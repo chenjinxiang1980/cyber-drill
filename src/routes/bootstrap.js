@@ -25,7 +25,8 @@ function mapProject(r) {
 function mapScenario(r) {
   return {
     id: r.id, name: r.name, type: r.type, level: r.level, difficulty: r.difficulty,
-    status: r.status, version: r.version, updated: r.updated, nodes: r.nodes, desc: r.descr
+    status: r.status, version: r.version, updated: r.updated, nodes: r.nodes, desc: r.descr,
+    alert: r.alert || ''
   };
 }
 
@@ -35,14 +36,19 @@ function mapNode(r) {
     timeout: r.timeout, form: r.form || undefined, att: r.att || undefined,
     desc: r.descr, branches: parseJson(r.branches, []),
     guide: r.guide || '', keywords: (r.keywords || '').split(',').filter(Boolean),
-    action: r.action || '', required: r.required === undefined ? true : !!r.required
+    action: r.action || '', required: r.required === undefined ? true : !!r.required,
+    wrong: parseJson(r.wrong, []),
+    evidenceReq: parseJson(r.evidence_req, []),
+    flowType: r.flow_type === 'distractor' ? 'distractor' : 'correct',
+    score: Number(r.score || 0) || 0,
+    receiver: r.receiver || ''
   };
 }
 
 function mapTask(r, atts) {
   return {
     id: r.id, projectId: r.project_id, role: r.role_id, title: r.title, desc: r.descr,
-    deadline: r.deadline, status: r.status, level: r.level,
+    deadline: r.deadline, status: r.status, level: r.level, nodeId: r.node_id || null,
     completedAt: r.completed_at || null,
     forms: parseJson(r.forms, []), atts: atts || []
   };
@@ -60,11 +66,12 @@ function mapEvidence(r) {
     id: r.id, type: r.type, name: r.name, size: r.size, time: r.time,
     role: r.role_id, uploader: r.uploader, auto: !!r.auto,
     taskId: r.task_id || null, projectId: r.project_id || null,
+    note: r.note || '', hasFile: !!r.file_path,
     url: r.file_path ? ('/uploads/' + r.file_path) : null
   };
 }
 
-/* 任务可见范围（与前端任务协同中心口径一致） */
+/* 任务可见范围（与角色工作台口径一致） */
 function visibleTasks(user, all) {
   const rid = user.role.id;
   if (rid === 'commander') return all;
@@ -102,7 +109,11 @@ router.get('/bootstrap', auth.requireAuth, function (req, res) {
   const scenarios = db.prepare('SELECT * FROM scenarios').all().map(mapScenario);
   const nodes = db.prepare('SELECT * FROM script_nodes ORDER BY scenario_id,seq').all().map(mapNode);
 
-  const allTaskRows = db.prepare('SELECT * FROM tasks ORDER BY seq').all();
+  const practical = {};
+  db.prepare("SELECT id FROM projects WHERE mode='实战版'").all().forEach(function (p) { practical[p.id] = true; });
+  /* 实战版不发布任务提示：任务中心与首页待办均不展示该项目的任务 */
+  const allTaskRows = db.prepare('SELECT * FROM tasks ORDER BY seq').all()
+    .filter(function (t) { return !practical[t.project_id]; });
   const visTasks = visibleTasks(u, allTaskRows);
 
   const attRows = db.prepare('SELECT * FROM task_attachments ORDER BY id').all();
@@ -138,11 +149,19 @@ router.get('/bootstrap', auth.requireAuth, function (req, res) {
       })
     : [];
 
+  /* 导调中心频道权限：院内角色仅院内会商，外部单位仅院外上报，信息科负责人/指挥部可同时使用 */
+  const CHAT_ROLE_ACCESS = {
+    duty: ['inner'], netsec: ['inner'], sysadmin: ['inner'], medlead: ['inner'], clinical: ['inner'],
+    healthbureau: ['external'], cac: ['external'], cyberpolice: ['external'],
+    itlead: ['inner', 'external'], commander: ['inner', 'external']
+  };
+  const allowedChat = CHAT_ROLE_ACCESS[u.role.id] || [];
   const chatRows = db.prepare('SELECT * FROM chat_messages ORDER BY id').all();
   const chat = {};
   chatRows.forEach(function (c) {
+    if (allowedChat.indexOf(c.grp) < 0) return;
     (chat[c.grp] = chat[c.grp] || []).push({
-      sender: c.sender, role: c.role_id, time: c.time, text: c.text, att: c.att || null,
+      id: c.id, sender: c.sender, role: c.role_id, time: c.time, text: c.text, att: c.att || null,
       url: c.file_path ? '/uploads/' + c.file_path : null
     });
   });

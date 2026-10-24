@@ -33,6 +33,13 @@ window.API = (function () {
       return r;
     });
   }
+  function updateProjectMembers(id, members) {
+    return DRILL.patch('/content/projects/' + encodeURIComponent(id) + '/members', { members: members }).then(function (r) {
+      var p = (MOCK.PROJECTS || []).filter(function (x) { return x.id === id; })[0];
+      if (p && r && r.project) p.members = r.project.members;
+      return r;
+    });
+  }
   function updateProjectStatus(id, status) {
     return DRILL.patch('/projects/' + encodeURIComponent(id) + '/status', { status: status }).then(function (r) {
       var p = (MOCK.PROJECTS || []).filter(function (x) { return x.id === id; })[0];
@@ -141,18 +148,24 @@ window.API = (function () {
     });
   }
 
-  /* ---------- 会商 ---------- */
+  /* ---------- 演练导调中心（院内演练会商 / 院外上报沟通） ---------- */
+  function getChatChannels() { return DRILL.get('/content/chat/channels'); }
   function getChat(group) { return DRILL.get('/content/chat/' + encodeURIComponent(group)); }
-  function sendChat(group, text, att) {
-    return DRILL.post('/content/chat/' + encodeURIComponent(group), { text: text, att: att || null }).then(function (r) {
-      MOCK.CHAT = MOCK.CHAT || {};
-      (MOCK.CHAT[group] = MOCK.CHAT[group] || []).push({
-        sender: (JSON.parse(sessionStorage.getItem('pzy_role') || 'null') || {}).name || '',
-        role: ((JSON.parse(sessionStorage.getItem('pzy_role') || 'null') || {}).id) || '',
-        time: new Date().toTimeString().slice(0, 5), text: text || '', att: att || null
-      });
-      return r;
+  function uploadChatAttachment(group, formData) {
+    return DRILL.upload('/content/chat/' + encodeURIComponent(group) + '/upload', formData);
+  }
+  function sendChat(group, text, att, filePath, attSize) {
+    return DRILL.post('/content/chat/' + encodeURIComponent(group), {
+      text: text || '', att: att || null, filePath: filePath || null, attSize: attSize || null
     });
+  }
+  /* 演练节点操作情况（按频道权限过滤：院内看全部，院外仅上报沟通阶段） */
+  function getDrillProgress(channel) {
+    return DRILL.get('/content/drill-progress?channel=' + encodeURIComponent(channel || 'inner'));
+  }
+  /* 打开处置表单即标记该节点为处置中 */
+  function startNode(nodeId) {
+    return DRILL.post('/drill/nodes/' + encodeURIComponent(nodeId) + '/start');
   }
 
   /* ---------- 表单 / 场景 / 剧本 ---------- */
@@ -171,19 +184,20 @@ window.API = (function () {
       (MOCK.SCENARIOS = MOCK.SCENARIOS || []).push({
         id: r.id, name: s.name, type: s.type || '', level: s.level || '一般',
         difficulty: s.difficulty || '实战版', status: '草稿', version: 'v1.0',
-        updated: new Date().toISOString().slice(0, 10), nodes: 0, desc: s.desc || ''
+        updated: new Date().toISOString().slice(0, 10), nodes: 0, desc: s.desc || '', alert: s.alert || ''
       });
       return r;
     });
   }
-  function saveScriptNodes(scenarioId, nodes, difficulty) {
-    return DRILL.post('/content/script-nodes', { scenarioId: scenarioId, nodes: nodes, difficulty: difficulty }).then(function (r) {
+  function saveScriptNodes(scenarioId, nodes, difficulty, alert) {
+    return DRILL.post('/content/script-nodes', { scenarioId: scenarioId, nodes: nodes, difficulty: difficulty, alert: alert }).then(function (r) {
       var s = (MOCK.SCENARIOS || []).filter(function (x) { return x.id === scenarioId; })[0];
       if (s) {
         s.version = r.version;
         s.nodes = r.count;
         s.updated = r.updated;
         if (r.difficulty) s.difficulty = r.difficulty;
+        if (r.alert !== undefined) s.alert = r.alert;
       }
       /* 本地节点缓存同步，保证回放/编排切换场景后读到最新编排 */
       MOCK.SCRIPT_NODES = (MOCK.SCRIPT_NODES || []).filter(function (n) { return n.scenarioId !== scenarioId; })
@@ -219,6 +233,42 @@ window.API = (function () {
         });
       }
       return r;
+    });
+  }
+  /* 按剧本预填材料（批量归档） */
+  function prefillEvidence(items, projectId) {
+    var p = activeProject();
+    return DRILL.post('/evidence/prefill', { items: items || [], projectId: projectId || (p && p.id) || null });
+  }
+  /* 剧本要求取证材料清单（逐项归档状态；mine=true 仅本角色负责的节点） */
+  function getEvidenceRequirements(projectId, mine) {
+    var p = activeProject();
+    var pid = projectId || (p && p.id) || '';
+    var qs = [];
+    if (pid) qs.push('projectId=' + encodeURIComponent(pid));
+    if (mine) qs.push('mine=1');
+    return DRILL.get('/evidence/requirements' + (qs.length ? ('?' + qs.join('&')) : ''));
+  }
+  /* 一键导入与剧本相符的模拟取证材料 */
+  function importMockEvidence(nodeId, index, projectId) {
+    var p = activeProject();
+    return DRILL.post('/evidence/mock', { nodeId: nodeId, index: index, projectId: projectId || (p && p.id) || null });
+  }
+
+  /* 下载归档材料（携带令牌的真实文件下载） */
+  function downloadEvidence(id, name) {
+    return fetch('/api/evidence/' + encodeURIComponent(id) + '/download', {
+      headers: { Authorization: 'Bearer ' + DRILL.token() }
+    }).then(function (r) {
+      if (!r.ok) return r.json().then(function (d) { throw new Error((d && d.error) || '下载失败'); });
+      return r.blob();
+    }).then(function (blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name || 'evidence';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      return true;
     });
   }
   function getSnapshots() { return DRILL.get('/content/snapshots'); }
@@ -357,13 +407,11 @@ window.API = (function () {
 
   /* ---------- 演练模式与自动考评（基础版 / 实战版） ---------- */
   function getDrillWorkbench(projectId) { return DRILL.get('/drill/workbench/' + encodeURIComponent(projectId)); }
-  function setDrillMode(projectId, mode) {
-    return DRILL.patch('/drill/mode/' + encodeURIComponent(projectId), { mode: mode }).then(function (r) {
-      var p = (MOCK.PROJECTS || []).filter(function (x) { return x.id === projectId; })[0];
-      if (p) p.mode = r.mode;
-      return r;
-    });
-  }
+  function getDrillFlows(projectId) { return DRILL.get('/drill/flows/' + encodeURIComponent(projectId)); }
+  function getDrillFaults(projectId) { return DRILL.get('/drill/faults/' + encodeURIComponent(projectId)); }
+  function submitDrillFlow(payload) { return DRILL.post('/drill/decide', payload); }
+  function skipDrillFlow(projectId, nodeId) { return DRILL.post('/drill/skip', { projectId: projectId, nodeId: nodeId }); }
+  function finishDrill(projectId) { return DRILL.post('/drill/finish', { projectId: projectId }); }
   function addDrillStep(step) { return DRILL.post('/drill/steps', step); }
   function deleteDrillStep(id) { return DRILL.del('/drill/steps/' + encodeURIComponent(id)); }
   function recalcDrillScore(projectId) { return DRILL.post('/drill/score/' + encodeURIComponent(projectId) + '/recalc', {}); }
@@ -371,16 +419,16 @@ window.API = (function () {
   return {
     login: login, logout: logout, curRole: curRole, changePassword: changePassword, me: me,
     activeProject: activeProject, setActiveProject: setActiveProject,
-    getProjects: getProjects, createProject: createProject, updateProjectStatus: updateProjectStatus, drillElapsed: drillElapsed,
+    getProjects: getProjects, createProject: createProject, updateProjectMembers: updateProjectMembers, updateProjectStatus: updateProjectStatus, drillElapsed: drillElapsed,
     getTasks: getTasks, deleteTask: deleteTask, completeTask: completeTask, resetTasks: resetTasks,
     acceptTask: acceptTask, submitTask: submitTask,
     getTaskAttachments: getTaskAttachments, uploadTaskAttachments: uploadTaskAttachments,
     deleteTaskAttachment: deleteTaskAttachment, submitForm: submitForm,
     getMessages: getMessages, getNotifs: getNotifs, readNotifs: readNotifs, pushMessage: pushMessage,
-    getChat: getChat, sendChat: sendChat, getForms: getForms,
+    getChatChannels: getChatChannels, getChat: getChat, sendChat: sendChat, uploadChatAttachment: uploadChatAttachment, getDrillProgress: getDrillProgress, startNode: startNode, getForms: getForms,
     getScenarios: getScenarios, getScriptNodes: getScriptNodes,
     saveScenario: saveScenario, addScenario: addScenario, saveScriptNodes: saveScriptNodes,
-    getEvidence: getEvidence, addEvidence: addEvidence, uploadEvidence: uploadEvidence,
+    getEvidence: getEvidence, addEvidence: addEvidence, uploadEvidence: uploadEvidence, prefillEvidence: prefillEvidence, downloadEvidence: downloadEvidence, getEvidenceRequirements: getEvidenceRequirements, importMockEvidence: importMockEvidence,
     getSnapshots: getSnapshots, addSnapshot: addSnapshot,
     getTimeline: getTimeline, getSeqFlow: getSeqFlow, saveSeqFlow: saveSeqFlow,
     getScoreItems: getScoreItems, getScores: getScores, saveScore: saveScore, saveScores: saveScores,
@@ -392,7 +440,9 @@ window.API = (function () {
     adminForms: adminForms, addFormTemplate: addFormTemplate,
     backupData: backupData, listBackups: listBackups, sysinfo: sysinfo,
     getDrillReport: getDrillReport, markReportExported: markReportExported,
-    getDrillWorkbench: getDrillWorkbench, setDrillMode: setDrillMode,
+    getDrillWorkbench: getDrillWorkbench,
+    getDrillFlows: getDrillFlows, getDrillFaults: getDrillFaults,
+    submitDrillFlow: submitDrillFlow, skipDrillFlow: skipDrillFlow, finishDrill: finishDrill,
     addDrillStep: addDrillStep, deleteDrillStep: deleteDrillStep, recalcDrillScore: recalcDrillScore
   };
 })();

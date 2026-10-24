@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -16,6 +16,32 @@
 .sp-card .sp-note{font-size:12px;color:var(--text2);margin-top:8px;min-height:38px}
 .ev-warn{color:var(--err);font-size:12px;display:flex;align-items:flex-start;gap:8px;background:var(--err-dim);border:1px solid rgba(248,81,73,.4);border-radius:6px;padding:8px 12px}
 .ev-warn svg{width:15px;height:15px;flex:none;margin-top:2px}
+.ev-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.ev-bar .select{max-width:280px}
+.ev-ops{display:flex;gap:6px;flex-wrap:wrap}
+.ev-file-list{max-height:170px;overflow-y:auto;border:1px dashed var(--border2);border-radius:6px;padding:8px 10px;margin-top:8px}
+.ev-shot{width:100%;max-height:260px;object-fit:contain;border:1px solid var(--border);border-radius:6px;background:#000;margin-top:10px}
+.pf-row{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;background:var(--elev)}
+.pf-row input[type=checkbox]{margin-top:9px}
+.pf-row .grow{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.pf-row input[type=text],.pf-row textarea{width:100%}
+.pf-row textarea{min-height:46px;resize:vertical}
+.pf-tools{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.pf-group{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:var(--panel)}
+.pf-group-t{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.pf-group .pf-row{background:var(--elev)}
+.req-row.other{opacity:.72}
+.req-row{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--elev)}
+.req-row.done{border-color:rgba(63,185,80,.35);background:rgba(63,185,80,.06)}
+.req-ic{width:26px;height:26px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--err-dim);color:var(--err)}
+.req-ic svg{width:14px;height:14px}
+.req-row.done .req-ic{background:rgba(63,185,80,.15);color:var(--ok)}
+.req-main{flex:1;min-width:0}
+.req-name{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.req-meta{font-size:11.5px;color:var(--text3);margin-top:5px}
+.req-note{font-size:12px;color:var(--text2);margin-top:6px;line-height:1.6}
+.req-ops{display:flex;gap:6px;flex-wrap:wrap;flex:none}
+.req-ops .btn svg{width:13px;height:13px}
 </style>
 </head>
 <body data-page="evidence">
@@ -27,113 +53,436 @@ document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
   var ext = !!role.external;
-  var REPORTED = ['表单文书','处置记录','样本摘要'];
-  var TYPE_CLS = { '操作日志':'gray','附件截图':'blue','聊天记录':'purple','表单文书':'green','处置记录':'yellow','样本摘要':'red','状态变更':'blue' };
-  var tab = '全部';
+  var TYPE_CLS = { '操作日志':'gray','附件截图':'blue','聊天记录':'purple','表单文书':'green','处置记录':'yellow','样本摘要':'red','状态变更':'blue','附件':'blue','上报材料':'green','报案材料':'green' };
+  var TYPES = ['附件截图','操作日志','处置记录','样本摘要','表单文书','上报材料','报案材料','附件'];
+  var MAX_MB = 20;
+  var BAD_EXT = /\.(exe|bat|cmd|com|scr|pss?1|vbs|js|jse|jar|msi|dll|apk|sh|py|psm1|hta|lnk)$/i;
 
+  var ALL = [];        /* 全部已归档材料（跨场景） */
+  var tab = '全部';
+  var projFilter = 'all';
   var proj = API.activeProject();
+  var projects = MOCK.PROJECTS || [];
+
   page.innerHTML =
-    '<div class="page-head"><div><h1>取证与材料归档</h1><div class="sub">'+(proj?proj.name:'当前演练项目')+' · 自动采集流 + 关键节点快照 + 手动取证'+(ext?' · 外部单位只读视图':'')+'</div></div>'
+    '<div class="page-head"><div><h1>取证与材料归档</h1><div class="sub">'+(proj?esc(proj.name):'当前演练项目')+' · 真实上传 / 屏幕截图 / 按剧本预填 + 跨场景归档查询'+(ext?' · 外部单位只读视图':'')+'</div></div>'
     + '<div class="acts">'
-    + (ext?'':'<button class="btn" id="btnUp">'+App.icon('upload')+'手动取证上传</button>')
+    + (ext?'':'<button class="btn" id="btnUp">'+App.icon('upload')+'上传真实材料</button>')
+    + (ext?'':'<button class="btn" id="btnShot">'+App.icon('camera')+'屏幕截图取证</button>')
+    + (ext?'':'<button class="btn" id="btnPre">'+App.icon('file')+'按剧本预填材料</button>')
     + (ext?'':'<button class="btn primary" id="btnPack">'+App.icon('archive')+'一键打包演练档案</button>')
     + '</div></div>'
-    + '<div class="sim-banner">'+App.icon('alert')+'<span>'+(ext?'外部单位视图：仅可见医院已上报的取证材料（演练模拟权限隔离），不可查看内网原始日志，不可上传或打包。':'所有取证材料均为演练模拟生成/上传的虚拟内容；系统不采集真实患者数据，不下载真实恶意样本。')+'</span></div>'
-    + '<div class="card"><div class="card-title">'+App.icon('evidence')+'取证材料流（自动采集 + 审计摘要）<span class="more" id="tamperNote" title="取证材料一经归档不可删除，保障演练复盘证据链完整性">'+App.icon('lock')+'防篡改：归档后不可删除</span></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>'+(ext?'外部单位视图：仅可见医院已上报的取证材料（演练模拟权限隔离），不可查看内网原始日志，不可上传或打包。':'材料可真实上传或直接屏幕截图取证；按剧本预填的材料仅供演练参考，请核对后按实际处置修改再归档。严禁上传可执行程序、脚本、恶意样本与真实患者数据。')+'</span></div>'
+    + (ext?'':'<div class="card" id="reqCard"><div class="card-title">'+App.icon('check')+'本场景需取证材料（剧本要求，逐项提醒）<span class="more" id="reqStats">—</span></div>'
+    + '<div class="tiny dim mb2">按剧本节点逐项提醒：可直接「模拟材料一键导入」与剧本相符的取证材料，也可上传真实材料或屏幕截图；导入后请核对并按实际处置修改。</div>'
+    + '<div id="reqList"><div class="tiny dim">加载中…</div></div></div>')
+    + '<div class="card"><div class="card-title">'+App.icon('evidence')+'取证材料归档（跨场景可查）<span class="more" id="tamperNote" title="取证材料一经归档不可删除，保障演练复盘证据链完整性">'+App.icon('lock')+'防篡改：归档后不可删除</span></div>'
+    + '<div class="ev-bar">'
+    +   '<select class="select" id="evProj"><option value="all">全部场景（跨场景归档）</option>'
+    +     projects.map(function(p){ return '<option value="'+esc(p.id)+'">'+esc(p.id+' · '+p.name)+'</option>'; }).join('')
+    +   '</select>'
+    +   '<span class="tag gray" id="evCount">共 0 份</span>'
+    +   '<span class="tiny dim">切换场景可查看其他演练项目归档的材料</span>'
+    + '</div>'
     + '<div class="ev-tabs" id="evTabs"></div>'
-    + '<div class="table-wrap"><table class="table"><thead><tr><th>类型</th><th>材料名称</th><th>来源</th><th>时间</th><th>上传人</th><th>标记</th></tr></thead><tbody id="evBody"></tbody></table></div></div>'
+    + '<div class="table-wrap"><table class="table"><thead><tr><th>类型</th><th>材料名称</th><th>所属场景</th><th>来源</th><th>时间</th><th>上传人</th><th>操作</th></tr></thead><tbody id="evBody"></tbody></table></div></div>'
     + '<div class="section-title mt5" style="margin-top:24px">'+App.icon('camera')+'关键节点快照</div>'
     + '<div class="grid grid-3" id="spGrid"></div>';
 
-  function buildList(){
-    var ev = MOCK.EVIDENCE.map(function(x){
-      return { type:x.type, name:x.name, source:x.auto?'系统自动采集':'人工上传', time:x.time, uploader:x.uploader, reported:REPORTED.indexOf(x.type)>=0 };
+  function esc(s){ return App.esc(s); }
+  function pad2(n){ return n<10 ? '0'+n : ''+n; }
+  function fmtSize(bytes){ return bytes>=1048576 ? (bytes/1048576).toFixed(1)+' MB' : Math.max(1,Math.round(bytes/1024))+' KB'; }
+  function isImage(url){ return !!url && (/^data:image\//i.test(url) || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(url)); }
+  function projName(id){ var p = projects.filter(function(x){ return x.id===id; })[0]; return p ? p.name : (id || '—'); }
+
+  /* ---------- 加载与筛选 ---------- */
+  function loadList(){
+    API.getEvidence().then(function(rows){
+      ALL = rows || [];
+      renderTabs();
+      renderTable();
+    }).catch(function(err){
+      document.getElementById('evBody').innerHTML = '<tr><td colspan="7"><div class="empty">'+App.icon('evidence')+'<div>材料加载失败：'+esc((err&&err.message)||'请刷新')+'</div></div></td></tr>';
     });
-    var au = MOCK.AUDIT_LOGS.slice(-6).map(function(a){
-      return { type:'操作日志', name:a.action, source:'操作审计', time:a.time, uploader:a.user, reported:false };
-    });
-    var all = au.concat(ev);
-    if(ext) all = all.filter(function(x){ return x.reported; });
-    if(tab!=='全部') all = all.filter(function(x){ return x.type===tab; });
-    return all;
+  }
+
+  function filtered(){
+    var list = ALL.slice();
+    if(projFilter!=='all') list = list.filter(function(x){ return x.projectId===projFilter; });
+    if(tab!=='全部') list = list.filter(function(x){ return x.type===tab; });
+    return list;
   }
 
   function renderTabs(){
     var types = ['全部'];
-    MOCK.EVIDENCE.forEach(function(x){ if(types.indexOf(x.type)<0) types.push(x.type); });
-    document.getElementById('evTabs').innerHTML = types.map(function(t){ return '<span class="ev-tab'+(t===tab?' on':'')+'" data-t="'+t+'">'+t+'</span>'; }).join('');
-    page.querySelectorAll('.ev-tab').forEach(function(b){ b.onclick = function(){ tab = b.dataset.t; renderTabs(); renderList(); }; });
+    ALL.forEach(function(x){ if(types.indexOf(x.type)<0) types.push(x.type); });
+    document.getElementById('evTabs').innerHTML = types.map(function(t){ return '<span class="ev-tab'+(t===tab?' on':'')+'" data-t="'+esc(t)+'">'+esc(t)+'</span>'; }).join('');
+    page.querySelectorAll('.ev-tab').forEach(function(b){ b.onclick = function(){ tab = b.dataset.t; renderTabs(); renderTable(); }; });
   }
 
-  function renderList(){
-    var list = buildList();
+  function sourceOf(x){
+    if(x.auto) return '系统自动采集';
+    if(/模拟材料|模拟取证/.test(x.note||'')) return '剧本模拟生成';
+    return x.hasFile ? '真实文件上传' : '预填/记录';
+  }
+
+  function renderTable(){
+    var list = filtered();
+    document.getElementById('evCount').textContent = '共 '+list.length+' 份';
     var body = document.getElementById('evBody');
-    if(!list.length){ body.innerHTML = '<tr><td colspan="6"><div class="empty">'+App.icon('evidence')+'<div>当前筛选下暂无材料（外部单位仅见已上报材料）</div></div></td></tr>'; return; }
+    if(!list.length){
+      body.innerHTML = '<tr><td colspan="7"><div class="empty">'+App.icon('evidence')+'<div>'+(ext?'暂无医院已上报的取证材料':'当前筛选下暂无归档材料，可上传真实材料、屏幕截图或按剧本预填')+'</div></div></td></tr>';
+      return;
+    }
     body.innerHTML = list.map(function(x){
-      return '<tr><td><span class="tag '+(TYPE_CLS[x.type]||'gray')+'">'+x.type+'</span></td>'
-      + '<td class="ellip" style="max-width:320px" title="'+App.esc(x.name)+'">'+App.esc(x.name)+'</td>'
-      + '<td class="small dim">'+x.source+'</td>'
-      + '<td class="mono small">'+x.time+'</td>'
-      + '<td class="small">'+App.esc(x.uploader)+'</td>'
-      + '<td>'+(x.reported?'<span class="tag green">'+App.icon('check')+'已上报</span>':'<span class="tag gray">院内留存</span>')+'</td></tr>';
+      return '<tr><td><span class="tag '+(TYPE_CLS[x.type]||'gray')+'">'+esc(x.type)+'</span></td>'
+        + '<td class="ellip" style="max-width:300px" title="'+esc(x.name)+(x.note?'\n'+esc(x.note):'')+'">'+esc(x.name)
+        +   (x.note?'<div class="tiny dim ellip">'+esc(x.note)+'</div>':'')+'</td>'
+        + '<td class="small dim ellip" style="max-width:200px">'+esc(projName(x.projectId))+'</td>'
+        + '<td class="small dim">'+esc(sourceOf(x))+'</td>'
+        + '<td class="mono small">'+esc(x.time||'')+'</td>'
+        + '<td class="small">'+esc(x.uploader||'')+'</td>'
+        + '<td><div class="ev-ops">'
+        +   '<button class="btn sm" data-view="'+esc(x.id)+'">'+App.icon('eye')+'查看</button>'
+        +   (x.hasFile?'<button class="btn sm outline" data-dl="'+esc(x.id)+'">'+App.icon('download')+'下载</button>':'')
+        + '</div></td></tr>';
     }).join('');
+    page.querySelectorAll('[data-view]').forEach(function(b){ b.onclick = function(){ viewItem(byId(b.dataset.view)); }; });
+    page.querySelectorAll('[data-dl]').forEach(function(b){ b.onclick = function(){
+      var x = byId(b.dataset.dl);
+      API.downloadEvidence(x.id, x.name).then(function(){ App.toast('已开始下载：'+x.name,'ok'); })
+        .catch(function(err){ App.toast((err&&err.message)||'下载失败','err'); });
+    }; });
   }
 
-  function renderSnapshots(){
-    document.getElementById('spGrid').innerHTML = MOCK.SNAPSHOTS.map(function(sp,i){
-      return '<div class="card sp-card"><div class="sp-name">'+App.icon('camera')+App.esc(sp.name)+'</div>'
-      + '<div class="sp-meta">'+sp.time+' · 定格人：'+App.esc(sp.by)+'</div>'
-      + '<div class="sp-note">'+App.esc(sp.note)+'</div>'
-      + '<div class="flex gap2 mt2"><button class="btn sm" data-sp="'+i+'">'+App.icon('eye')+'查看</button><span class="tiny dim right">过程自动定格（演练模拟）</span></div></div>';
+  function byId(id){ return ALL.filter(function(x){ return String(x.id)===String(id); })[0] || null; }
+
+  function viewItem(x){
+    if(!x) return;
+    App.modal({ title:'取证材料详情 · '+esc(x.name), wide:true, body:
+      '<div class="kv">'
+      + '<span class="k">材料名称</span><span>'+esc(x.name)+'</span>'
+      + '<span class="k">材料类型</span><span><span class="tag '+(TYPE_CLS[x.type]||'gray')+'">'+esc(x.type)+'</span></span>'
+      + '<span class="k">所属场景</span><span>'+esc(projName(x.projectId))+'</span>'
+      + '<span class="k">归档时间</span><span class="mono">'+esc(x.time||'—')+'</span>'
+      + '<span class="k">上传人</span><span>'+esc(x.uploader||'—')+(x.auto?'（系统自动）':'')+'</span>'
+      + '<span class="k">文件大小</span><span>'+esc(x.size||'—')+'</span>'
+      + '<span class="k">取证说明</span><span class="small" style="line-height:1.7">'+esc(x.note||'—')+'</span>'
+      + '</div>'
+      + (isImage(x.url) ? '<div class="section-title mt3">材料预览</div><img class="ev-shot" src="'+esc(x.url)+'" alt="material">' : '')
+      + '<div class="tiny dim mt3">'+(x.hasFile?'该材料已归档真实文件，可点击下载留存。':'该材料为预填/记录类条目，不含实体文件。')+'</div>',
+      foot:'<button class="btn" id="evClose">关闭</button>'+(x.hasFile?'<button class="btn primary" id="evDl">'+App.icon('download')+'下载材料</button>':''),
+      onOpen:function(ov){
+        ov.querySelector('#evClose').onclick = ov.close;
+        var d = ov.querySelector('#evDl');
+        if(d) d.onclick = function(){ API.downloadEvidence(x.id, x.name).then(function(){ App.toast('已开始下载','ok'); }).catch(function(err){ App.toast((err&&err.message)||'下载失败','err'); }); };
+      } });
+  }
+
+  /* ---------- 上传真实材料 ---------- */
+  function openUpload(preset){
+    preset = preset || {};
+    var picked = [];
+    App.modal({ title:(preset.reqKey?'上传真实材料 · '+preset.name:'上传真实材料（取证归档）'), wide:true, body:
+      '<div class="sim-banner">'+App.icon('alert')+'<span>可上传本地截图、日志片段、文书等真实材料；<b>严禁上传可执行程序/脚本/恶意样本</b>，单文件限 '+MAX_MB+'MB。</span></div>'
+      + '<div class="form-grid">'
+      + '<div class="form-row"><label class="f-label">材料类型</label><select class="select" id="upType">'+TYPES.map(function(t){ return '<option value="'+t+'"'+(preset.type===t?' selected':'')+'>'+t+'</option>'; }).join('')+'</select></div>'
+      + '<div class="form-row"><label class="f-label">归档场景</label><select class="select" id="upProj">'+projects.map(function(p){ return '<option value="'+esc(p.id)+'"'+((preset.projectId||(proj&&proj.id))===p.id?' selected':'')+'>'+esc(p.id+' · '+p.name)+'</option>'; }).join('')+'</select></div>'
+      + '</div>'
+      + '<div class="flex wrap gap2 mb3"><button class="btn primary" id="upPick">'+App.icon('file')+'选择文件（可多选）</button><input type="file" id="upFile" multiple style="display:none"></div>'
+      + '<div class="ev-file-list small muted" id="upList">尚未选择文件</div>'
+      + '<div class="form-row mt3"><label class="f-label">取证说明</label><textarea class="textarea" id="upNote" placeholder="取证背景、采集方式、涉及终端/系统等（演练环境）…">'+esc(preset.note||'')+'</textarea></div>',
+      foot:'<button class="btn" id="upNo">取消</button><button class="btn primary" id="upYes">'+App.icon('upload')+'上传并归档</button>',
+      onOpen:function(ov){
+        var listBox = ov.querySelector('#upList'), fileIn = ov.querySelector('#upFile');
+        function renderPicked(){
+          if(!picked.length){ listBox.innerHTML = '<span class="small muted">尚未选择文件</span>'; return; }
+          listBox.innerHTML = picked.map(function(f){
+            var bad = BAD_EXT.test(f.name) ? ' <span style="color:var(--err)">不允许的类型</span>' : (f.size>MAX_MB*1048576 ? ' <span style="color:var(--err)">超出'+MAX_MB+'MB</span>' : ' <span class="tag green">通过校验</span>');
+            return '<div style="padding:5px 0;border-bottom:1px dashed var(--line)">'+esc(f.name)+' · '+fmtSize(f.size)+bad+'</div>';
+          }).join('');
+        }
+        ov.querySelector('#upPick').onclick = function(){ fileIn.click(); };
+        fileIn.onchange = function(){
+          Array.prototype.forEach.call(fileIn.files||[], function(f){ picked.push(f); });
+          renderPicked();
+        };
+        ov.querySelector('#upNo').onclick = ov.close;
+        ov.querySelector('#upYes').onclick = function(){
+          if(!picked.length){ App.toast('请先选择文件','err'); return; }
+          var valid = [], rejected = 0;
+          picked.forEach(function(f){ if(BAD_EXT.test(f.name) || f.size>MAX_MB*1048576) rejected++; else valid.push(f); });
+          if(!valid.length){ App.toast('所选文件均未通过类型/大小校验','err'); return; }
+          var fd = new FormData();
+          valid.forEach(function(f){ fd.append('files', f); });
+          fd.append('type', ov.querySelector('#upType').value);
+          fd.append('projectId', ov.querySelector('#upProj').value);
+          fd.append('note', ov.querySelector('#upNote').value.trim());
+          if(preset.nodeId) fd.append('nodeId', preset.nodeId);
+          if(preset.reqKey) fd.append('reqKey', preset.reqKey);
+          var btn = ov.querySelector('#upYes'); btn.disabled = true;
+          API.uploadEvidence(fd).then(function(r){
+            ov.close();
+            loadList(); loadRequirements();
+            App.toast(valid.length+' 份材料已上传并归档'+(rejected?('，'+rejected+' 份被拦截'):''), rejected?'warn':'ok');
+          }).catch(function(err){ App.toast((err&&err.message)||'上传失败','err'); }).then(function(){ btn.disabled = false; });
+        };
+      } });
+  }
+  var upBtn = document.getElementById('btnUp');
+  if(upBtn) upBtn.onclick = function(){ openUpload(); };
+
+  /* ---------- 屏幕截图取证 ---------- */
+  function openShot(preset){
+    preset = preset || {};
+    var dataUrl = null;
+    var stamp = new Date();
+    var nm = preset.name || ('屏幕截图-'+stamp.getFullYear()+pad2(stamp.getMonth()+1)+pad2(stamp.getDate())+'-'+pad2(stamp.getHours())+pad2(stamp.getMinutes())+pad2(stamp.getSeconds())+'.png');
+    App.modal({ title:(preset.reqKey?'屏幕截图取证 · '+preset.name:'屏幕截图取证'), wide:true, body:
+      '<div class="sim-banner">'+App.icon('camera')+'<span>点击「开始截图」后选择要定格的窗口/屏幕；截图将作为真实图片文件归档到取证模块（仅演练环境使用）。</span></div>'
+      + '<div class="flex wrap gap2 mb3"><button class="btn primary" id="shStart">'+App.icon('camera')+'开始截图</button><span class="tiny dim" id="shHint">尚未截图</span></div>'
+      + '<div id="shBox"></div>'
+      + '<div class="form-grid mt3">'
+      + '<div class="form-row"><label class="f-label">材料名称<span class="req">*</span></label><input class="input" id="shName" value="'+esc(nm)+'"></div>'
+      + '<div class="form-row"><label class="f-label">归档场景</label><select class="select" id="shProj">'+projects.map(function(p){ return '<option value="'+esc(p.id)+'"'+((preset.projectId||(proj&&proj.id))===p.id?' selected':'')+'>'+esc(p.id+' · '+p.name)+'</option>'; }).join('')+'</select></div>'
+      + '</div>'
+      + '<div class="form-row"><label class="f-label">取证说明</label><textarea class="textarea" id="shNote" placeholder="如：告警平台界面截图，含告警时间与受影响终端…">'+esc(preset.note||'')+'</textarea></div>',
+      foot:'<button class="btn" id="shNo">取消</button><button class="btn primary" id="shYes">'+App.icon('archive')+'归档截图</button>',
+      onOpen:function(ov){
+        var startBtn = ov.querySelector('#shStart'), box = ov.querySelector('#shBox'), hint = ov.querySelector('#shHint');
+        startBtn.onclick = function(){
+          if(!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)){ App.toast('当前浏览器不支持屏幕截图，请改用「上传真实材料」','err'); return; }
+          navigator.mediaDevices.getDisplayMedia({ video: true }).then(function(stream){
+            var video = document.createElement('video');
+            video.muted = true; video.srcObject = stream;
+            video.onloadedmetadata = function(){
+              video.play();
+              setTimeout(function(){
+                var c = document.createElement('canvas');
+                c.width = video.videoWidth || 1280; c.height = video.videoHeight || 720;
+                c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+                stream.getTracks().forEach(function(tr){ tr.stop(); });
+                dataUrl = c.toDataURL('image/png');
+                box.innerHTML = '<img class="ev-shot" src="'+dataUrl+'" alt="screenshot">';
+                hint.innerHTML = '<span class="tag green">'+App.icon('check')+'截图完成，可归档</span>';
+              }, 350);
+            };
+            video.onerror = function(){ stream.getTracks().forEach(function(tr){ tr.stop(); }); App.toast('截图失败：无法读取屏幕画面','err'); };
+          }, function(){});
+        };
+        ov.querySelector('#shNo').onclick = ov.close;
+        ov.querySelector('#shYes').onclick = function(){
+          if(!dataUrl){ App.toast('请先完成屏幕截图','err'); return; }
+          var name = ov.querySelector('#shName').value.trim();
+          if(!name){ App.toast('请填写材料名称','err'); return; }
+          var btn = ov.querySelector('#shYes'); btn.disabled = true;
+          var payload = {
+            type:'附件截图', name:name, dataUrl:dataUrl,
+            note:ov.querySelector('#shNote').value.trim(),
+            projectId:ov.querySelector('#shProj').value
+          };
+          if(preset.nodeId) payload.nodeId = preset.nodeId;
+          if(preset.reqKey) payload.reqKey = preset.reqKey;
+          API.addEvidence(payload).then(function(r){
+            ov.close(); loadList(); loadRequirements();
+            App.toast('屏幕截图已归档：'+name,'ok');
+          }).catch(function(err){ App.toast((err&&err.message)||'归档失败','err'); }).then(function(){ btn.disabled = false; });
+        };
+      } });
+  }
+  var shot = document.getElementById('btnShot');
+  if(shot) shot.onclick = function(){ openShot(); };
+
+  /* ---------- 按剧本预填材料（按角色范围） ---------- */
+  function openPrefill(pend, resp){
+    var groups = {}, order = [];
+    pend.forEach(function(it){
+      if(!groups[it.nodeId]){ groups[it.nodeId] = { nodeTitle:it.nodeTitle, target:it.target, items:[] }; order.push(it.nodeId); }
+      groups[it.nodeId].items.push(it);
+    });
+    App.modal({ title:'按剧本预填材料 · 本角色负责', wide:true, body:
+      '<div class="sim-banner">'+App.icon('alert')+'<span>只列出<b>本角色负责节点</b>的取证材料，其他角色的材料需由对应角色自行取证。系统按剧本生成相符的模拟文件（截图类为界面图，日志/记录类为文本），请核对并按实际处置修改后归档。</span></div>'
+      + '<div class="pf-tools"><span class="tag blue">本角色 已归档 '+(resp.mineDone||0)+' / '+(resp.mineTotal||0)+'</span><button class="btn sm outline" id="pfAll">全选</button><button class="btn sm outline" id="pfNone">全不选</button>'
+      +   '<span class="tiny dim">归档到：'+esc(resp.project?resp.project.name:(proj?proj.name:'当前项目'))+'</span></div>'
+      + '<div id="pfList">'+order.map(function(nid){
+            var g = groups[nid];
+            return '<div class="pf-group"><div class="pf-group-t">'+esc(g.nodeTitle)+' <span class="tag gray">'+esc(g.target||'—')+'</span></div>'
+              + g.items.map(function(it){
+                  return '<div class="pf-row" data-node="'+esc(it.nodeId)+'" data-index="'+esc(it.index)+'">'
+                    + '<input type="checkbox" class="pf-ck" checked>'
+                    + '<div class="grow">'
+                    +   '<div class="flex gap2" style="align-items:center"><span class="tag '+(TYPE_CLS[it.type]||'gray')+'">'+esc(it.type)+'</span>'
+                    +   '<input type="text" class="input pf-name" value="'+esc(it.name)+'"></div>'
+                    +   '<textarea class="textarea pf-note">'+esc(it.note||'')+'</textarea>'
+                    + '</div></div>';
+                }).join('')
+              + '</div>';
+          }).join('')+'</div>',
+      foot:'<button class="btn" id="pfNo">取消</button><button class="btn primary" id="pfYes">'+App.icon('archive')+'确认归档选中材料</button>',
+      onOpen:function(ov){
+        ov.querySelector('#pfAll').onclick = function(){ ov.querySelectorAll('.pf-ck').forEach(function(c){ c.checked = true; }); };
+        ov.querySelector('#pfNone').onclick = function(){ ov.querySelectorAll('.pf-ck').forEach(function(c){ c.checked = false; }); };
+        ov.querySelector('#pfNo').onclick = ov.close;
+        ov.querySelector('#pfYes').onclick = function(){
+          var list = [];
+          ov.querySelectorAll('.pf-row').forEach(function(row){
+            if(!row.querySelector('.pf-ck').checked) return;
+            var name = row.querySelector('.pf-name').value.trim();
+            if(!name) return;
+            list.push({
+              nodeId: row.dataset.node, index: Number(row.dataset.index), name: name,
+              note: row.querySelector('.pf-note').value.trim()
+            });
+          });
+          if(!list.length){ App.toast('请至少选择并填写一项材料','err'); return; }
+          var btn = ov.querySelector('#pfYes'); btn.disabled = true;
+          API.prefillEvidence(list, resp.project && resp.project.id).then(function(r){
+            ov.close(); loadList(); loadRequirements();
+            var sk = (r.skipped||[]).length;
+            App.toast((r.count||list.length)+' 份本角色预填材料已归档'+(sk?('，'+sk+' 份跳过'):''), sk?'warn':'ok');
+          }).catch(function(err){ App.toast((err&&err.message)||'归档失败','err'); }).then(function(){ btn.disabled = false; });
+        };
+      } });
+  }
+
+  var pre = document.getElementById('btnPre');
+  if(pre) pre.onclick = function(){
+    API.getEvidenceRequirements(proj && proj.id, true).then(function(r){
+      var pend = ((r && r.items) || []).filter(function(x){ return !x.done && x.mine; });
+      if(!pend.length){
+        App.toast('本角色当前没有待取证的剧本材料（已归档 '+(r.mineDone||0)+' / '+(r.mineTotal||0)+'）','warn');
+        return;
+      }
+      openPrefill(pend, r);
+    }).catch(function(err){ App.toast((err&&err.message)||'取证清单加载失败','err'); });
+  };
+
+  /* ---------- 本场景需取证材料（剧本要求，逐项提醒） ---------- */
+  var REQ = { items: [], done: 0, total: 0, pending: 0, mineDone: 0, mineTotal: 0, minePending: 0 };
+  var reqWarned = false;
+
+  function loadRequirements(){
+    if(ext) return;
+    API.getEvidenceRequirements().then(function(r){
+      REQ = r || { items: [], done: 0, total: 0, pending: 0, mineDone: 0, mineTotal: 0, minePending: 0 };
+      renderRequirements();
+      if(REQ.minePending > 0 && !reqWarned){
+        reqWarned = true;
+        App.toast('本角色还有 '+REQ.minePending+' 项剧本取证材料未归档，请逐项上传或点击「模拟材料」一键导入', 'warn');
+      }
+    }).catch(function(err){
+      var box = document.getElementById('reqList');
+      if(box) box.innerHTML = '<div class="tiny dim">取证要求加载失败：'+esc((err&&err.message)||'请刷新重试')+'</div>';
+    });
+  }
+
+  function reqByKey(key){ return REQ.items.filter(function(x){ return x.key===key; })[0] || null; }
+
+  function renderRequirements(){
+    var stats = document.getElementById('reqStats');
+    var box = document.getElementById('reqList');
+    if(!stats || !box) return;
+    if(!REQ.total){
+      stats.innerHTML = '<span class="tag gray">未配置</span>';
+      box.innerHTML = '<div class="tiny dim">当前演练剧本未配置需取证材料。可在「剧本编辑」中为各节点设置需取证材料，系统也会按剧本节点自动生成模拟取证材料清单。</div>';
+      return;
+    }
+    stats.innerHTML = (REQ.mineTotal
+        ? '<span class="tag '+(REQ.minePending?'yellow':'green')+'">本角色 已归档 '+REQ.mineDone+' / '+REQ.mineTotal+'</span>'
+          + (REQ.minePending?' <span class="tag red">待取证 '+REQ.minePending+'</span>':' <span class="tag green">本角色已齐</span>')
+        : '<span class="tag gray">本角色无取证任务</span>')
+      + ' <span class="tiny dim">全场景 '+REQ.done+' / '+REQ.total+'</span>';
+    box.innerHTML = REQ.items.map(function(it){
+      var ops;
+      if(it.done){
+        ops = '<button class="btn sm" data-rv="'+esc(it.evidenceId)+'">'+App.icon('eye')+'查看</button>'
+          + (it.hasFile?'<button class="btn sm outline" data-rdl="'+esc(it.evidenceId)+'">'+App.icon('download')+'下载</button>':'');
+      } else if(it.mine){
+        ops = '<button class="btn sm primary" data-rmock="'+esc(it.key)+'">'+App.icon('file')+'模拟材料</button>'
+          + '<button class="btn sm outline" data-rup="'+esc(it.key)+'">'+App.icon('upload')+'上传真实材料</button>'
+          + '<button class="btn sm outline" data-rshot="'+esc(it.key)+'">'+App.icon('camera')+'屏幕截图</button>';
+      } else {
+        ops = '<span class="tag gray">由 '+esc(it.target||'其他角色')+' 负责</span>';
+      }
+      return '<div class="req-row'+(it.done?' done':'')+(it.mine?' mine':' other')+'">'
+        + '<div class="req-ic">'+(it.done?App.icon('check'):App.icon('alert'))+'</div>'
+        + '<div class="req-main">'
+        +   '<div class="req-name">'+esc(it.name)
+        +     ' <span class="tag '+(TYPE_CLS[it.type]||'gray')+'">'+esc(it.type)+'</span>'
+        +     (it.done?' <span class="tag green">已归档 '+(it.doneAt?esc(it.doneAt):'')+'</span>':' <span class="tag red">待取证</span>')
+        +   '</div>'
+        +   '<div class="req-meta">所属节点：'+esc(it.nodeTitle)+' · 责任角色：'+esc(it.target||'—')+(it.mine?' · 本角色负责':'')+'</div>'
+        +   (it.note?'<div class="req-note">取证说明：'+esc(it.note)+'</div>':'')
+        + '</div>'
+        + '<div class="req-ops">'+ops+'</div></div>';
     }).join('');
-    page.querySelectorAll('[data-sp]').forEach(function(b){ b.onclick = function(){ viewSnapshot(MOCK.SNAPSHOTS[+b.dataset.sp]); }; });
+
+    page.querySelectorAll('[data-rmock]').forEach(function(b){ b.onclick = function(){ importMock(b.dataset.rmock, b); }; });
+    page.querySelectorAll('[data-rup]').forEach(function(b){
+      b.onclick = function(){
+        var it = reqByKey(b.dataset.rup); if(!it || !it.mine) return;
+        openUpload({ type:it.type, name:it.name, note:it.note, nodeId:it.nodeId, reqKey:it.key, projectId:(REQ.project&&REQ.project.id)||(proj&&proj.id) });
+      };
+    });
+    page.querySelectorAll('[data-rshot]').forEach(function(b){
+      b.onclick = function(){
+        var it = reqByKey(b.dataset.rshot); if(!it || !it.mine) return;
+        openShot({ name:it.name, note:it.note, nodeId:it.nodeId, reqKey:it.key, projectId:(REQ.project&&REQ.project.id)||(proj&&proj.id) });
+      };
+    });
+    page.querySelectorAll('[data-rv]').forEach(function(b){ b.onclick = function(){ viewItem(byId(b.dataset.rv)); }; });
+    page.querySelectorAll('[data-rdl]').forEach(function(b){ b.onclick = function(){
+      var it = REQ.items.filter(function(x){ return String(x.evidenceId)===String(b.dataset.rdl); })[0];
+      if(!it) return;
+      API.downloadEvidence(it.evidenceId, it.name).then(function(){ App.toast('已开始下载：'+it.name,'ok'); })
+        .catch(function(err){ App.toast((err&&err.message)||'下载失败','err'); });
+    }; });
+  }
+
+  function importMock(key, btn){
+    var it = reqByKey(key); if(!it) return;
+    if(btn) btn.disabled = true;
+    API.importMockEvidence(it.nodeId, it.index).then(function(r){
+      App.toast((r&&r.deduped?'该材料此前已导入：':'已一键导入模拟材料：')+(r&&r.name||it.name)+'，请核对并按实际处置修改', (r&&r.deduped)?'warn':'ok');
+      loadList(); loadRequirements();
+    }).catch(function(err){
+      App.toast((err&&err.message)||'模拟材料导入失败','err');
+      if(btn) btn.disabled = false;
+    });
+  }
+
+  /* ---------- 关键节点快照 ---------- */
+  function renderSnapshots(){
+    var list = MOCK.SNAPSHOTS || [];
+    document.getElementById('spGrid').innerHTML = list.length ? list.map(function(sp,i){
+      return '<div class="card sp-card"><div class="sp-name">'+App.icon('camera')+esc(sp.name)+'</div>'
+      + '<div class="sp-meta">'+esc(sp.time)+' · 定格人：'+esc(sp.by)+'</div>'
+      + '<div class="sp-note">'+esc(sp.note)+'</div>'
+      + '<div class="flex gap2 mt2"><button class="btn sm" data-sp="'+i+'">'+App.icon('eye')+'查看</button><span class="tiny dim right">过程自动定格（演练模拟）</span></div></div>';
+    }).join('') : '<div class="card"><div class="empty">'+App.icon('camera')+'<div>暂无关键节点快照</div></div></div>';
+    page.querySelectorAll('[data-sp]').forEach(function(b){ b.onclick = function(){ viewSnapshot(list[+b.dataset.sp]); }; });
   }
 
   function viewSnapshot(sp){
-    var rel = MOCK.TIMELINE.filter(function(t){ return t.t<=sp.time; }).slice(-4);
-    App.drawer({ title:'快照详情 · '+App.esc(sp.name), body:
-      '<div class="kv"><span class="k">快照名称</span><span>'+App.esc(sp.name)+'</span>'
-      + '<span class="k">定格时刻</span><span class="mono">'+sp.time+'</span>'
-      + '<span class="k">创建方</span><span>'+App.esc(sp.by)+'</span>'
-      + '<span class="k">备注</span><span>'+App.esc(sp.note)+'</span></div>'
+    if(!sp) return;
+    var rel = (MOCK.TIMELINE||[]).filter(function(t){ return t.t<=sp.time; }).slice(-4);
+    App.drawer({ title:'快照详情 · '+esc(sp.name), body:
+      '<div class="kv"><span class="k">快照名称</span><span>'+esc(sp.name)+'</span>'
+      + '<span class="k">定格时刻</span><span class="mono">'+esc(sp.time)+'</span>'
+      + '<span class="k">创建方</span><span>'+esc(sp.by)+'</span>'
+      + '<span class="k">备注</span><span>'+esc(sp.note)+'</span></div>'
       + '<div class="divider"></div><div class="section-title">关联时序（快照前最近事件）</div>'
-      + '<div class="timeline">'+rel.map(function(t){ return '<div class="tl-item '+(t.level==='P0'?'err':t.level==='P1'?'warn':'ok')+'"><span class="tl-dot"></span><div class="tl-time">'+t.t+' · '+App.esc(t.actor)+'</div><div class="tl-title">'+App.esc(t.action)+'</div><div class="tl-desc">'+App.esc(t.detail)+'</div></div>'; }).join('')+'</div>'
+      + '<div class="timeline">'+rel.map(function(t){ return '<div class="tl-item '+(t.level==='P0'?'err':t.level==='P1'?'warn':'ok')+'"><span class="tl-dot"></span><div class="tl-time">'+esc(t.t)+' · '+esc(t.actor)+'</div><div class="tl-title">'+esc(t.action)+'</div><div class="tl-desc">'+esc(t.detail)+'</div></div>'; }).join('')+'</div>'
       + '<div class="tiny dim mt3">快照内容为演练平台对当时态势的虚拟定格记录，用于复盘评估与档案打包。</div>' });
   }
 
-  /* ===== 手动取证上传 ===== */
-  var up = document.getElementById('btnUp');
-  if(up) up.onclick = function(){
-    App.modal({ title:'手动取证上传（演练模拟）', body:
-      '<div class="form-grid">'
-      + '<div class="form-row"><label class="f-label">文件类型</label><select class="select" id="upType"><option value="截图">截图</option><option value="日志片段">日志片段</option><option value="文档">文档</option></select></div>'
-      + '<div class="form-row"><label class="f-label">文件大小（MB）</label><input class="input" id="upSize" type="number" min="0" step="0.1" value="1.5"></div>'
-      + '<div class="form-row span2"><label class="f-label">材料名称<span class="req">*</span></label><input class="input" id="upName" placeholder="如：处置截图-终端隔离-03.png（虚拟命名）"></div>'
-      + '</div>'
-      + '<div class="form-row"><label class="f-label">说明备注</label><textarea class="textarea" id="upNote" placeholder="取证背景、采集方式（演练模拟环境）…"></textarea></div>'
-      + '<div class="ev-warn">'+App.icon('alert')+'<span>禁止上传真实恶意程序样本、真实患者数据及任何生产环境敏感信息；单件取证文件不得超过 20MB。</span></div>',
-      foot:'<button class="btn" id="upNo">取消</button><button class="btn primary" id="upYes">确认归档</button>',
-      onOpen:function(ov){ ov.querySelector('#upNo').onclick=ov.close; ov.querySelector('#upYes').onclick=function(){
-        var name = ov.querySelector('#upName').value.trim();
-        var size = parseFloat(ov.querySelector('#upSize').value);
-        if(!name){ App.toast('请填写材料名称','err'); return; }
-        if(isNaN(size)||size<=0){ App.toast('请填写有效的文件大小','err'); return; }
-        if(size>20){ App.toast('文件超出演练取证限制（单件≤20MB）','err'); return; }
-        var tmap = { '截图':'附件截图', '日志片段':'操作日志', '文档':'表单文书' };
-        API.addEvidence({ type:tmap[ov.querySelector('#upType').value], name:name, size:size+' MB' }).then(function(){
-          ov.close(); renderTabs(); renderList();
-          App.toast('取证材料已归档（演练模拟）：'+name,'ok');
-        });
-      }; } });
-  };
-
-  /* ===== 一键打包 ===== */
+  /* ---------- 一键打包 ---------- */
   var pk = document.getElementById('btnPack');
   if(pk) pk.onclick = function(){
     App.confirmSim('将当前项目全部取证材料、审计日志与关键节点快照打包为演练档案（演练模拟，仅生成虚拟档案清单，不传输真实文件）。', function(){
-      var docs = MOCK.EVIDENCE.filter(function(x){ return x.type==='表单文书'||x.type==='处置记录'; }).length;
-      var logs = MOCK.EVIDENCE.filter(function(x){ return x.type==='操作日志'||x.type==='状态变更'||x.type==='聊天记录'; }).length + MOCK.AUDIT_LOGS.length;
-      var snaps = MOCK.SNAPSHOTS.length;
+      var docs = ALL.filter(function(x){ return x.type==='表单文书'||x.type==='处置记录'||x.type==='上报材料'||x.type==='报案材料'; }).length;
+      var logs = ALL.filter(function(x){ return x.type==='操作日志'||x.type==='状态变更'||x.type==='聊天记录'; }).length + (MOCK.AUDIT_LOGS||[]).length;
+      var snaps = (MOCK.SNAPSHOTS||[]).length;
       var ov = App.modal({ title:'正在打包演练档案', body:
         '<div class="flex small" style="justify-content:space-between"><span id="pkTxt">正在汇总取证材料…</span><span class="mono" id="pkPct">0%</span></div>'
         + '<div class="progress mt3"><div class="bar" id="pkBar" style="width:0%"></div></div>'
@@ -154,7 +503,12 @@ document.addEventListener('app:ready', function(e){
     });
   };
 
-  renderTabs(); renderList(); renderSnapshots();
+  /* ---------- 场景筛选 ---------- */
+  var sel = document.getElementById('evProj');
+  sel.value = projFilter;
+  sel.onchange = function(){ projFilter = sel.value; renderTable(); };
+
+  loadList(); renderSnapshots(); loadRequirements();
 });
 App.boot('evidence');
 </script>

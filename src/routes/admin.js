@@ -182,6 +182,27 @@ router.get('/report/:projectId', auth.requireAuth, adminOnly, function (req, res
   evidence.forEach(function (e) { evByType[e.type] = (evByType[e.type] || 0) + 1; });
   const autoEv = evidence.filter(function (e) { return e.auto; }).length;
 
+  /* 实战版处置决策记录（角色工作台提交） */
+  const decisions = db.prepare('SELECT * FROM drill_steps WHERE project_id=? ORDER BY step_time,id').all(pid).map(function (s) {
+    const node = s.matched_node
+      ? db.prepare('SELECT id,title,target,time,timeout FROM script_nodes WHERE id=?').get(s.matched_node) : null;
+    return {
+      nodeId: s.matched_node, title: node ? node.title : s.title, target: node ? node.target : '',
+      role: s.role_id, roleName: roleName(s.role_id).name, choice: s.choice || s.title,
+      correct: s.correct === 0 ? 0 : 1, ontime: !!s.ontime, stepTime: s.step_time,
+      foundAt: s.found_at, found: s.found, measure: s.measure, result: s.result, user: s.user
+    };
+  });
+  const baseline = project.scenario_id
+    ? db.prepare("SELECT COUNT(*) AS c FROM script_nodes WHERE scenario_id=? AND required=1 AND type<>'end'").get(project.scenario_id).c : 0;
+  const decisionStats = {
+    baseline: baseline,
+    total: decisions.length,
+    correct: decisions.filter(function (d) { return d.correct; }).length,
+    wrong: decisions.filter(function (d) { return !d.correct; }).length,
+    ontime: decisions.filter(function (d) { return d.ontime; }).length
+  };
+
   const items = db.prepare('SELECT * FROM score_items ORDER BY seq,id').all();
   const scoreRows = db.prepare('SELECT * FROM scores WHERE project_id=?').all(pid);
   const scores = items.map(function (k) {
@@ -208,6 +229,7 @@ router.get('/report/:projectId', auth.requireAuth, adminOnly, function (req, res
     stats: { total: total, done: done, doing: doing, pending: pending, overdue: overdue, rate: total ? Math.round(done / total * 100) : 0 },
     byRole: Object.keys(byRole).map(function (k) { return byRole[k]; }),
     tasks: tasks, timeline: timeline, seqFlow: seqFlow,
+    decisions: decisions, decisionStats: decisionStats,
     evidence: evidence, evidenceStats: { total: evidence.length, auto: autoEv, byType: evByType },
     scores: scores, scoreStats: { sum: scoreSum, max: scoreMax, pct: scorePct, graded: scored.length, items: scores.length },
     modeScore: modeRow ? { score: modeRow.score, max: modeRow.max, note: modeRow.note, updatedAt: modeRow.updated_at } : null,

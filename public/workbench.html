@@ -16,118 +16,47 @@ document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
   var proj = API.activeProject();
+  var isExternal = !!role.external;
+  var isPractical = proj.mode === '实战版';
 
-  /* ---------- 11角色差异化配置：模拟处置动作 + 关注态势 ---------- */
-  var ROLE_UI = {
-    commander: {
-      feed:'messages',
-      actions:[
-        { ic:'check', label:'审批应急启动', detail:'审批《应急启动审批单》，下达Ⅱ级响应启动指令（演练模拟记录）' },
-        { ic:'send', label:'批准上报主管部门', detail:'批准《网络安全事件上报表》流转市卫健局（演练模拟记录）' },
-        { ic:'opinion', label:'审批对外口径', detail:'审批院方公告口径，未经审批不得对外发布（演练模拟记录）' },
-        { ic:'bell', label:'下达全院指令', detail:'向全部参演角色广播指挥部指令（演练模拟消息）' },
-        { ic:'power', label:'终止演练进入复盘', detail:'确认闭环后终止演练，进入时序回放与评估（演练模拟记录）' }
-      ]
-    },
-    duty: {
-      feed:'messages',
-      actions:[
-        { ic:'bell', label:'接收告警确认', detail:'确认接收态势感知平台模拟告警（演练模拟记录）' },
-        { ic:'file', label:'提交初步核实单', detail:'填写《事件初步核实单》并提交（演练模拟记录）' },
-        { ic:'send', label:'上报信息科负责人', detail:'向信息科负责人上报初步核实情况（演练模拟记录）' },
-        { ic:'camera', label:'截图取证留痕', detail:'对模拟告警界面截图归档至取证模块（演练模拟记录）' }
-      ]
-    },
-    netsec: {
-      feed:'evidence',
-      actions:[
-        { ic:'net', label:'模拟IP封堵', detail:'对模拟C2地址 185.2xx.xx.77 执行封堵策略登记（演练模拟，不下发真实策略）', danger:true },
-        { ic:'power', label:'感染终端断网隔离', detail:'对3台模拟感染终端登记断网隔离操作（演练模拟记录）', danger:true },
-        { ic:'flow', label:'异常流量排查', detail:'登记外联流量排查结果与受影响网段（演练模拟记录）' },
-        { ic:'upload', label:'样本摘要上传', detail:'上传勒索信文本摘要与样本哈希（演练模拟，不含真实恶意样本）' }
-      ]
-    },
-    sysadmin: {
-      feed:'impact',
-      actions:[
-        { ic:'db', label:'HIS模拟停机隔离', detail:'登记HIS数据库服务器模拟停机与隔离状态（演练模拟记录）', danger:true },
-        { ic:'refresh', label:'灾备切换演练', detail:'执行PACS/LIS灾备切换推演并记录（演练模拟记录）' },
-        { ic:'archive', label:'备份有效性校验', detail:'校验今早6点存储快照可用于恢复（演练模拟记录）' },
-        { ic:'check', label:'业务恢复验证', detail:'恢复上线后提交《业务恢复确认单》并验证（演练模拟记录）' }
-      ]
-    },
-    itlead: {
-      feed:'messages',
-      actions:[
-        { ic:'chat', label:'组织线上研判会商', detail:'召集网安员、系统员进入院内会商组研判（演练模拟记录）' },
-        { ic:'file', label:'汇总研判简报', detail:'形成阶段性研判简报提交院应急指挥部（演练模拟记录）' },
-        { ic:'tasks', label:'分配技术处置任务', detail:'向网安组/运维组下发处置任务（演练模拟记录）' },
-        { ic:'send', label:'向指挥部汇报', detail:'提交《网络安全事件上报表》待指挥部审批（演练模拟记录）' }
-      ]
-    },
-    medlead: {
-      feed:'impact',
-      actions:[
-        { ic:'hospital', label:'启用纸质兜底流程', detail:'启动纸质处方、人工登记、人工收费兜底（演练模拟记录）' },
-        { ic:'file', label:'登记业务影响评估', detail:'填写《业务影响评估表》勾选受影响业务（演练模拟记录）' },
-        { ic:'user', label:'患者风险评估', detail:'评估业务中断对在院患者（虚拟数据）的诊疗风险（演练模拟记录）' },
-        { ic:'edit', label:'发布临床工作指引', detail:'向临床科室下发应急处置工作指引（演练模拟记录）' }
-      ]
-    },
-    clinical: {
-      feed:'impact',
-      actions:[
-        { ic:'file', label:'张贴窗口公告', detail:'在门诊收费窗口张贴系统维护公告（口径需经指挥部审批，演练模拟）' },
-        { ic:'edit', label:'登记患者诉求投诉', detail:'记录现场患者咨询与投诉诉求（虚拟登记，演练模拟）' },
-        { ic:'alert', label:'上报业务卡点', detail:'将纸质流程卡点上报医务部与指挥部（演练模拟记录）' },
-        { ic:'tasks', label:'执行纸质登记流程', detail:'按兜底流程执行手工处方/登记/收费（演练模拟记录）' }
-      ]
-    },
-    healthbureau: {
-      feed:'docs',
-      actions:[
-        { ic:'download', label:'接收医院上报材料', detail:'查看医院报送的《网络安全事件上报表》等文书（演练模拟）' },
-        { ic:'bell', label:'下达督办意见', detail:'对医院处置进展填写督办意见（演练模拟记录）' },
-        { ic:'building', label:'统筹区域资源', detail:'登记区域应急资源协调意向（演练模拟记录）' },
-        { ic:'check', label:'确认处置进展', detail:'确认医院阶段性处置进展并反馈（演练模拟记录）' }
-      ]
-    },
-    cac: {
-      feed:'docs_opinion',
-      actions:[
-        { ic:'download', label:'接收事件通报', detail:'接收医院报送的事件通报材料（演练模拟）' },
-        { ic:'eye', label:'舆情风险研判', detail:'对模拟舆情监测信息填写《舆情风险研判表》（演练模拟）' },
-        { ic:'send', label:'下达口径指导', detail:'向院方下达对外口径指导意见（演练模拟记录）' },
-        { ic:'archive', label:'归档监测记录', detail:'将舆情监测记录归档留存（演练模拟记录）' }
-      ]
-    },
-    cyberpolice: {
-      feed:'docs',
-      actions:[
-        { ic:'file', label:'登记报案材料', detail:'接收《报案登记表》及证据清单并登记（演练模拟记录）' },
-        { ic:'check', label:'出具受理回执', detail:'对报案材料出具受理回执（演练模拟记录）' },
-        { ic:'evidence', label:'下发取证指引', detail:'向医院下发取证指引单（勒索信截图/样本哈希/文件清单）（演练模拟）' },
-        { ic:'camera', label:'固定证据摘要', detail:'对报送证据材料固定摘要（演练模拟记录）' }
-      ]
-    },
-    platformadmin: {
-      feed:'audit',
-      actions:[
-        { ic:'play', label:'启用演练剧本', detail:'启用/停用剧本版本供项目调用（演练模拟记录）' },
-        { ic:'eye', label:'查看审计日志', detail:'检查各角色操作留痕是否完整（仅查看，不可删改）' },
-        { ic:'archive', label:'执行数据备份', detail:'对演练数据执行模拟备份（演练模拟记录）' },
-        { ic:'admin', label:'维护字典与账号', detail:'维护事件等级字典与参演账号（演练模拟记录）' }
-      ]
-    }
+  /* 各角色关注态势（工作台统一承载待办任务与处置执行） */
+  var FEED = {
+    commander:'messages', duty:'messages', netsec:'evidence', sysadmin:'impact', itlead:'messages',
+    medlead:'impact', clinical:'impact', healthbureau:'docs', cac:'docs_opinion',
+    cyberpolice:'docs', platformadmin:'audit'
+  };
+  var feed = FEED[role.id] || 'messages';
+
+  /* 演练事件模拟数据：按当前项目场景取 SIM_DATA，供表单自动预填与自动取证截图（全部虚拟数据） */
+  var SCEN = (MOCK.SCENARIOS||[]).filter(function(s){ return s.id===proj.scenarioId; })[0] || null;
+  /* 剧本故障通报：演练开始后先弹窗展示，再在页面正上方固定显示；内容来自剧本编排「演练初始故障通报」 */
+  var ALERT = String((SCEN && SCEN.alert) || '').trim()
+    || (SCEN ? (SCEN.type+'事件：'+SCEN.desc) : '');
+  var started = proj.status === '演练中';
+  /* 实战版：可选下一节点接收角色 + 取证材料完成情况（未归档不允许结束演练） */
+  var RECEIVERS = [];
+  var EV = { done:0, total:0, pending:0, pendingItems:[] };
+  var SIM = MOCK.SIM_DATA || {};
+  var FACTS = (SCEN && SIM[SCEN.type]) || SIM['通用'] || {
+    sys:'院内业务系统（模拟地址 10.20.x.x）', fault:'模拟故障现象（通用兜底，请按实际修改）',
+    alert:'态势感知平台（模拟）：推送安全告警', ip:'10.20.x.x（模拟可疑IP）',
+    sample:'模拟样本摘要（占位）', scope:'模拟范围（无真实业务影响）',
+    action:'按预案模拟处置', progress:'按剧本推进中（模拟）',
+    backup:'备份有效性校验（模拟）', impact:'无真实业务影响（模拟）', measure:'按预案启用纸质/人工兜底（模拟）'
   };
 
-  var cfg = ROLE_UI[role.id] || ROLE_UI.duty;
-  var isExternal = !!role.external;
+  function p2(n){ return n<10 ? '0'+n : String(n); }
+  function fmtSize(b){ return b<1024 ? b+' B' : b<1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
 
   page.innerHTML =
     '<div class="page-head"><div><h1>'+App.esc(role.name)+' · 工作台</h1>'
-    + '<div class="sub">'+App.esc(proj.name)+' · 按角色职责渲染差异化面板'+(isExternal?' · <span style="color:var(--warn)">外部单位受限视图</span>':'')+'</div></div>'
-    + '<div class="acts"><button class="btn" id="btnToTasks">'+App.icon('tasks')+'前往任务中心</button></div></div>'
+    + '<div class="sub">'+App.esc(proj.name)+' · '+(isPractical?'实战版：自主研判处置':'基础版：按剧本流程逐步执行')+(isExternal?' · <span style="color:var(--warn)">外部单位受限视图</span>':'')+'</div></div>'
+    + '<div class="acts">'
+    + '<button class="btn" id="btnFault">'+App.icon('alert')+'查看故障通报</button>'
+    + (isPractical && proj.status==='演练中' && ['commander','platformadmin','itlead'].indexOf(role.id)>=0
+        ? '<button class="btn danger" id="btnFinish">'+App.icon('check')+'完成演练</button>' : '')
+    + '<button class="btn" id="btnRefresh">'+App.icon('refresh')+'刷新</button></div></div>'
+    + '<div id="wbFault"></div>'
     + '<div class="sim-banner">'+App.icon('alert')+'<span>工作台所有处置动作均为<b>演练模拟记录</b>（写入审计日志与取证模块），系统不会向医院真实网络、HIS/EMR等生产系统下发任何命令。</span></div>'
     + '<div class="wb-grid">'
     +   '<div class="card"><div class="card-title">'+App.icon('shield')+'岗位职责</div>'
@@ -139,152 +68,826 @@ document.addEventListener('app:ready', function(e){
     +     '</div>'
     +     (isExternal?'<div class="tiny dim mt3">依据分级权限策略：外部单位仅可查看医院主动上报的文书与公告材料，不可查看内网原始技术日志、告警明细与会商内部讨论。</div>':'')
     +   '</div>'
-    +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'本角色待办任务<span class="more" onclick="location.href=\'tasks.html\'">全部任务 ▸</span></div><div id="wbTasks"><div class="small dim">加载中…</div></div></div>'
-    +   '<div class="card"><div class="card-title">'+App.icon('workbench')+'常用模拟处置动作</div>'
-    +     '<div class="sim-actions" id="wbActions"></div>'
-    +     '<div class="tiny dim mt3">点击任一动作 → 演练模拟确认弹窗 → 记录写入审计日志（演练模拟：动作已记录）</div></div>'
-    +   '<div class="card" id="wbModeCard"></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色待办任务<span class="more">'+(isPractical?'已发现故障 · 自主处置':'按剧本流程逐步执行')+'</span></div>'
+    +     '<div id="wbTasks"><div class="small dim">加载中…</div></div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('score')+'演练评分<span class="more">'+(isPractical?'偏离/超时扣分':'时限达成率')+'</span></div><div id="wbScore" class="small dim">正在汇总…</div></div>'
     +   '<div class="card"><div class="card-title">'+App.icon('eye')+'本角色关注态势</div><div id="wbFeed"><div class="small dim">加载中…</div></div></div>'
     + '</div>';
 
-  document.getElementById('btnToTasks').onclick = function(){ location.href='tasks.html'; };
+  document.getElementById('btnRefresh').onclick = function(){
+    App.toast('正在刷新工作台数据…','ok');
+    if(isPractical){ renderPractical(); renderScore(); } else { renderBasic(); renderScore(); }
+  };
 
-  /* ---------- 待办任务摘要 ---------- */
-  API.getTasks().then(function(ts){
-    var mine = ts.filter(function(t){ return t.projectId===proj.id; });
-    var box = document.getElementById('wbTasks');
-    if(!mine.length){ box.innerHTML='<div class="empty">'+App.icon('check')+'<div>本角色暂无待办任务</div></div>'; return; }
-    box.innerHTML = mine.slice(0,5).map(function(t){
-      return '<div class="task-item'+(t.status==='超时'?' overdue':'')+(t.status==='已完成'?' done':'')+'" style="margin-bottom:8px" onclick="location.href=\'tasks.html\'">'
-        + '<span class="tk-ic">'+App.icon(t.status==='超时'?'alert':'tasks')+'</span>'
-        + '<div><div class="tk-title">'+App.esc(t.title)+'</div>'
-        + '<div class="tk-meta"><span class="mono">'+t.id+'</span><span>时限 '+t.deadline+'</span>'+App.levelTag(t.level)+'</div></div>'
-        + '<span class="tk-right">'+App.statusTag(t.status)+'</span></div>';
-    }).join('')
-    + '<div class="tiny dim mt2">共 '+mine.length+' 项 · 待处理 '+mine.filter(function(t){return t.status==='待处理'||t.status==='超时';}).length+' 项</div>';
-  });
+  /* ---------- 关联剧本节点 ---------- */
+  function nodeForTask(t){
+    var list = MOCK.SCRIPT_NODES || [];
+    var n = t.nodeId ? list.filter(function(x){ return x.id===t.nodeId; })[0] : null;
+    if(n) return n;
+    if(t.forms && t.forms.length) n = list.filter(function(x){ return x.form===t.forms[0]; })[0];
+    return n || null;
+  }
 
-  /* ---------- 演练模式面板：基础版显示引导提示，实战版录入自主处置步骤 ---------- */
-  function renderModeCard(){
-    var box = document.getElementById('wbModeCard');
-    if(isExternal || role.id === 'platformadmin'){
-      box.style.display = 'none'; return;
-    }
-    var mode = proj.mode || '基础版';
-    if(mode === '基础版'){
-      var mine = (MOCK.SCRIPT_NODES || []).filter(function(n){
-        return n.scenarioId === proj.scenarioId && (n.target === role.name || n.target === role.id || n.target === role.short);
-      });
-      var all = (MOCK.SCRIPT_NODES || []).filter(function(n){ return n.scenarioId === proj.scenarioId && n.type !== 'end'; });
-      box.innerHTML = '<div class="card-title">'+App.icon('flow')+'基础版引导流程<span class="more">诱导演练 · 仅按时限评分</span></div>'
-        + '<div class="tiny dim">当前项目采用<b>基础版</b>：系统按剧本节点依次下发任务并给出引导提示，按提示完成即可，考评只统计各节点时限达成率。</div>'
-        + '<div class="section-title mt3">本角色相关节点（'+(mine.length||0)+'）</div>'
-        + (mine.length
-            ? mine.map(function(n){
-                return '<div class="st-item"><div class="st-h"><b>'+App.esc(n.time||'')+' · '+App.esc(n.title)+'</b><span class="tag gray">时限 '+(n.timeout||'—')+' 分</span></div>'
-                  + '<div class="tiny dim mt2">引导：'+App.esc(n.guide||'按预案执行')+'</div></div>';
+  /* ---------- 表单字段模拟值自动填充 ---------- */
+  function simValue(fd, t, node){
+    var d = new Date();
+    var tm = (node && node.time) || t.deadline || '09:00';
+    if(/时间/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+'T'+tm;
+    if(/发现方式/.test(fd)) return String(FACTS.alert||'').split('：')[0] || '安全告警系统';
+    if(/涉及系统|IP/i.test(fd)) return FACTS.sys;
+    if(/描述|现象/.test(fd)) return FACTS.fault;
+    if(/判断/.test(fd)) return '结合告警与样本特征（'+FACTS.sample+'），初步判定为'+(SCEN?SCEN.type:'模拟')+'类事件（模拟判定）';
+    if(/核实人|确认人|审批人|联系人|报送人|填报人|研判人|报案人/.test(fd)) return App.curUser()||role.short;
+    if(/范围/.test(fd)) return FACTS.scope;
+    if(/进展/.test(fd)) return FACTS.progress;
+    if(/等级/.test(fd)) return (SCEN&&SCEN.level)||t.level||'较大';
+    if(/类型/.test(fd)) return SCEN?SCEN.type:'模拟事件';
+    if(/单位/.test(fd)) return (proj.units&&proj.units[0])||'盘州市人民医院';
+    if(/摘要|经过|依据/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'（系统自动填充，请核对修改）';
+    if(/患者数/.test(fd)) return '0（虚拟数据，无真实患者）';
+    if(/损失/.test(fd)) return FACTS.impact;
+    if(/证据清单/.test(fd)) return FACTS.sample+'、告警与故障截图（自动取证）';
+    if(/清单/.test(fd)) return FACTS.sys;
+    if(/校验|备份/.test(fd)) return FACTS.backup;
+    if(/结果|验证/.test(fd)) return '业务验证通过（模拟，无真实影响）';
+    if(/兜底|方案/.test(fd)) return FACTS.measure;
+    if(/措施/.test(fd)) return FACTS.action;
+    if(/意见/.test(fd)) return '同意，按预案执行（模拟审批）';
+    return '模拟数据·自动填充';
+  }
+
+  function formsHtml(t, node){
+    var forms = (t.forms||[]).map(function(fid){
+      return (MOCK.FORM_TEMPLATES||[]).filter(function(f){ return f.id===fid; })[0];
+    }).filter(Boolean);
+    if(!forms.length) return '';
+    return '<div class="section-title mt3">'+App.icon('edit')+'需提交表单 <span class="tiny dim" style="font-weight:400">已按场景【'+App.esc(SCEN?SCEN.type:'通用')+'】自动填充，请核对修改后提交</span></div>'
+      + forms.map(function(f, fi){
+          return '<div class="card mb3" style="padding:12px 14px"><div class="small bold mb2">'+App.esc(f.name)+' <span class="tag gray">'+f.id+'</span></div>'
+            + '<div class="form-grid">'
+            + f.fields.map(function(fd, di){
+                var long = /描述|意见|摘要|进展|清单|方案|依据|经过|情况|范围|措施/.test(fd);
+                var isTime = /时间$/.test(fd);
+                var isWay = fd==='发现方式';
+                var idc = 'wf-'+t.id+'-'+fi+'-'+di;
+                var sv = simValue(fd, t, node);
+                var ctl;
+                if(isTime){
+                  ctl = '<input class="input" type="datetime-local" id="'+idc+'" value="'+App.esc(sv)+'">';
+                } else if(isWay){
+                  var did = 'wfdl-'+t.id+'-'+fi;
+                  ctl = '<input class="input" id="'+idc+'" list="'+did+'" value="'+App.esc(sv)+'" placeholder="下拉选择，也可自由填写">'
+                    + '<datalist id="'+did+'">'+['安全告警系统','值班巡检','医护人员报障','外部单位通报','第三方监测','供应商反馈'].map(function(o){ return '<option value="'+o+'"></option>'; }).join('')+'</datalist>';
+                } else {
+                  ctl = long ? '<textarea class="textarea" id="'+idc+'" rows="2">'+App.esc(sv)+'</textarea>'
+                             : '<input class="input" id="'+idc+'" value="'+App.esc(sv)+'">';
+                }
+                return '<div class="form-row'+(long?' span2':'')+'" style="margin-bottom:10px">'
+                  + '<label class="f-label" for="'+idc+'">'+App.esc(fd)+'<span class="tiny dim">已自动填充</span><span class="req"> *</span></label>'
+                  + ctl + '</div>';
               }).join('')
-            : '<div class="tiny dim">本场景基线中未分配本角色节点，可前往任务中心查看协同任务。</div>')
-        + '<div class="section-title mt3">全流程节点</div>'
-        + '<div class="tiny muted" style="line-height:1.9">'+all.map(function(n,i){ return (i+1)+'. '+App.esc(n.time)+' '+App.esc(n.title)+'（'+App.esc(n.target)+'）'; }).join('<br>')+'</div>';
-      return;
-    }
-    /* 实战版 */
-    var now2 = new Date();
-    var hh = (now2.getHours()<10?'0':'')+now2.getHours();
-    var mm = (now2.getMinutes()<10?'0':'')+now2.getMinutes();
-    box.innerHTML = '<div class="card-title">'+App.icon('edit')+'实战版处置步骤录入<span class="more">自主处置 · 按基线判定遗漏</span></div>'
-      + '<div class="tiny dim" style="margin-bottom:10px">当前项目采用<b>实战版</b>：系统不提供固定流程，请按实际处置过程逐步添加步骤；系统自动匹配基础版基线节点，并在复盘时对<b>步骤遗漏</b>与<b>时限</b>评分。</div>'
-      + '<div class="filters" style="gap:8px;align-items:flex-end">'
-      +   '<div><label class="f-label">动作类型</label><select class="select" id="wbStAction">'
-      +     ['告警核实','隔离处置','处置恢复','业务兜底','上报审批','取证留痕','协同沟通','其他'].map(function(x){ return '<option>'+x+'</option>'; }).join('')
-      +   '</select></div>'
-      +   '<div style="flex:1;min-width:180px"><label class="f-label">步骤标题</label><input class="input" id="wbStTitle" placeholder="如：隔离感染主机"></div>'
-      +   '<div><label class="f-label">时刻</label><input class="input" id="wbStTime" type="time" value="'+hh+':'+mm+'" style="width:120px"></div>'
-      + '</div>'
-      + '<div class="form-row" style="margin-top:8px"><input class="input" id="wbStDesc" placeholder="处置说明（可选）：主机IP、操作对象等"></div>'
-      + '<button class="btn primary block mt2" id="wbStAdd">'+App.icon('plus')+'添加处置步骤</button>'
-      + '<div class="section-title mt3">已录入步骤（<span id="wbStCount">0</span>）</div><div id="wbStList" class="tiny dim">加载中…</div>';
-
-    function loadSteps(){
-      API.getDrillWorkbench(proj.id).then(function(wb){
-        document.getElementById('wbStCount').textContent = wb.steps.length;
-        var host = document.getElementById('wbStList');
-        host.className = '';
-        if(!wb.steps.length){ host.className='tiny dim'; host.textContent = '尚未录入处置步骤，请按实际处置过程添加'; return; }
-        host.innerHTML = wb.steps.map(function(s2){
-          return '<div class="st-item"><div class="st-h"><span><b>'+App.esc(s2.step_time)+'</b> '+App.esc(s2.title)+'</span>'
-            + '<span class="flex gap2">'+(s2.matched ? '<span class="tag green">匹配 '+App.esc(s2.matched_node||'')+'</span>' : '<span class="tag gray">额外步骤</span>')
-            + (s2.user===App.curUser() || ['platformadmin','commander'].indexOf(role.id)>=0 ? '<button class="btn sm danger" data-d="'+s2.id+'">删除</button>' : '')
-            + '</span></div><div class="tiny dim mt2">'+App.esc(s2.action||'')+(s2.descr?' · '+App.esc(s2.descr):'')+'</div></div>';
+            + '</div><button class="btn primary sm" data-form="'+t.id+'|'+fi+'">'+App.icon('upload')+'提交表单（模拟）</button></div>';
         }).join('');
-        host.querySelectorAll('[data-d]').forEach(function(b){
-          b.onclick = function(){
-            API.deleteDrillStep(b.dataset.d).then(function(){ App.toast('步骤已删除','ok'); loadSteps(); })
-              .catch(function(err){ App.toast((err&&err.message)||'删除失败','err'); });
-          };
-        });
-      }).catch(function(){
-        host.className='tiny dim'; host.textContent = '步骤加载失败，请稍后刷新';
+  }
+
+  /* ---------- 基础版：仅显示当前正确流程，完成后进入下一步 ---------- */
+  function stepCard(t, node, idx, total){
+    var action = node ? (node.action || '应急处置') : '应急处置';
+    var desc = node ? node.desc : (t.desc || '按预案完成本岗处置');
+    var guide = node ? node.guide : '';
+    var limit = (node && node.timeout) ? node.timeout+' 分钟' : '—';
+    return '<div class="section-title">'+App.icon('flow')+'当前步骤 '+idx+' / '+total+' <span class="tiny dim" style="font-weight:400">完成本步骤后自动进入下一流程</span></div>'
+      + '<div class="card" style="padding:14px 16px;border-color:rgba(47,129,247,.35)">'
+      +   '<div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px">'
+      +     '<div><div class="small bold">'+App.esc(t.title)+'</div>'
+      +     '<div class="tk-meta mt2"><span class="mono">'+App.esc(t.id)+'</span><span class="mono">计划 '+App.esc(node&&node.time||t.deadline||'—')+'</span><span>时限 '+limit+'</span>'+App.levelTag(t.level)+'</div></div>'
+      +     App.statusTag(t.status)+'</div>'
+      +   '<div class="kv mt3">'
+      +     '<span class="k">处置动作</span><span class="bold">'+App.esc(action)+'</span>'
+      +     '<span class="k">处置内容</span><span class="small" style="line-height:1.75">'+App.esc(desc)+'</span>'
+      +     (node&&node.receiver?'<span class="k">下一节点接收人</span><span class="bold">'+App.esc(node.receiver)+' <span class="tag gray">剧本预设</span></span>':'')
+      +   '</div>'
+      +   (guide?'<div class="tiny mt3" style="color:var(--accent2);line-height:1.8">'+App.icon('flow')+' 引导：'+App.esc(guide)+'</div>':'')
+      +   '<div class="section-title mt3">需完成事项</div>'
+      +   '<div class="small" style="line-height:1.95">1. 按引导提示完成本节点处置动作<br>'
+      +     '2. 核对并提交下方表单（已自动填充模拟数据）<br>'
+      +     '3. 上传证据附件（可上传文件或直接屏幕截图）</div>'
+      +   '<div class="section-title mt3">'+App.icon('file')+'证据附件 <button class="btn sm outline" data-att="'+t.id+'">'+App.icon('upload')+'上传 / 截图</button></div>'
+      +   '<div class="flex wrap gap2" id="watt-'+t.id+'">'+(t.atts&&t.atts.length?attHtml(t):'<span class="small dim">暂无附件 · 上传后即时刷新</span>')+'</div>'
+      +   formsHtml(t, node)
+      +   '<div class="divider"></div>'
+      +   '<button class="btn ok" data-finish="'+t.id+'">'+App.icon('check')+'完成本步骤，进入下一流程</button>'
+      +   '<div class="tiny dim mt2">仅基础版展示正确处置流程；完成后本步骤归档，工作台自动切换到下一节点。</div>'
+      + '</div>';
+  }
+
+  /* 列表行：完成态可查看归档记录，当前步点击打开完整处置表单弹窗 */
+  function basicRow(t, node, state, idx, total){
+    var done = state === 'done';
+    var meta = '<span class="mono">'+App.esc(t.id)+'</span>'
+      + '<span>计划 '+App.esc((node&&node.time)||t.deadline||'—')+'</span>'
+      + (node&&node.timeout?'<span>时限 '+node.timeout+' 分钟</span>':'')
+      + (node&&node.action?'<span>'+App.esc(node.action)+'</span>':'');
+    return '<div class="tn-row '+(done?'done':'cur')+'" data-'+(done?'view':'open')+'="'+App.esc(t.id)+'" role="button" tabindex="0">'
+      + '<span class="tn-ic">'+(done?App.icon('check'):App.icon('alert'))+'</span>'
+      + '<div class="tn-main"><div class="tn-title">'+App.esc(t.title)+'</div><div class="tn-meta">'+meta+'</div></div>'
+      + (done?'<span class="tag green">已完成</span>':'<span class="tag red">当前步骤 '+idx+' / '+total+'</span>')
+      + '<span class="tn-go">'+(done?'查看归档记录 ›':'打开处置表单 ›')+'</span></div>';
+  }
+
+  function renderBasic(){
+    var host = document.getElementById('wbTasks');
+    host.innerHTML = '<div class="small dim">正在加载本角色待办任务…</div>';
+    API.getTasks().then(function(ts){
+      var mine = (ts||[]).filter(function(t){ return t.projectId===proj.id && t.role===role.id; });
+      if(!mine.length){
+        host.innerHTML = '<div class="empty">'+App.icon('check')+'<div>本角色暂无待办任务</div><div class="tiny dim mt2">剧本基线中未分配本角色节点，或任务已完成</div></div>';
+        return;
+      }
+      var done = mine.filter(function(t){ return t.status==='已完成'; });
+      var idx = -1;
+      for(var i=0;i<mine.length;i++){ if(mine[i].status!=='已完成'){ idx=i; break; } }
+      var head = '<div class="tiny dim" style="margin-bottom:10px">本角色流程进度 <b>'+done.length+' / '+mine.length+'</b> 步 · 点击列表行打开完整处置表单（弹窗形式）</div>';
+      var rows = done.map(function(t){ return basicRow(t, nodeForTask(t), 'done', 0, mine.length); }).join('');
+      if(idx<0){
+        host.innerHTML = head + '<div class="task-nav">'+rows+'</div>'
+          + '<div class="empty mt3">'+App.icon('check')+'<div>本角色负责的流程已全部完成</div><div class="tiny dim mt2">可前往复盘评估查看时限达成情况</div></div>';
+      } else {
+        rows += basicRow(mine[idx], nodeForTask(mine[idx]), 'cur', idx+1, mine.length);
+        host.innerHTML = head + '<div class="task-nav">'+rows+'</div>'
+          + '<div class="tiny dim mt2">当前步骤需点开弹窗核对处置动作、提交表单与附件；完成后列表自动推进到下一步。</div>';
+      }
+      host.querySelectorAll('[data-open]').forEach(function(row){
+        row.onclick = function(){
+          var t = mine.filter(function(x){ return String(x.id)===String(row.dataset.open); })[0];
+          if(t) openBasicTask(t, idx+1, mine.length);
+        };
       });
-    }
-    loadSteps();
-    document.getElementById('wbStAdd').onclick = function(){
-      var title = document.getElementById('wbStTitle').value.trim();
-      if(!title){ App.toast('请填写步骤标题','err'); return; }
-      var btn = this; btn.disabled = true;
-      API.addDrillStep({
-        projectId: proj.id, action: document.getElementById('wbStAction').value,
-        title: title, desc: document.getElementById('wbStDesc').value.trim(),
-        stepTime: document.getElementById('wbStTime').value
-      }).then(function(r){
-        btn.disabled = false;
-        document.getElementById('wbStTitle').value = '';
-        document.getElementById('wbStDesc').value = '';
-        App.toast(r.matchedNode ? '步骤已记录，匹配基线节点 '+r.matchedNode+(r.ontime?'（时限内）':'（超基线时限）') : '步骤已记录（未匹配基线，作为额外处置）', r.matchedNode?'ok':'warn');
-        loadSteps();
-      }).catch(function(err){
-        btn.disabled = false;
-        App.toast((err&&err.message)||'录入失败','err');
+      host.querySelectorAll('[data-view]').forEach(function(row){
+        row.onclick = function(){
+          var t = mine.filter(function(x){ return String(x.id)===String(row.dataset.view); })[0];
+          if(t) openBasicDone(t);
+        };
+      });
+    }).catch(function(err){
+      host.innerHTML = '<div class="tiny dim">'+App.esc((err&&err.message)||'任务加载失败')+'</div>';
+    });
+  }
+
+  /* 完整处置表单以弹窗方式打开 */
+  function openBasicTask(t, idx, total){
+    var node = nodeForTask(t);
+    App.modal({
+      title:'待办任务处置 · '+App.esc(t.title),
+      wide:true,
+      body:'<div id="wbTaskBody"><div class="small dim">正在载入处置表单…</div></div>',
+      foot:'<button class="btn" id="wbTaskClose">关闭</button>',
+      onOpen:function(ov){
+        /* 打开处置表单即标记为处置中（导调中心节点操作情况同步展示） */
+        var nid = (node&&node.id)||t.nodeId;
+        if(nid) API.startNode(nid).catch(function(){});
+        ov.querySelector('#wbTaskClose').onclick = ov.close;
+        var box = ov.querySelector('#wbTaskBody');
+        box.innerHTML = stepCard(t, node, idx, total);
+        bindBasic(t, box, function(){
+          ov.close();
+          renderBasic(); renderScore();
+        });
+        ensureAutoAtts(t, box);
+      }
+    });
+  }
+
+  function openBasicDone(t){
+    var node = nodeForTask(t);
+    App.modal({
+      title:'已完成步骤 · '+App.esc(t.title),
+      body:'<div class="kv">'
+        + '<span class="k">任务编号</span><span class="mono">'+App.esc(t.id)+'</span>'
+        + '<span class="k">处置动作</span><span class="bold">'+App.esc((node&&node.action)||'应急处置')+'</span>'
+        + '<span class="k">处置内容</span><span class="small" style="line-height:1.75">'+App.esc((node&&node.desc)||t.desc||'—')+'</span>'
+        + '<span class="k">计划时刻</span><span class="mono">'+App.esc((node&&node.time)||t.deadline||'—')+'</span>'
+        + '<span class="k">当前状态</span><span>'+App.statusTag(t.status)+'</span>'
+        + '</div>'
+        + '<div class="sim-banner mt3">'+App.icon('check')+'<span>本步骤已完成并归档（接单 → 提交处置 → 完成），列表行仅供查看，不可重复提交。</span></div>',
+      foot:'<button class="btn" id="wbDoneClose">关闭</button>',
+      onOpen:function(ov){ ov.querySelector('#wbDoneClose').onclick = ov.close; }
+    });
+  }
+
+  function bindBasic(t, host, onDone){
+    var forms = (t.forms||[]).map(function(fid){
+      return (MOCK.FORM_TEMPLATES||[]).filter(function(f){ return f.id===fid; })[0];
+    }).filter(Boolean);
+
+    host.querySelectorAll('[data-form]').forEach(function(b){
+      b.onclick = function(){
+        var parts = b.dataset.form.split('|');
+        var fi = +parts[1];
+        var f = forms[fi];
+        if(!f) return;
+        var data = {}, missing = [];
+        f.fields.forEach(function(fd, di){
+          var el = host.querySelector('#wf-'+t.id+'-'+fi+'-'+di);
+          var v = el ? String(el.value||'').trim() : '';
+          if(!v) missing.push(fd); else data[fd] = v;
+        });
+        if(missing.length){ App.toast('《'+f.name+'》仍有必填项：'+missing.slice(0,3).join('、'),'err'); return; }
+        b.disabled = true; b.textContent = '提交中…';
+        API.submitForm(t.id, f.id, data).then(function(){
+          b.disabled = false; b.innerHTML = App.icon('upload')+'重新提交表单';
+          App.toast('《'+f.name+'》已提交并归档至取证模块','ok');
+        }).catch(function(err){
+          b.disabled = false; b.innerHTML = App.icon('upload')+'提交表单（模拟）';
+          App.toast((err&&err.message)||'表单提交失败','err');
+        });
+      };
+    });
+
+    host.querySelectorAll('[data-att]').forEach(function(b){
+      b.onclick = function(){ openAttUpload(t, host); };
+    });
+    var attBox = host.querySelector('#watt-'+t.id);
+    if(attBox) attBox.onclick = function(ev){
+      var chip = ev.target.closest ? ev.target.closest('.att-img') : null;
+      if(!chip) return;
+      var im = chip.querySelector('img');
+      if(!im) return;
+      App.modal({ title:'证据预览 · '+t.id, wide:true,
+        body:'<img src="'+im.src+'" style="max-width:100%;display:block;border-radius:6px">',
+        foot:'<button class="btn" id="pvNo">关闭</button>',
+        onOpen:function(m){ m.querySelector('#pvNo').onclick = m.close; } });
+    };
+
+    var fin = host.querySelector('[data-finish]');
+    if(fin) fin.onclick = function(){
+      App.confirmSim('确认完成「'+t.title+'」？完成后归档并自动进入下一流程（演练模拟）。', function(){
+        fin.disabled = true; fin.textContent = '提交中…';
+        var chain = Promise.resolve();
+        if(t.status==='待处理'||t.status==='超时') chain = chain.then(function(){ return API.acceptTask(t.id); });
+        chain.then(function(){ return API.submitTask(t.id, '基础版按引导流程完成本节点处置'); })
+          .then(function(){ return API.completeTask(t.id); })
+          .then(function(){
+            App.toast('本步骤已完成，演练流程进入下一步','ok');
+            App.refreshShell();
+            if(onDone) onDone(); else { renderBasic(); renderScore(); }
+          })
+          .catch(function(err){
+            fin.disabled = false; fin.innerHTML = App.icon('check')+'完成本步骤，进入下一流程';
+            App.toast((err&&err.message)||'操作失败','err');
+          });
       });
     };
   }
-  renderModeCard();
 
-  /* ---------- 模拟处置动作 ---------- */
-  document.getElementById('wbActions').innerHTML = cfg.actions.map(function(a,i){
-    return '<button class="sim-btn'+(a.danger?' danger-sim':'')+'" data-i="'+i+'">'+App.icon(a.ic)+App.esc(a.label)+'</button>';
-  }).join('');
-  document.querySelectorAll('#wbActions .sim-btn').forEach(function(btn){
-    btn.onclick = function(){
-      var a = cfg.actions[+btn.dataset.i];
-      App.confirmSim(a.detail, function(){
-        API.actSim(role.short+'·'+a.label, a.detail);
-        App.toast('演练模拟：动作「'+a.label+'」已记录','ok');
+  /* ---------- 附件与截图取证 ---------- */
+  var BAD_EXT = /\.(exe|bat|cmd|vbs|scr|msi|com|pif|jar)$/i;
+  var IMG_EXT = /\.(png|jpe?g|gif|bmp|webp|svg)$/i;
+  var MAX_MB = 20;
+
+  function guessType(name, mime){
+    var n = String(name||'').toLowerCase();
+    if(/^image\//.test(mime||'') || IMG_EXT.test(n)) return '截图';
+    if(/\.(pcap|cap|pcapng)$/.test(n)) return '流量包摘要';
+    if(/\.(log|txt|csv)$/.test(n)) return '日志片段';
+    if(/\.(cfg|conf|ini|yaml|yml|json)$/.test(n)) return '配置备份';
+    return '文档';
+  }
+  function attHtml(t){
+    return (t.atts||[]).map(function(a){
+      var auto = (a.by==='系统自动' || a.auto) ? '⚙ ' : '';
+      var nm = App.esc(a.name||'附件');
+      var meta = (a.time?a.time+' · ':'')+(a.by||'')+(a.size?(' · '+a.size):'');
+      if(a.by==='系统自动' || a.auto) meta = '自动生成 · '+meta;
+      var isImg = a.url && (/^data:image/.test(a.url) || /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(a.url).split('?')[0]));
+      if(isImg){
+        return '<span class="file-chip att-img" title="点击放大预览" style="padding:4px 8px 4px 4px;cursor:pointer"><img src="'+App.esc(a.url)+'" alt="" style="width:56px;height:40px;object-fit:cover;border-radius:4px;display:block;flex:none">'+auto+nm+'<span class="fc-size">'+meta+'</span></span>';
+      }
+      var dl = a.url ? ' <a href="'+App.esc(a.url)+'" target="_blank" rel="noopener" style="color:var(--accent2);margin-left:4px">下载</a>' : '';
+      return '<span class="file-chip">'+App.icon('file')+auto+nm+'<span class="fc-size">'+meta+'</span>'+dl+'</span>';
+    }).join('') || '<span class="small dim">暂无附件</span>';
+  }
+  function refreshAtt(t, host){
+    var box = host && host.querySelector ? host.querySelector('#watt-'+t.id) : null;
+    if(box) box.innerHTML = attHtml(t);
+  }
+  function pushAutoAtt(t, att, host){
+    API.addEvidence({ type: att.type || '截图', name: att.name, size: att.size || '-',
+      taskId: t.id, auto: true, asAttachment: true, dataUrl: att.url }).then(function(r){
+      var rec = { id: r.attId, name: att.name, type: att.type || '截图', size: r.size || att.size || '-',
+        url: r.url || att.url, by: '系统自动', time: att.time, auto: true };
+      t.atts = t.atts || [];
+      var dup = t.atts.filter(function(x){ return x && x.name === att.name; })[0];
+      if(dup){ dup.url = rec.url; dup.size = rec.size; } else t.atts.push(rec);
+      refreshAtt(t, host);
+    }).catch(function(){});
+  }
+  function openAttUpload(t, host){
+    var picked = [];
+    App.modal({ title:'上传证据附件 · '+t.id,
+      body:'<div class="sim-banner">'+App.icon('alert')+'<span>真实文件上传：可选择本地证据文件，或直接<b>屏幕截图</b>取证。<b>严禁上传可执行程序/脚本/恶意样本</b>，单文件限 '+MAX_MB+'MB。</span></div>'
+        + '<div class="flex wrap gap2 mb3">'
+        + '<button class="btn primary" id="attPick">'+App.icon('file')+'选择文件</button>'
+        + '<button class="btn" id="attShot">'+App.icon('camera')+'屏幕截图</button>'
+        + '<input type="file" id="attFile" multiple style="display:none">'
+        + '</div>'
+        + '<div id="attList" class="small muted">尚未选择文件</div>',
+      foot:'<button class="btn" id="attNo">取消</button><button class="btn primary" id="attYes">'+App.icon('upload')+'上传归档</button>',
+      onOpen:function(ov){
+        var listBox = ov.querySelector('#attList');
+        var fileIn = ov.querySelector('#attFile');
+        function renderPicked(){
+          if(!picked.length){ listBox.innerHTML = '<span class="small muted">尚未选择文件</span>'; return; }
+          listBox.innerHTML = picked.map(function(p){
+            var bad = BAD_EXT.test(p.name) ? ' <span style="color:var(--err)">不允许的类型</span>' : (p.size>MAX_MB*1048576 ? ' <span style="color:var(--err)">超出'+MAX_MB+'MB</span>' : ' <span class="tag green">通过校验</span>');
+            return '<div style="padding:6px 0;border-bottom:1px dashed var(--line)">'+App.esc(p.name)+' · '+fmtSize(p.size)+bad+'</div>';
+          }).join('');
+        }
+        ov.querySelector('#attPick').onclick = function(){ fileIn.click(); };
+        fileIn.onchange = function(){
+          Array.prototype.forEach.call(fileIn.files||[], function(f){ picked.push(f); });
+          renderPicked();
+        };
+        ov.querySelector('#attShot').onclick = function(){
+          if(!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)){
+            App.toast('当前浏览器不支持屏幕截图，请使用“选择文件”上传截图','err'); return;
+          }
+          navigator.mediaDevices.getDisplayMedia({video:true}).then(function(stream){
+            var video = document.createElement('video');
+            video.muted = true; video.srcObject = stream;
+            video.onloadedmetadata = function(){
+              video.play();
+              setTimeout(function(){
+                var c = document.createElement('canvas');
+                c.width = video.videoWidth || 1280; c.height = video.videoHeight || 720;
+                c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+                stream.getTracks().forEach(function(tr){ tr.stop(); });
+                var url = c.toDataURL('image/png');
+                var nm = '屏幕截图-'+t.id+'-'+p2(new Date().getHours())+p2(new Date().getMinutes())+p2(new Date().getSeconds())+'.png';
+                pushAutoAtt(t, { name:nm, time:new Date().toTimeString().slice(0,5), type:'截图', size:fmtSize(Math.round(url.length*0.75)), url:url }, host);
+                App.toast('屏幕截图已归档为证据附件','ok');
+                ov.close();
+              }, 350);
+            };
+            video.onerror = function(){ App.toast('截图失败：无法读取屏幕画面','err'); };
+          }, function(){});
+        };
+        ov.querySelector('#attNo').onclick = ov.close;
+        ov.querySelector('#attYes').onclick = function(){
+          if(!picked.length){ App.toast('请先选择文件','err'); return; }
+          var valid = [], rejected = 0;
+          picked.forEach(function(f){
+            if(BAD_EXT.test(f.name) || f.size>MAX_MB*1048576) rejected++;
+            else valid.push(f);
+          });
+          if(!valid.length){ App.toast('所选文件均未通过类型/大小校验','err'); return; }
+          var fd = new FormData();
+          valid.forEach(function(f){ fd.append('files', f); });
+          API.uploadTaskAttachments(t.id, fd).then(function(r){
+            var list = r.attachments || [];
+            t.atts = t.atts || [];
+            list.forEach(function(a){ t.atts.push(a); });
+            refreshAtt(t, host);
+            ov.close();
+            App.toast(list.length+' 个附件已上传并归档至取证模块'+(rejected?('，'+rejected+' 个被拦截'):''), rejected?'warn':'ok');
+          }).catch(function(err){ App.toast((err&&err.message)||'上传失败','err'); });
+        };
+      } });
+  }
+
+  /* ---------- 自动取证截图（canvas 本地绘制模拟界面） ---------- */
+  function wrapLines(g, text, maxW){
+    var lines = [], cur = '', chars = String(text||'').split('');
+    for(var i=0;i<chars.length;i++){
+      var trial = cur + chars[i];
+      if(g.measureText(trial).width > maxW && cur){ lines.push(cur); cur = chars[i]; }
+      else cur = trial;
+    }
+    if(cur) lines.push(cur);
+    return lines;
+  }
+  function drawSimShot(kind, t){
+    var c = document.createElement('canvas');
+    c.width = 640; c.height = 360;
+    var g = c.getContext('2d');
+    var d = new Date();
+    var ts = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());
+    var lines, i, y;
+    if(kind==='alert'){
+      g.fillStyle='#0d1117'; g.fillRect(0,0,640,360);
+      g.fillStyle='#161b22'; g.fillRect(0,0,640,40);
+      g.strokeStyle='#30363d'; g.lineWidth=1; g.strokeRect(0.5,0.5,639,359);
+      var dots = ['#f85149','#d29922','#3fb950'];
+      for(i=0;i<3;i++){ g.beginPath(); g.arc(18+i*16,20,5,0,Math.PI*2); g.fillStyle=dots[i]; g.fill(); }
+      g.fillStyle='#c9d1d9'; g.font='bold 14px "Microsoft YaHei",sans-serif';
+      g.fillText('态势感知平台（模拟） · 安全告警详情',80,25);
+      g.fillStyle='rgba(248,81,73,.15)'; g.fillRect(20,52,118,26);
+      g.strokeStyle='#f85149'; g.strokeRect(20.5,52.5,117,25);
+      g.fillStyle='#f85149'; g.font='bold 13px "Microsoft YaHei",sans-serif';
+      g.fillText((t.level||'P0')+' 高危告警',30,70);
+      g.fillStyle='#8b949e'; g.font='12px Consolas,monospace';
+      g.fillText('告警时间 '+ts,156,70);
+      g.fillStyle='#e6edf3'; g.font='13px "Microsoft YaHei",sans-serif';
+      y = 104;
+      ['告警内容：'+FACTS.alert, '可疑地址：'+FACTS.ip, '样本特征：'+FACTS.sample, '关联处置：'+FACTS.action].forEach(function(txt){
+        wrapLines(g, txt, 590).forEach(function(ln){ g.fillText(ln,22,y); y+=20; });
       });
-    };
-  });
+      g.fillStyle='#484f58'; g.font='12px "Microsoft YaHei",sans-serif';
+      g.fillText('【模拟数据 · 系统自动取证 · 不含真实患者数据】 任务 '+t.id,22,340);
+    } else {
+      g.fillStyle='#eef1f5'; g.fillRect(0,0,640,360);
+      g.fillStyle='#2f81f7'; g.fillRect(0,0,640,36);
+      g.fillStyle='#ffffff'; g.font='bold 14px "Microsoft YaHei",sans-serif';
+      g.fillText('HIS 医院信息系统（模拟） — 门诊工作站',16,23);
+      g.fillStyle='#ffffff'; g.fillRect(0,36,640,324);
+      g.strokeStyle='#d0d7de'; g.lineWidth=1;
+      g.beginPath(); g.moveTo(0,36.5); g.lineTo(640,36.5); g.stroke();
+      g.fillStyle='#f6f8fa'; g.fillRect(60,74,520,178);
+      g.strokeStyle='#d0d7de'; g.strokeRect(60.5,74.5,519,177);
+      g.beginPath(); g.arc(96,112,16,0,Math.PI*2); g.fillStyle='#f85149'; g.fill();
+      g.strokeStyle='#ffffff'; g.lineWidth=3;
+      g.beginPath(); g.moveTo(89,105); g.lineTo(103,119); g.moveTo(103,105); g.lineTo(89,119); g.stroke();
+      g.fillStyle='#1f2328'; g.font='bold 15px "Microsoft YaHei",sans-serif';
+      g.fillText('系统连接异常（模拟故障界面）',124,117);
+      g.font='13px "Microsoft YaHei",sans-serif'; g.fillStyle='#57606a';
+      lines = wrapLines(g, FACTS.fault, 470);
+      y = 146;
+      for(i=0;i<lines.length;i++){ g.fillText(lines[i],80,y); y+=19; }
+      g.fillStyle='#2f81f7'; g.fillRect(368,214,96,28);
+      g.fillStyle='#ffffff'; g.font='13px "Microsoft YaHei",sans-serif';
+      g.fillText('重试连接',392,232);
+      g.fillStyle='#ffffff'; g.fillRect(252,214,104,28);
+      g.strokeStyle='#57606a'; g.strokeRect(252.5,214.5,103,27);
+      g.fillStyle='#57606a'; g.fillText('切换纸质流程',266,232);
+      g.strokeStyle='rgba(248,81,73,.7)'; g.lineWidth=2; g.strokeRect(20.5,296.5,330,32);
+      g.fillStyle='rgba(248,81,73,.85)'; g.font='bold 13px "Microsoft YaHei",sans-serif';
+      g.fillText('【模拟数据 · 系统自动取证 · 无真实患者数据】任务 '+t.id,30,317);
+      g.fillStyle='#8b949e'; g.font='12px Consolas,monospace';
+      g.fillText(ts,520,317);
+    }
+    return c.toDataURL('image/png');
+  }
+  var autoDone = {};
+  function ensureAutoAtts(t, host){
+    if(autoDone[t.id]) return;
+    autoDone[t.id] = true;
+    var tm = p2(new Date().getHours())+':'+p2(new Date().getMinutes());
+    [{ name:'自动取证-告警截图-'+t.id+'.png', kind:'alert' },
+     { name:'自动取证-系统故障截图-'+t.id+'.png', kind:'fault' }].forEach(function(s){
+      var url;
+      try{ url = drawSimShot(s.kind, t); }catch(err){ return; }
+      pushAutoAtt(t, { name:s.name, time:tm, type:'截图', size:fmtSize(Math.round(url.length*0.75)), url:url }, host);
+    });
+  }
 
-  /* ---------- 态势小块（按角色裁剪） ---------- */
+  /* ---------- 剧本故障通报：演练开始后弹窗 + 页面正上方固定告警 ---------- */
+  function renderFaultBanner(){
+    var box = document.getElementById('wbFault');
+    if(!box) return;
+    if(!started || !ALERT){ box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="fault-alert">'
+      + '<span class="fa-ic">'+App.icon('alert')+'</span>'
+      + '<div class="fa-main"><span class="fa-tag">● 演练故障通报 · '+(isPractical?'实战版':'基础版')+'</span>'
+      + '<div class="fa-title">'+App.esc(SCEN?SCEN.type:'系统')+'异常事件（'+(SCEN?App.esc(SCEN.level):'—')+'级 · 演练模拟）</div>'
+      + '<div class="fa-text">'+App.esc(ALERT)+'</div></div>'
+      + '<button class="btn sm" id="faMore">查看完整通报</button></div>';
+    var more = document.getElementById('faMore');
+    if(more) more.onclick = function(){ faultModal(true); };
+  }
+
+  function faultModal(force){
+    if(!started){
+      if(force) App.toast('当前演练项目为「'+(proj.status||'未开始')+'」，故障通报将在演练开始后展示','warn');
+      return;
+    }
+    var key = 'pzy_fault_notice_'+proj.id;
+    if(!force && sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key,'1');
+
+    function show(extra){
+      App.modal({
+        title:'演练系统异常 · 剧本故障通报',
+        wide:true,
+        body:'<div class="fm-hero">'
+          +   '<div class="fm-kicker">⚠ 演练已开始 · 初始故障通报</div>'
+          +   '<div class="fm-title">'+App.esc(SCEN?SCEN.type:'系统')+'异常 · '+(SCEN?App.esc(SCEN.level):'—')+'级事件</div>'
+          +   '<div class="fm-text">'+App.esc(ALERT||FACTS.fault)+'</div>'
+          + '</div>'
+          + '<div class="kv">'
+          +   '<span class="k">涉及系统</span><span class="small mono">'+App.esc(FACTS.sys||'—')+'</span>'
+          +   '<span class="k">影响范围</span><span class="small">'+App.esc(FACTS.scope||'—')+'</span>'
+          +   '<span class="k">关联线索</span><span class="small">'+App.esc(FACTS.ip||'—')+'</span>'
+          +   '<span class="k">演练模式</span><span class="small">'+App.esc(proj.mode||'基础版')+'</span>'
+          +   extra
+          + '</div>'
+          + '<div class="sim-banner mt3">'+App.icon('alert')+'<span>本通报为演练模拟数据，不含真实患者信息。关闭后将在页面<b>正上方持续显示醒目告警条</b>，可随时点「查看完整通报」重新打开。</span></div>',
+        foot:'<button class="btn" id="fmClose">关闭</button><button class="btn primary" id="fmGo">进入角色待办任务</button>',
+        onOpen:function(ov){
+          ov.querySelector('#fmClose').onclick = ov.close;
+          ov.querySelector('#fmGo').onclick = function(){
+            ov.close();
+            var el = document.getElementById('wbTasks');
+            if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+          };
+        }
+      });
+    }
+
+    if(isPractical){
+      API.getDrillFaults(proj.id).then(function(d){
+        var fs = d.faults || [];
+        show('<span class="k">已发现故障</span><span class="small">共 <b style="color:var(--err)">'+fs.length+'</b> 个（待处置 '+fs.filter(function(x){ return x.status==='待处置'; }).length+' 个）</span>');
+      }).catch(function(){ show(''); });
+    } else {
+      show('');
+    }
+  }
+
+  /* ---------- 实战版：本角色全部候选处置流程（正确流程与混淆流程外观一致） ---------- */
+  function flowRow(d){
+    var sub = d.submitted;
+    var skipped = !!(sub && sub.skipped);
+    var statusTag = skipped
+      ? '<span class="tag gray">已跳过</span>'
+      : (sub
+        ? '<span class="tag '+(sub.correct?'green':'red')+'">已提交</span>'
+        : '<span class="tag red">待处置</span>');
+    var meta = '<span class="mono">计划 '+App.esc(d.time||'—')+'</span>'
+      + (d.timeout?'<span>时限 '+d.timeout+' 分钟</span>':'')
+      + (d.action?'<span>'+App.esc(d.action)+'</span>':'')
+      + (d.formName?'<span>表单：'+App.esc(d.formName)+'</span>':'');
+    return '<div class="tn-row '+(sub?'done':'cur')+'" data-flow="'+App.esc(d.nodeId)+'" role="button" tabindex="0">'
+      + '<span class="tn-ic">'+(sub?App.icon('check'):App.icon('alert'))+'</span>'
+      + '<div class="tn-main"><div class="tn-title">'+App.esc(d.title||d.action||'处置流程')+'</div>'
+      + '<div class="tn-meta">'+meta+'</div></div>'
+      + statusTag
+      + (!sub ? '<button class="btn sm outline" data-skip="'+App.esc(d.nodeId)+'" title="判定该流程不属于本岗处置动作，不执行">跳过（不执行）</button>' : '')
+      + '<span class="tn-go">'+(skipped?'查看跳过记录 ›':(sub?'查看处置记录 ›':'填写处置表单 ›'))+'</span></div>';
+  }
+
+  function fieldOf(fl){
+    return typeof fl==='string'
+      ? { label:String(fl||'').trim(), required:true }
+      : { label:String((fl&&(fl.label||fl.name))||'').trim(), required:!(fl&&fl.required===false) };
+  }
+
+  function flowForm(d){
+    var fields = (d.fields||[]).map(fieldOf).filter(function(x){ return !!x.label; });
+    var recv = '<div class="form-row span2" style="margin-bottom:10px"><label class="f-label">下一节点接收人 <span class="req">*</span> <span class="tiny dim">（可多选）</span></label>'
+      + '<div class="flex gap3 wrap" id="flReceiverBox">'
+      + RECEIVERS.map(function(x, i){ return '<label class="check"><input type="checkbox" value="'+App.esc(x)+'" data-recv="'+i+'">'+App.esc(x)+'</label>'; }).join('')
+      + '</div><div class="tiny dim" style="margin-top:4px">实战版需由参演人员自行研判流转对象，可多选；所选接收人与剧本预设完全一致才正确，多选、漏选均扣本流程 10% 分值。</div></div>';
+    if(!fields.length){
+      return '<div class="section-title">'+App.icon('edit')+'流程流转 <span class="tiny dim" style="font-weight:400">由参演人员选择下一节点接收人</span></div>'
+        + '<div class="form-grid">'+recv+'</div>'
+        + '<div class="tiny dim mb3">该流程未关联表单模板，请直接填写下方实际处置信息。</div>';
+    }
+    return '<div class="section-title">'+App.icon('edit')+'处置表单 · '+App.esc(d.formName||'实战处置表单')+' <span class="tiny dim" style="font-weight:400">空表手填，无系统预填数据</span></div>'
+      + '<div class="form-grid">'
+      + recv
+      + fields.map(function(f, i){
+          var idc = 'pf-'+d.nodeId+'-'+i;
+          var long = /描述|意见|摘要|进展|清单|方案|依据|经过|情况|范围|措施|结果|备注/.test(f.label);
+          var isTime = /时间$/.test(f.label);
+          var ctl = isTime
+            ? '<input class="input" type="datetime-local" id="'+App.esc(idc)+'" data-pf="'+i+'" value="">'
+            : (long ? '<textarea class="textarea" id="'+App.esc(idc)+'" data-pf="'+i+'" rows="2" placeholder="请如实填写"></textarea>'
+                    : '<input class="input" id="'+App.esc(idc)+'" data-pf="'+i+'" placeholder="请如实填写">');
+          return '<div class="form-row'+(long?' span2':'')+'" style="margin-bottom:10px">'
+            + '<label class="f-label">'+App.esc(f.label)+(f.required?'<span class="req"> *</span>':'<span class="tiny dim">（选填）</span>')+'</label>'
+            + ctl + '</div>';
+        }).join('')
+      + '</div>';
+  }
+
+  function flowDoneBody(d){
+    var sub = d.submitted;
+    if(sub.skipped){
+      return '<div class="kv">'
+        + '<span class="k">处置时刻</span><span class="mono">'+App.esc(sub.stepTime||'—')+'</span>'
+        + '<span class="k">处置人</span><span>'+App.esc(sub.user||'—')+'</span>'
+        + '<span class="k">判定结果</span><span><span class="tag gray">已跳过（不执行）</span></span>'
+        + '</div><div class="tiny dim mt2">该流程由参演人员判定不属于本岗处置动作并跳过，不可重复执行。</div>';
+    }
+    var forms = sub.forms || {};
+    var rows = Object.keys(forms).map(function(k){
+      return '<span class="k">'+App.esc(k)+'</span><span class="small">'+App.esc(forms[k]||'—')+'</span>';
+    }).join('');
+    return '<div class="kv">'
+      + '<span class="k">处置时刻</span><span class="mono">'+App.esc(sub.stepTime||'—')+'</span>'
+      + '<span class="k">处置人</span><span>'+App.esc(sub.user||'—')+'</span>'
+      + '<span class="k">判定结果</span><span>'+(sub.correct
+          ? '<span class="tag green">正确流程 · 得分 +'+sub.delta+'</span>'+(sub.ontime?'':' <span class="tag yellow">超出计划时限</span>')
+          : '<span class="tag red">混淆流程 · 扣分 '+Math.abs(sub.delta)+'</span>')+'</span>'
+      + '<span class="k">下一节点接收人</span><span>'+(sub.receiver?App.esc(sub.receiver):'—')
+        +(sub.correct?(sub.receiverOk?'':' <span class="tag red">选择错误 · 扣本流程10%</span>'):'')+'</span>'
+      + rows
+      + '<span class="k">处置措施</span><span class="small">'+App.esc(sub.measure||'—')+'</span>'
+      + '<span class="k">处置结果</span><span class="small">'+App.esc(sub.result||'—')+'</span>'
+      + (sub.found?'<span class="k">发现情况</span><span class="small">'+App.esc(sub.found)+'</span>':'')
+      + (sub.evidence?'<span class="k">证据说明</span><span class="small">'+App.esc(sub.evidence)+'</span>':'')
+      + '</div>'
+      + '<div class="tiny dim mt2">该流程已锁定，不可重复提交；处置记录已归档至取证模块。</div>';
+  }
+
+  function openFlow(d){
+    var sub = d.submitted;
+    App.modal({
+      title:'处置流程 · '+App.esc(d.title||d.action||'系统故障'),
+      wide:true,
+      body:'<div class="fm-strip">'+App.icon('alert')+'<span><b>'+App.esc(d.title||'')+'</b><br>'+App.esc(d.desc||'请结合故障通报研判本流程是否属于本岗正确处置动作')+'</span></div>'
+        + '<div class="kv mb3"><span class="k">计划时刻</span><span class="mono">'+App.esc(d.time||'—')+'</span>'
+        + '<span class="k">节点时限</span><span>'+(d.timeout?d.timeout+' 分钟':'—')+'</span>'
+        + '<span class="k">责任角色</span><span>'+App.esc(d.target||'—')+'</span></div>'
+        + '<div id="wbFlowBody">'+(sub?flowDoneBody(d):flowForm(d))+'</div>',
+      foot:'<button class="btn" id="wbFlowClose">关闭</button>'+(sub?'':'<button class="btn primary" id="wbFlowSubmit">'+App.icon('check')+'提交处置记录</button>'),
+      onOpen:function(ov){
+        ov.querySelector('#wbFlowClose').onclick = ov.close;
+        if(sub) return;
+        /* 打开处置表单即标记为处置中（导调中心同步展示） */
+        if(d.nodeId) API.startNode(d.nodeId).catch(function(){});
+        var box = ov.querySelector('#wbFlowBody');
+        box.insertAdjacentHTML('beforeend','<div class="divider"></div>'
+          + '<div class="form-grid">'
+          + '<div class="form-row span2"><label class="f-label">发现情况 <span class="tiny dim">（可选）</span></label><textarea class="textarea" id="flFound" rows="2" placeholder="记录观察到的异常现象、涉及主机/IP、影响范围等"></textarea></div>'
+          + '<div class="form-row span2"><label class="f-label">实际处置措施 <span class="req">*</span> <span class="tiny dim">不少于6字</span></label><textarea class="textarea" id="flMeasure" rows="2" placeholder="如实记录本流程实际执行的动作"></textarea></div>'
+          + '<div class="form-row span2"><label class="f-label">处置结果 <span class="req">*</span></label><input class="input" id="flResult" placeholder="如：已隔离2台主机，业务验证恢复正常"></div>'
+          + '<div class="form-row span2"><label class="f-label">证据材料说明 <span class="tiny dim">（可选）</span></label><input class="input" id="flEvidence" placeholder="如：已截图并归档至取证模块"></div>'
+          + '</div>'
+          + '<div class="tiny dim mt2">实战版不提供引导提示与预填数据：请自行研判该流程是否属于本岗正确处置动作。误选混淆流程按该流程分值直接扣分；正确流程超时完成按分值的 90% 计分。</div>');
+        var btn = ov.querySelector('#wbFlowSubmit');
+        btn.onclick = function(){
+          var forms = {}, missing = [];
+          (d.fields||[]).map(fieldOf).forEach(function(f, i){
+            if(!f.label) return;
+            var el = box.querySelector('[data-pf="'+i+'"]');
+            var v = el ? String(el.value||'').trim() : '';
+            if(f.required && !v) missing.push(f.label);
+            if(v) forms[f.label] = v;
+          });
+          var measure = box.querySelector('#flMeasure').value.trim();
+          var result = box.querySelector('#flResult').value.trim();
+          var evidence = box.querySelector('#flEvidence').value.trim();
+          var found = box.querySelector('#flFound').value.trim();
+          var receiverBox = box.querySelector('#flReceiverBox');
+          var receivers = receiverBox
+            ? Array.prototype.slice.call(receiverBox.querySelectorAll('input:checked')).map(function(c){ return c.value; })
+            : [];
+          if(!receivers.length){ App.toast('请选择下一节点接收人（可多选）','err'); return; }
+          if(missing.length){ App.toast('请完整填写表单：'+missing.slice(0,3).join('、'),'err'); return; }
+          if(measure.length<6){ App.toast('实际处置措施不少于6字','err'); return; }
+          if(!result){ App.toast('请填写处置结果','err'); return; }
+          btn.disabled = true; btn.textContent = '提交中…';
+          API.submitDrillFlow({
+            projectId: proj.id, nodeId: d.nodeId, forms: forms, receiver: receivers,
+            measure: measure, result: result, evidence: evidence, found: found
+          }).then(function(r){
+            var recvTip = r.correct && r.receiverOk===0 ? '（接收人选择错误，扣本流程10%）' : '';
+            App.toast(r.correct
+              ? '处置记录已提交：正确流程，得分 +'+r.delta+(r.ontime?'':';超出计划时限')+recvTip
+              : '处置记录已提交：混淆流程，扣分 '+Math.abs(r.delta),
+              r.correct && r.receiverOk!==0 ? 'ok':'warn');
+            ov.close();
+            App.refreshShell();
+            renderPractical(); renderScore();
+          }).catch(function(err){
+            btn.disabled = false; btn.innerHTML = App.icon('check')+'提交处置记录';
+            App.toast((err&&err.message)||'提交失败','err');
+          });
+        };
+      }
+    });
+  }
+
+  /* 跳过流程：判定该流程不属于本岗处置动作，不执行且无需填写表单 */
+  function skipFlow(d){
+    App.modal({
+      title:'跳过处置流程',
+      body:'<div class="fm-strip">'+App.icon('alert')+'<span>请确认流程 <b>'+App.esc(d.title||'')+'</b> 不属于本岗应执行的处置动作，将标记为「已跳过（不执行）」，不可撤销。</span></div>'
+        + '<div class="tiny dim mt2">跳过混淆流程可获得少量奖励分；若跳过的是正确流程，结束演练时按该流程分值扣分。</div>',
+      foot:'<button class="btn" id="wbSkipCancel">取消</button><button class="btn danger" id="wbSkipOk">'+App.icon('check')+'确认跳过</button>',
+      onOpen:function(ov){
+        ov.querySelector('#wbSkipCancel').onclick = ov.close;
+        var btn = ov.querySelector('#wbSkipOk');
+        btn.onclick = function(){
+          btn.disabled = true; btn.textContent = '提交中…';
+          API.skipDrillFlow(proj.id, d.nodeId).then(function(r){
+            App.toast('已跳过该流程'+(r.delta>0?'（+'+r.delta+' 分）':''), r.delta>0?'ok':'warn');
+            ov.close();
+            App.refreshShell();
+            renderPractical(); renderScore();
+          }).catch(function(err){
+            btn.disabled = false; btn.innerHTML = App.icon('check')+'确认跳过';
+            App.toast((err&&err.message)||'跳过失败','err');
+          });
+        };
+      }
+    });
+  }
+
+  /* 完成演练按钮：取证材料未全部归档时禁用（与取证归档模块联动） */
+  function updateFinishBtn(){
+    var b = document.getElementById('btnFinish');
+    if(!b) return;
+    if(EV.pending > 0){
+      b.disabled = true;
+      b.innerHTML = App.icon('lock')+'完成演练（取证 '+EV.done+'/'+EV.total+'）';
+      b.title = '尚有 '+EV.pending+' 项取证材料未归档，请先在取证与材料归档模块完成取证';
+    } else {
+      b.disabled = false;
+      b.innerHTML = App.icon('check')+'完成演练';
+      b.title = '取证材料已全部归档（'+EV.done+'/'+EV.total+'），可结束演练';
+    }
+  }
+
+  function renderPractical(){
+    var host = document.getElementById('wbTasks');
+    host.innerHTML = '<div class="small dim">正在加载本角色处置流程…</div>';
+    API.getDrillFlows(proj.id).then(function(data){
+      var flows = data.flows || [];
+      RECEIVERS = data.receivers || [];
+      EV = data.evidence || EV;
+      updateFinishBtn();
+      var pending = flows.filter(function(d){ return !d.submitted; }).length;
+      if(!flows.length){
+        host.innerHTML = '<div class="empty">'+App.icon('lock')+'<div>本角色暂无可处置流程</div>'
+          + '<div class="tiny dim mt2">剧本基线中未分配本角色处置节点</div></div>';
+        return;
+      }
+      host.innerHTML = '<div class="tiny dim" style="margin-bottom:10px">本角色候选处置流程 <b>'+flows.length+'</b> 个（待处置 <b style="color:var(--err)">'+pending+'</b> 个）· 点击列表行填写完整处置表单，判定不属于本岗动作可点「跳过（不执行）」</div>'
+        + '<div class="task-nav">'+flows.map(flowRow).join('')+'</div>'
+        + '<div class="tiny dim mt2">列表同时包含正确处置流程与混淆流程，外观一致、不提示属性：误选混淆流程按该流程分值直接扣分；正确流程超时完成按 90% 计分；跳过混淆流程可加少量分，跳过正确流程则在结束演练时按该流程分值扣分。</div>';
+      host.querySelectorAll('[data-flow]').forEach(function(row){
+        row.onclick = function(){
+          var d = flows.filter(function(x){ return String(x.nodeId)===String(row.dataset.flow); })[0];
+          if(d) openFlow(d);
+        };
+      });
+      host.querySelectorAll('[data-skip]').forEach(function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var d = flows.filter(function(x){ return String(x.nodeId)===String(b.dataset.skip); })[0];
+          if(d) skipFlow(d);
+        };
+      });
+    }).catch(function(err){
+      host.innerHTML = '<div class="tiny dim">'+App.esc((err&&err.message)||'处置流程加载失败，请稍后刷新')+'</div>';
+    });
+  }
+
+  /* ---------- 评分卡 ---------- */
+  function renderScore(){
+    var el = document.getElementById('wbScore');
+    API.getDrillWorkbench(proj.id).then(function(wb){
+      var s = wb.score || {};
+      var ded = s.deductions || [];
+      if(!isPractical){
+        el.innerHTML = '<div class="kpi info" style="margin-bottom:10px"><div class="k-label">剧本流程得分</div><div class="k-value">'+s.score+'<span class="small dim">分</span></div><div class="k-foot">'+App.esc(s.grade||'—')+' · 正确流程满分 '+s.maxScore+'</div></div>'
+          + '<div class="tiny">正确流程 <b>'+s.hit+'</b>/'+s.total+' · 超时完成 <b style="color:var(--err)">'+(s.late||0)+'</b>'+(s.missed?(' · 未完成 <b style="color:var(--err)">'+s.missed+'</b>'):'')+'</div>'
+          + '<div class="tiny dim mt2">基础版按剧本正确流程的分值累计得分，超时完成按分值的 90% 计分；演练结束时未完成的正确流程扣该流程全部分值。</div>'
+          + (ded.length?'<div class="tiny dim mt2">'+ded.slice(0,4).map(function(x){ return App.esc(x.title)+' '+x.point+'分（'+App.esc(x.type)+'）'; }).join('；')+(ded.length>4?' 等':'')+'</div>':'');
+        return;
+      }
+      var items = ded.concat(s.bonuses||[]);
+      el.innerHTML = '<div class="kpi info" style="margin-bottom:10px"><div class="k-label">即时评分</div><div class="k-value">'+s.score+'<span class="small dim">分</span></div><div class="k-foot">'+App.esc(s.grade||'—')+' · 正确流程满分 '+s.maxScore+'</div></div>'
+        + '<div class="tiny">正确流程 <b>'+s.hit+'</b>/'+s.total+' · 待处置 <b>'+(s.pending||0)+'</b> · 已跳过 <b>'+(s.skipped||0)+'</b> · 混淆流程误选 <b style="color:var(--err)">'+(s.wrong||0)+'</b> · 超时完成 <b style="color:var(--err)">'+(s.late||0)+'</b>'+(s.missed?(' · 未完成 <b style="color:var(--err)">'+s.missed+'</b>'):'')+'</div>'
+        + '<div class="tiny dim mt2">实战版计分：正确流程按设置分值得分，超时完成按 90% 计；接收人与剧本预设不一致按 90% 计；混淆流程按分值扣分；跳过混淆流程 +2 分；跳过正确流程在结束演练时扣该流程全部分值。</div>'
+        + (items.length?'<div class="tiny dim mt2">'+items.slice(0,4).map(function(x){ return App.esc(x.title)+' '+(x.point>0?'+':'')+x.point+'分（'+App.esc(x.type)+'）'; }).join('；')+(items.length>4?' 等':'')+'</div>':'<div class="tiny dim mt2">尚无扣分项</div>');
+    }).catch(function(){ el.innerHTML = '<div class="tiny dim">评分加载失败</div>'; });
+  }
+
+  /* ---------- 本角色关注态势 ---------- */
   function docList(){
     return MOCK.EVIDENCE.filter(function(x){ return x.type==='表单文书' || x.type==='处置记录'; });
   }
+  /* 关注态势统一时间格式：YYYY-MM-DD HH:mm */
+  function fmtTime(t){
+    var s = String(t||'');
+    if(!s) return '';
+    if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,16);
+    var p = API.activeProject();
+    var d = new Date();
+    var day = (p && /^\d{4}-\d{2}-\d{2}/.test(String(p.date||''))) ? String(p.date).slice(0,10)
+      : (d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()));
+    return day + ' ' + s.slice(0,5);
+  }
+
   function renderFeed(){
     var box = document.getElementById('wbFeed');
-    if(cfg.feed==='docs' || cfg.feed==='docs_opinion'){
+    if(feed==='docs' || feed==='docs_opinion'){
       var docs = docList();
       box.innerHTML = '<div class="small muted mb3">医院已上报文书/公告材料（外部单位可见范围）</div>'
         + docs.map(function(d){
-            return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('file')+'<span class="grow ellip">'+App.esc(d.name)+'</span><span class="fc-size">'+d.time+' · '+App.esc(d.uploader)+'</span></div>';
+            return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('file')+'<span class="grow ellip">'+App.esc(d.name)+'</span><span class="fc-size">'+fmtTime(d.time)+' · '+App.esc(d.uploader)+'</span></div>';
           }).join('')
-        + (cfg.feed==='docs_opinion'
+        + (feed==='docs_opinion'
             ? '<div class="section-title mt3">'+App.icon('opinion')+'院方公告文稿</div>'
               + MOCK.OPINION.filter(function(o){ return o.source==='院办提交'; }).map(function(o){
-                  return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('opinion')+'<span class="grow ellip">'+App.esc(o.title)+'</span><span class="fc-size">'+o.time+' · '+App.esc(o.status)+'</span></div>';
+                  return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('opinion')+'<span class="grow ellip">'+App.esc(o.title)+'</span><span class="fc-size">'+fmtTime(o.time)+' · '+App.esc(o.status)+'</span></div>';
                 }).join('')
             : '')
         + '<div class="tiny dim mt2">内网原始告警、操作日志、会商内部讨论不在外部单位权限范围内（演练模拟权限隔离）</div>';
-    } else if(cfg.feed==='impact'){
+    } else if(feed==='impact'){
       API.getImpact().then(function(imp){
         box.innerHTML = '<div class="small muted mb3">业务系统影响态势（演练模拟）</div>'
           + imp.map(function(i){
@@ -292,49 +895,62 @@ document.addEventListener('app:ready', function(e){
               return '<div style="margin-bottom:10px"><div class="flex small" style="justify-content:space-between"><span>'+App.esc(i.sys)+'</span><span class="tag '+c+'">'+App.esc(i.state)+'</span></div><div class="progress mt2"><div class="bar '+c+'" style="width:'+i.pct+'%"></div></div></div>';
             }).join('');
       });
-    } else if(cfg.feed==='evidence'){
+    } else if(feed==='evidence'){
       API.getEvidence().then(function(ev){
         var mine = ev.filter(function(x){ return x.role===role.id || x.type==='操作日志' || x.type==='附件截图'; });
         box.innerHTML = '<div class="small muted mb3">取证留痕（技术类，本角色可见）</div>'
           + mine.map(function(d){
-              return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon(d.type==='操作日志'?'db':'file')+'<span class="grow ellip">'+App.esc(d.name)+'</span><span class="fc-size">'+d.time+' · '+App.esc(d.type)+'</span></div>';
+              return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon(d.type==='操作日志'?'db':'file')+'<span class="grow ellip">'+App.esc(d.name)+'</span><span class="fc-size">'+fmtTime(d.time)+' · '+App.esc(d.type)+'</span></div>';
             }).join('');
       });
-    } else if(cfg.feed==='scores'){
-      API.getScoreItems().then(function(items){
-        API.getScores().then(function(scores){
-          var total = scores.reduce(function(s,x){ return s+x.score; },0);
-          var max = scores.reduce(function(s,x){ return s+x.max; },0);
-          box.innerHTML = '<div class="small muted mb3">评分进度（演练模拟）</div>'
-            + '<div class="kpi info" style="margin-bottom:12px"><div class="k-label">'+App.icon('score')+'当前累计得分</div><div class="k-value">'+total+'<span class="small dim">/'+max+'</span></div><div class="k-foot">已打分 '+scores.length+' / '+items.length+' 项指标</div></div>'
-            + items.slice(0,4).map(function(it){
-                var sc = scores.filter(function(x){ return x.itemId===it.id; })[0];
-                return '<div class="hbar-row"><span class="muted">'+App.esc(it.name)+'</span><div class="hb-track"><div class="hb-fill" style="width:'+(sc?Math.round(sc.score/sc.max*100):0)+'%"></div></div><span class="hb-val">'+(sc?sc.score:'-')+'</span></div>';
-              }).join('')
-            + '<div class="tiny dim mt2">完整打分请前往复盘评估模块</div>';
-        });
-      });
-    } else if(cfg.feed==='audit'){
+    } else if(feed==='audit'){
       API.getAuditLogs().then(function(logs){
         box.innerHTML = '<div class="small muted mb3">平台审计日志（仅查看，不可删改）</div>'
           + '<div class="timeline">'+logs.slice(-6).reverse().map(function(l){
-              return '<div class="tl-item gray"><span class="tl-dot"></span><div class="tl-time">'+App.esc(l.time)+'</div>'
+              return '<div class="tl-item gray"><span class="tl-dot"></span><div class="tl-time">'+fmtTime(l.time)+'</div>'
                 + '<div class="tl-title">'+App.esc(l.user)+' · '+App.esc(l.action)+'</div>'
                 + '<div class="tl-desc mono tiny">IP '+App.esc(l.ip)+'</div></div>';
             }).join('')+'</div>';
       });
-    } else { // messages
+    } else {
       API.getMessages().then(function(ms){
         var mine = ms.filter(function(m){ return (m.targets||[]).indexOf(role.id)>=0 || (m.targets||[]).indexOf('*')>=0; }).slice(-6).reverse();
         box.innerHTML = '<div class="small muted mb3">与本角色相关的消息流（演练模拟）</div>'
           + '<div class="timeline">'+ (mine.length ? mine.map(function(m){
               return '<div class="tl-item '+(m.level==='P0'?'err':m.level==='P1'?'warn':'gray')+'"><span class="tl-dot"></span>'
-                + '<div class="tl-time">'+m.time+' · '+App.esc(m.source)+'</div>'
+                + '<div class="tl-time">'+fmtTime(m.time)+' · '+App.esc(m.source)+'</div>'
                 + '<div class="tl-desc">'+App.levelTag(m.level)+' '+App.esc(m.text)+'</div></div>';
             }).join('') : '<div class="small dim">暂无定向消息</div>') + '</div>';
       });
     }
   }
+
+  var bf = document.getElementById('btnFault');
+  if(bf) bf.onclick = function(){ faultModal(true); };
+  var bfin = document.getElementById('btnFinish');
+  if(bfin) bfin.onclick = function(){
+    if(EV.pending > 0){
+      App.toast('取证材料尚未完成归档（已归档 '+EV.done+'/'+EV.total+'，待归档 '+EV.pending+' 项），不可结束演练','err');
+      return;
+    }
+    App.confirmSim('确认结束本次演练？结束前未完成的正确流程将按各自分值扣分（混淆流程误选已实时扣分），结束后不可再提交处置记录。', function(){
+      bfin.disabled = true; bfin.textContent = '提交中…';
+      API.finishDrill(proj.id).then(function(r){
+        App.toast('演练已结束，综合得分 '+(r.score&&r.score.score!=null?r.score.score:'—')+' 分','ok');
+        bfin.remove();
+        App.refreshShell();
+        renderPractical(); renderScore();
+      }).catch(function(err){
+        bfin.disabled = false; bfin.innerHTML = App.icon('check')+'完成演练';
+        App.toast((err&&err.message)||'结束演练失败','err');
+        renderPractical();
+      });
+    });
+  };
+  renderFaultBanner();
+  if(isPractical){ renderPractical(); renderScore(); }
+  else { renderBasic(); renderScore(); }
+  faultModal(false);
   renderFeed();
 });
 App.boot('workbench');

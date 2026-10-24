@@ -1,19 +1,42 @@
-/* 演练模式与自动考评：基础版（诱导演练，仅时限打分）/ 实战版（自主添加步骤，遗漏+时限评分）
- * 基线：script_nodes 中 scenario_id 对应的标准处置节点（required=1 为必经步骤，keywords 用于匹配）
+/* 演练模式与自动考评：
+ * 两种模式共用同一套剧本基线，模式在新建演练项目时选定：
+ * 基础版 = 按剧本节点自动下发任务并给出引导提示，仅对操作时限打分；
+ * 实战版 = 任务中心只展示“已发现的系统故障”，参演人员在角色工作台自主选择处置方案，
+ *          与剧本基线偏离扣分、超时扣分、未处置扣分。
  */
 'use strict';
 const express = require('express');
 const { db, parseJson } = require('../db');
 const auth = require('../auth');
-const { now, hhmm } = require('../util');
+const { now, hhmm, nowSec } = require('../util');
+const { canHandle } = require('../drill_plan');
 
 const router = express.Router();
-
-const MODES = ['基础版', '实战版'];
 
 function mins(t) {
   const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ''));
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/* 参演人员判定「不执行」跳过混淆流程时的少量奖励分 */
+const SKIP_BONUS = 2;
+
+/* 接收人支持多选：字符串（顿号/逗号分隔）或数组，统一转为去重排序的名称数组 */
+function parseReceivers(v) {
+  let arr = [];
+  if (Array.isArray(v)) arr = v;
+  else arr = String(v || '').split(/[、,，;；]/);
+  const out = [];
+  arr.forEach(function (x) {
+    const s = String(x || '').trim().slice(0, 40);
+    if (s && out.indexOf(s) < 0) out.push(s);
+  });
+  return out.sort();
+}
+
+/* 接收人判定：集合完全一致才算正确（多选、漏选均视为错误） */
+function sameReceivers(a, b) {
+  return a.length === b.length && a.every(function (x, i) { return x === b[i]; });
 }
 
 function nodesOf(scenarioId) {
@@ -21,18 +44,56 @@ function nodesOf(scenarioId) {
     return {
       id: n.id, type: n.type, title: n.title, target: n.target, time: n.time, timeout: n.timeout || 0,
       desc: n.descr || '', guide: n.guide || '', keywords: (n.keywords || '').split(',').filter(Boolean),
-      action: n.action || '', required: !!n.required
+      action: n.action || '', required: !!n.required, wrong: parseJson(n.wrong, []),
+      form: n.form || '', flowType: n.flow_type === 'distractor' ? 'distractor' : 'correct',
+      score: Number(n.score || 0) || 0, receiver: n.receiver || ''
     };
   });
+}
+
+/* 可选接收角色（剧本责任角色 + 全部系统角色名称，供实战版参演人员选择） */
+function receiverOptions() {
+  const names = db.prepare('SELECT name FROM roles ORDER BY seq').all().map(function (r) { return r.name; });
+  ['院应急指挥部', '信息科负责人', '信息科值班员', '网络安全管理员', '系统管理员', '医务科主任', '临床科室'].forEach(function (x) {
+    if (names.indexOf(x) < 0) names.push(x);
+  });
+  return names;
+}
+
+/* 取证材料完成情况（全场景，用于「完成演练」前置校验） */
+function evidenceSummary(project) {
+  const archived = {};
+  db.prepare('SELECT req_key FROM evidence WHERE project_id=? AND req_key IS NOT NULL').all(project.id)
+    .forEach(function (e) { archived[e.req_key] = true; });
+  const pending = [];
+  let total = 0;
+  db.prepare("SELECT * FROM script_nodes WHERE scenario_id=? AND type!='end' AND COALESCE(flow_type,'correct')!='distractor' ORDER BY seq").all(project.scenario_id)
+    .forEach(function (n) {
+      parseJson(n.evidence_req, []).forEach(function (it, i) {
+        total++;
+        const key = n.id + '#' + i;
+        if (archived[key]) return;
+        pending.push({ key: key, nodeId: n.id, nodeTitle: n.title, target: n.target, type: it.type, name: it.name });
+      });
+    });
+  return { total: total, done: total - pending.length, pending: pending.length, pendingItems: pending };
+}
+
+/* 表单模板字段（实战版处置表单按节点关联表单展示） */
+function formFields(formId) {
+  if (!formId) return [];
+  const f = db.prepare('SELECT * FROM form_templates WHERE id=?').get(String(formId));
+  if (!f) return [];
+  return { name: f.name || formId, fields: parseJson(f.fields, []) };
 }
 
 function projectOf(projectId) {
   return db.prepare('SELECT * FROM projects WHERE id=?').get(projectId);
 }
 
-/* 步骤匹配基线节点：仅匹配必经节点（动作类型优先，关键词次之），避免误匹配"终止/复盘"等非必经节点 */
+/* 旧版自由步骤匹配基线节点（仅用于历史数据兼容） */
 function matchNode(step, nodes) {
-  const pool = nodes.filter(function (n) { return n.required && n.type !== 'end'; });
+  const pool = nodes.filter(function (n) { return n.required && n.type !== 'end' && n.flowType !== 'distractor'; });
   const text = (step.title || '') + ' ' + (step.descr || '') + ' ' + (step.action || '');
   let best = null, bestScore = 0;
   pool.forEach(function (n) {
@@ -47,94 +108,214 @@ function matchNode(step, nodes) {
   return { node: best, score: bestScore };
 }
 
-/* 评分：
- * 基础版 = 逐节点时限达成率（按时完成任务节点数 / 应完成节点总数 × 100）
- * 实战版 = 步骤遗漏 70% + 时限 30%（遗漏按必须节点未匹配计，时限按已匹配节点是否在 time+timeout 内）
+/* 评分（每个流程独立分值，所有正确流程合计满分 100）
+ * 基础版：正确流程完成得分；超时完成扣该流程分值的 10%；演练结束时未完成扣该流程全部分值
+ * 实战版：额外选择混淆流程直接扣该流程分值；混淆流程不参与得分
  */
 function score(projectId) {
   const p = projectOf(projectId);
   if (!p) return null;
-  const nodes = nodesOf(p.scenario_id);
-  const required = nodes.filter(function (n) { return n.required && n.type !== 'end'; });
   const mode = p.mode || '基础版';
+  const ended = p.status === '已结束' || p.status === '已归档';
+  const all = nodesOf(p.scenario_id).filter(function (n) { return n.type !== 'end'; });
+  const correct = all.filter(function (n) { return n.flowType !== 'distractor'; });
+  const distractors = all.filter(function (n) { return n.flowType === 'distractor'; });
   const tasks = db.prepare('SELECT * FROM tasks WHERE project_id=?').all(projectId);
-  const steps = db.prepare('SELECT * FROM drill_steps WHERE project_id=? ORDER BY step_time,id').all(projectId)
-    .map(function (s) { return Object.assign({}, s); });
+  const steps = db.prepare('SELECT * FROM drill_steps WHERE project_id=? ORDER BY step_time,id').all(projectId);
 
-  const nodeResults = [];
+  /* 已完成流程：基础版取已完成任务，实战版取已提交且判定为正确流程的记录 */
+  const hitMap = {};
   if (mode === '基础版') {
-    /* 基础版以系统下发的任务节点为考评单元：只统计操作时限（接单→完成耗时 vs 节点时限） */
     tasks.forEach(function (t) {
-      const m = matchNode({ title: t.title, descr: t.descr, roleId: t.role_id }, nodes);
-      const limit = (m.node && m.node.timeout) || 30;
+      if (t.status !== '已完成') return;
+      let node = t.node_id ? correct.filter(function (n) { return n.id === t.node_id; })[0] : null;
+      if (!node) node = matchNode({ title: t.title, descr: t.descr, roleId: t.role_id }, correct).node;
+      if (!node || hitMap[node.id]) return;
       const a = mins(t.accepted_at), d = mins(t.completed_at);
-      const known = a !== null && d !== null && d >= a;
-      const duration = known ? d - a : null;
-      const done = t.status === '已完成';
-      /* 历史已完成任务可能没有接单/完成时刻，无证据表明超时，按按时处理 */
-      const ontime = done && (known ? duration <= limit : true);
-      nodeResults.push({
-        id: t.id, title: t.title, role: t.role_id,
-        plan: '时限 ' + limit + ' 分钟' + (m.node ? '（基线 ' + m.node.id + '）' : ''),
-        actual: done ? (known ? '耗时 ' + duration + ' 分钟' : '已完成（未记录耗时）') : t.status,
-        required: true, hit: done, ontime: ontime,
-        state: !done ? t.status : (ontime ? '按时' : '超时')
-      });
+      const duration = (a !== null && d !== null && d >= a) ? d - a : null;
+      hitMap[node.id] = {
+        stepTime: t.completed_at ? String(t.completed_at).slice(11, 16) : null,
+        late: duration !== null ? duration > (node.timeout || 30) : false,
+        duration: duration
+      };
     });
-    const total = nodeResults.length;
-    const ontimeCnt = nodeResults.filter(function (x) { return x.ontime; }).length;
-    const doneCnt = nodeResults.filter(function (x) { return x.hit; }).length;
-    const rate = total ? Math.round(ontimeCnt / total * 1000) / 10 : 0;
-    return {
-      projectId: projectId, mode: mode, scenarioId: p.scenario_id,
-      total: total, hit: doneCnt, ontime: ontimeCnt, missed: total - doneCnt,
-      completeness: total ? Math.round(doneCnt / total * 1000) / 10 : 0,
-      timeRate: rate, score: Math.round(rate), grade: gradeOf(rate),
-      formula: '基础版：按时完成节点 ' + ontimeCnt + ' / ' + total + '，时限达成率 ' + rate + '%',
-      nodes: nodeResults, steps: []
-    };
+  } else {
+    steps.forEach(function (s) {
+      if (!s.matched_node || s.correct === 0 || s.skipped === 1) return;
+      const node = correct.filter(function (n) { return n.id === s.matched_node; })[0];
+      if (!node || hitMap[node.id]) return;
+      const limit = mins(node.time) === null ? null : mins(node.time) + (node.timeout || 0);
+      const real = mins(s.step_time);
+      hitMap[node.id] = { stepTime: s.step_time, late: !!(limit !== null && real !== null && real > limit), step: s };
+    });
+  }
+  /* 被选中的混淆流程 */
+  const wrongPicked = {};
+  if (mode !== '基础版') {
+    steps.forEach(function (s) {
+      if (!s.matched_node || s.correct !== 0 || s.skipped === 1) return;
+      if (distractors.some(function (n) { return n.id === s.matched_node; })) wrongPicked[s.matched_node] = s;
+    });
+  }
+  /* 参演人员判定「不执行」跳过的流程 */
+  const skipMap = {};
+  if (mode !== '基础版') {
+    steps.forEach(function (s) {
+      if (!s.matched_node || s.skipped !== 1) return;
+      skipMap[s.matched_node] = s;
+    });
   }
 
-  /* 实战版：先按步骤匹配基线必经节点，再判遗漏与时限 */
-  const covered = {};
-  steps.forEach(function (s) {
-    const r = matchNode({ title: s.title, descr: s.descr, action: s.action, roleId: s.role_id }, nodes);
-    s.matchedNode = r.node ? r.node.id : null;
-    s.matched = r.score >= 2;
-  });
-  steps.forEach(function (s) { if (s.matched) covered[s.matchedNode] = s; });
-
-  required.forEach(function (n) {
-    const hit = covered[n.id];
-    const limit = mins(n.time) === null ? null : mins(n.time) + (n.timeout || 0);
-    const actualMin = hit ? mins(hit.step_time) : null;
-    const ontime = !!(hit && actualMin !== null && limit !== null && actualMin <= limit);
+  const nodeResults = [];
+  const deductions = [];
+  const bonuses = [];
+  let earned = 0;
+  let skippedCorrect = 0, skippedDistract = 0;
+  correct.forEach(function (n) {
+    const sc = n.score;
+    const hit = hitMap[n.id];
+    const skip = skipMap[n.id];
+    if (!hit && skip) {
+      skippedCorrect++;
+      const missed = ended;
+      if (missed) {
+        earned -= sc;
+        deductions.push({ nodeId: n.id, title: n.title, type: '正确流程未完成', point: -sc, skipped: true });
+      }
+      nodeResults.push({
+        id: n.id, title: n.title, role: n.target,
+        plan: (n.time || '—') + (n.timeout ? ' ~ +' + n.timeout + 'min' : ''),
+        actual: missed ? '已跳过（演练结束，按未完成计）' : '已跳过（未执行）',
+        required: true, submitted: false, hit: false, ontime: false, wrong: false, skipped: true,
+        score: sc, earned: 0, late: false, state: missed ? '遗漏' : '已跳过'
+      });
+      return;
+    }
+    if (hit) {
+      /* 超时完成扣本流程 10%；下一节点接收人选择错误再扣本流程 10% */
+      const recvBad = !!(hit.step && hit.step.receiver_ok === 0);
+      const got = Math.round(sc * (hit.late ? 0.9 : 1) * (recvBad ? 0.9 : 1) * 10) / 10;
+      earned += got;
+      if (hit.late) deductions.push({ nodeId: n.id, title: n.title, type: '超时完成（扣10%）', point: -(Math.round(sc * 0.1 * 10) / 10) });
+      if (recvBad) deductions.push({ nodeId: n.id, title: n.title, type: '接收人选择错误（扣10%）', point: -(Math.round(sc * 0.1 * 10) / 10) });
+      nodeResults.push({
+        id: n.id, title: n.title, role: n.target,
+        plan: (n.time || '—') + (n.timeout ? ' ~ +' + n.timeout + 'min' : ''),
+        actual: hit.stepTime ? ('完成于 ' + hit.stepTime) : '已完成',
+        required: true, submitted: true, hit: true, ontime: !hit.late, wrong: false,
+        score: sc, earned: got, late: !!hit.late, receiver: (hit.step && hit.step.receiver) || '', receiverOk: !recvBad,
+        state: recvBad ? (hit.late ? '超时且接收人错误' : '接收人错误') : (hit.late ? '超时完成' : '已完成')
+      });
+      return;
+    }
+    const missed = ended;
+    if (missed) {
+      earned -= sc;
+      deductions.push({ nodeId: n.id, title: n.title, type: '正确流程未完成', point: -sc });
+    }
     nodeResults.push({
-      id: n.id, title: n.title, role: n.target, plan: n.time + (n.timeout ? ' ~ +' + n.timeout + 'min' : ''),
-      actual: hit ? (hit.step_time + ' ' + hit.title) : '未录入', required: true,
-      hit: !!hit, ontime: ontime, state: hit ? (ontime ? '按时' : '超时') : '遗漏'
+      id: n.id, title: n.title, role: n.target,
+      plan: (n.time || '—') + (n.timeout ? ' ~ +' + n.timeout + 'min' : ''),
+      actual: missed ? '未完成（演练结束）' : '待处置',
+      required: true, submitted: false, hit: false, ontime: false, wrong: false,
+      score: sc, earned: 0, late: false, state: missed ? '遗漏' : '待处置'
     });
   });
-  const total = required.length;
-  const hitCnt = nodeResults.filter(function (x) { return x.hit; }).length;
-  const ontimeCnt = nodeResults.filter(function (x) { return x.ontime; }).length;
-  const completeness = total ? hitCnt / total * 100 : 0;
-  const timeRate = hitCnt ? ontimeCnt / hitCnt * 100 : 0;
-  const raw = completeness * 0.7 + timeRate * 0.3;
-  const sc = Math.round(raw * 10) / 10;
+  Object.keys(wrongPicked).forEach(function (nid) {
+    const n = distractors.filter(function (x) { return x.id === nid; })[0];
+    const s = wrongPicked[nid];
+    earned -= n.score;
+    deductions.push({ nodeId: n.id, title: n.title, type: '选择混淆流程', point: -n.score, distract: true });
+    nodeResults.push({
+      id: n.id, title: n.title, role: n.target, plan: n.time || '—',
+      actual: '已执行（' + (s.step_time || '—') + '）', required: false, submitted: true,
+      hit: false, ontime: false, wrong: true, distract: true, score: 0, earned: -n.score,
+      late: false, state: '决策偏离'
+    });
+  });
+
+  /* 跳过混淆流程：判定不执行可获得少量奖励分 */
+  Object.keys(skipMap).forEach(function (nid) {
+    const n = distractors.filter(function (x) { return x.id === nid; })[0];
+    if (!n) return;
+    skippedDistract++;
+    earned += SKIP_BONUS;
+    bonuses.push({ nodeId: n.id, title: n.title, type: '跳过混淆流程（+' + SKIP_BONUS + '）', point: SKIP_BONUS, bonus: true });
+    nodeResults.push({
+      id: n.id, title: n.title, role: n.target, plan: n.time || '—',
+      actual: '已跳过（未执行）', required: false, submitted: false,
+      hit: false, ontime: false, wrong: false, skipped: true, score: 0, earned: SKIP_BONUS,
+      late: false, state: '已跳过'
+    });
+  });
+
+  const total = correct.length;
+  const hitCnt = nodeResults.filter(function (x) { return x.required && x.hit; }).length;
+  const ontimeCnt = nodeResults.filter(function (x) { return x.required && x.hit && x.ontime; }).length;
+  const wrongCnt = nodeResults.filter(function (x) { return x.distract; }).length;
+  const lateCnt = nodeResults.filter(function (x) { return x.required && x.hit && !x.ontime; }).length;
+  const missedCnt = nodeResults.filter(function (x) { return x.required && !x.submitted && ended; }).length;
+  const pendingCnt = nodeResults.filter(function (x) { return x.required && !x.submitted && !x.skipped && !ended; }).length;
+  const maxScore = correct.reduce(function (a, n) { return a + n.score; }, 0);
+  const sc = Math.max(0, Math.min(100, Math.round(earned * 10) / 10));
+  const completeness = total ? Math.round(hitCnt / total * 1000) / 10 : 0;
+  const timeRate = total ? Math.round(ontimeCnt / total * 1000) / 10 : 0;
   return {
-    projectId: projectId, mode: mode, scenarioId: p.scenario_id,
-    total: total, hit: hitCnt, ontime: ontimeCnt, missed: total - hitCnt,
-    completeness: Math.round(completeness * 10) / 10, timeRate: Math.round(timeRate * 10) / 10,
-    score: sc, grade: gradeOf(sc),
-    formula: '实战版：完整性 ' + Math.round(completeness * 10) / 10 + '% × 70% + 时限达成 ' + Math.round(timeRate * 10) / 10 + '% × 30% = ' + sc,
-    extraSteps: steps.filter(function (s) { return !s.matched; }).length,
-    nodes: nodeResults, steps: steps
+    projectId: projectId, mode: mode, scenarioId: p.scenario_id, ended: ended,
+    total: total, hit: hitCnt, ontime: ontimeCnt, missed: missedCnt, pending: pendingCnt,
+    wrong: wrongCnt, late: lateCnt, maxScore: maxScore, distractors: distractors.length,
+    skipped: skippedCorrect + skippedDistract, skippedCorrect: skippedCorrect, skippedDistract: skippedDistract,
+    completeness: completeness, timeRate: timeRate,
+    score: sc, grade: gradeOf(sc), deductions: deductions, bonuses: bonuses,
+    formula: (mode === '实战版' ? '实战版' : '基础版')
+      + '：正确流程满分 ' + maxScore + ' 分'
+      + (hitCnt ? '，已完成 ' + hitCnt + '/' + total + ' 项（超时按 90% 计）' : '')
+      + (skippedDistract ? '，跳过混淆流程 ' + skippedDistract + ' 项 +' + (skippedDistract * SKIP_BONUS) + ' 分' : '')
+      + (skippedCorrect ? '，跳过正确流程 ' + skippedCorrect + ' 项' : '')
+      + (wrongCnt ? '，误选混淆流程 ' + wrongCnt + ' 项扣 ' + deductions.filter(function (d) { return d.distract; }).reduce(function (a, d) { return a - d.point; }, 0) + ' 分' : '')
+      + (missedCnt ? '，未完成 ' + missedCnt + ' 项扣 ' + deductions.filter(function (d) { return d.type === '正确流程未完成'; }).reduce(function (a, d) { return a - d.point; }, 0) + ' 分' : '')
+      + ' = ' + sc + ' 分',
+    nodes: nodeResults, steps: steps, correctTotal: maxScore
   };
 }
 
 function gradeOf(v) {
   return v >= 90 ? '优秀' : v >= 80 ? '良好' : v >= 70 ? '合格' : '不合格';
+}
+
+/* 实战版：本角色可执行的全部处置流程（正确流程与混淆流程外观一致，不暴露属性、分值、引导提示）
+ * 与剧本基线相比多出的流程即为混淆流程，选中后按该流程分值扣分 */
+function flowList(p, role) {
+  const nodes = nodesOf(p.scenario_id).filter(function (n) { return n.type !== 'end'; });
+  const steps = db.prepare('SELECT * FROM drill_steps WHERE project_id=?').all(p.id);
+  const list = nodes.filter(function (n) { return canHandle(role, n.target); }).map(function (n) {
+    const st = steps.filter(function (s) { return s.matched_node === n.id; })[0] || null;
+    const f = formFields(n.form);
+    return {
+      nodeId: n.id, time: n.time, timeout: n.timeout, type: n.type, action: n.action, target: n.target,
+      title: n.title, desc: n.desc, formId: n.form || '',
+      formName: f.name || '', fields: f.fields || [],
+      submitted: st ? {
+        stepTime: st.step_time, user: st.user, role: st.role_id,
+        correct: st.correct === 0 ? 0 : 1, ontime: !!st.ontime, foundAt: st.found_at,
+        found: st.found, measure: st.measure, result: st.result, evidence: st.evidence,
+        forms: parseJson(st.forms, {}), delta: Number(st.score || 0),
+        receiver: st.receiver || '', receiverOk: st.receiver_ok === 0 ? 0 : 1,
+        skipped: st.skipped === 1 ? 1 : 0
+      } : null
+    };
+  });
+  /* 按计划时刻排序，同一时刻按节点 ID 哈希混杂，避免混淆流程集中在一处 */
+  const hash = function (s) {
+    let h = 0;
+    for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) >>> 0;
+    return h;
+  };
+  return list.sort(function (a, b) {
+    const ta = mins(a.time), tb = mins(b.time);
+    if (ta !== tb) return (ta === null ? 9999 : ta) - (tb === null ? 9999 : tb);
+    return hash(a.nodeId) - hash(b.nodeId);
+  });
 }
 
 /* 当前项目模式 + 基线 + 步骤 + 评分（工作台/复盘页共用） */
@@ -143,27 +324,222 @@ router.get('/workbench/:projectId', auth.requireAuth, function (req, res) {
   if (!p) return res.status(404).json({ error: '演练项目不存在' });
   res.json({
     projectId: p.id, mode: p.mode || '基础版', scenarioId: p.scenario_id,
-    nodes: nodesOf(p.scenario_id),
+    nodes: nodesOf(p.scenario_id).filter(function (n) { return n.flowType !== 'distractor'; }),
     steps: db.prepare('SELECT * FROM drill_steps WHERE project_id=? ORDER BY step_time,id').all(p.id),
+    evidence: evidenceSummary(p),
     score: score(p.id)
   });
 });
 
-/* 切换演练模式（指挥部/平台管理员/信息科负责人） */
-router.patch('/mode/:projectId', auth.requireAuth, function (req, res) {
-  const rid = req.user.role.id;
-  if (['commander', 'platformadmin', 'itlead'].indexOf(rid) < 0) return res.status(403).json({ error: '无演练模式调整权限' });
-  const mode = String((req.body && req.body.mode) || '');
-  if (MODES.indexOf(mode) < 0) return res.status(400).json({ error: '演练模式仅支持：基础版 / 实战版' });
-  const p = projectOf(req.params.projectId);
-  if (!p) return res.status(404).json({ error: '演练项目不存在' });
-  if (p.status === '已结束') return res.status(400).json({ error: '已结束的演练项目不可调整模式' });
-  db.prepare('UPDATE projects SET mode=? WHERE id=?').run(mode, p.id);
-  auth.audit(req, '调整演练模式 ' + p.id + ' → ' + mode);
-  res.json({ ok: true, mode: mode });
+/* 参演人员打开处置表单即视为「处置中」，仅记录状态供导调中心展示 */
+router.post('/nodes/:nodeId/start', auth.requireAuth, function (req, res) {
+  if (req.user.role.external) return res.status(403).json({ error: '外部单位仅可查看医院上报材料（分级权限隔离）' });
+  const pid = activeProjectId();
+  const p = pid ? projectOf(pid) : null;
+  if (!p) return res.status(404).json({ error: '当前没有进行中的演练项目' });
+  if (p.status !== '演练中') return res.status(400).json({ error: '演练未开始或已结束' });
+  const node = db.prepare('SELECT * FROM script_nodes WHERE id=? AND scenario_id=?').get(req.params.nodeId, p.scenario_id);
+  if (!node) return res.status(404).json({ error: '演练节点不存在' });
+  const mode = p.mode || '基础版';
+  if (mode === '实战版' && !canHandle(req.user.role, node.target)) {
+    return res.status(403).json({ error: '该环节不属于当前角色的处置范围' });
+  }
+  if (mode === '基础版') {
+    const own = db.prepare('SELECT id FROM tasks WHERE project_id=? AND node_id=? AND role_id=?')
+      .get(p.id, node.id, req.user.role.id);
+    if (!own && !canHandle(req.user.role, node.target)) {
+      return res.status(403).json({ error: '该环节不属于当前角色的处置范围' });
+    }
+  }
+  db.prepare('INSERT INTO drill_node_state (project_id,node_id,role_id,user,started_at) VALUES (?,?,?,?,?) ' +
+    'ON CONFLICT(project_id,node_id) DO UPDATE SET role_id=excluded.role_id, user=excluded.user, started_at=excluded.started_at')
+    .run(p.id, node.id, req.user.role.id, req.user.name, now().slice(0, 16));
+  res.json({ ok: true, projectId: p.id, nodeId: node.id });
 });
 
-/* 实战版：参演人员自行添加处置步骤 */
+function activeProjectId() {
+  const r = db.prepare("SELECT value FROM settings WHERE key='active_project'").get();
+  return r ? r.value : null;
+}
+
+/* 实战版处置流程列表（角色工作台：正确流程 + 混淆流程混合展示） */
+router.get('/flows/:projectId', auth.requireAuth, function (req, res) {
+  if (req.user.role.external) return res.status(403).json({ error: '外部单位仅可查看医院上报材料（分级权限隔离）' });
+  const p = projectOf(req.params.projectId);
+  if (!p) return res.status(404).json({ error: '演练项目不存在' });
+  if ((p.mode || '基础版') !== '实战版') return res.status(400).json({ error: '当前项目不是实战版' });
+  const flows = flowList(p, req.user.role);
+  res.json({
+    projectId: p.id, mode: '实战版', projectStatus: p.status,
+    flowCount: flows.length,
+    flows: flows,
+    /* 下一节点接收人候选角色（实战版需参演人员自行选择，选错扣本流程10%分值） */
+    receivers: receiverOptions(),
+    evidence: evidenceSummary(p),
+    score: score(p.id)
+  });
+});
+
+/* 实战版：角色工作台仅展示已发现的系统故障 */
+router.get('/faults/:projectId', auth.requireAuth, function (req, res) {
+  if (req.user.role.external) return res.status(403).json({ error: '外部单位仅可查看医院上报材料（分级权限隔离）' });
+  const p = projectOf(req.params.projectId);
+  if (!p) return res.status(404).json({ error: '演练项目不存在' });
+  if ((p.mode || '基础版') !== '实战版') return res.status(400).json({ error: '当前项目不是实战版' });
+  const steps = db.prepare('SELECT * FROM drill_steps WHERE project_id=?').all(p.id);
+  /* 剧本基线中的正确流程即为“已通报故障”，混淆流程不计入故障列表 */
+  const faults = nodesOf(p.scenario_id).filter(function (n) {
+    return n.type !== 'end' && n.flowType !== 'distractor';
+  }).map(function (n) {
+    const st = steps.filter(function (s) { return s.matched_node === n.id; })[0] || null;
+    let status = '待处置';
+    if (st) status = st.skipped === 1 ? '已跳过（未执行）' : (st.correct === 0 ? '处置偏差' : (st.ontime ? '已控制' : '已控制（超时）'));
+    return {
+      nodeId: n.id, time: n.time, title: n.title, symptom: n.desc,
+      status: status, handled: !!(st && st.skipped !== 1), handledBy: st ? st.user : null,
+      stepTime: st ? st.step_time : null, correct: st && st.skipped !== 1 ? (st.correct === 0 ? 0 : 1) : null,
+      ontime: st ? !!st.ontime : null
+    };
+  });
+  res.json({ projectId: p.id, mode: '实战版', projectStatus: p.status, count: faults.length, faults: faults, score: score(p.id) });
+});
+
+/* 实战版：判定当前流程「不执行」并跳过
+ * 混淆流程被正确跳过可获得少量奖励分；正确流程被跳过，结束演练时按该流程分值扣分 */
+router.post('/skip', auth.requireAuth, function (req, res) {
+  if (req.user.role.external) return res.status(403).json({ error: '外部单位不参与处置记录（分级权限隔离）' });
+  const b = req.body || {};
+  const p = projectOf(String(b.projectId || ''));
+  if (!p) return res.status(404).json({ error: '演练项目不存在' });
+  if ((p.mode || '基础版') !== '实战版') return res.status(400).json({ error: '当前项目为基础版，请在角色工作台按正确流程逐步执行' });
+  if (p.status !== '演练中') return res.status(400).json({ error: '演练' + p.status + '，暂不能跳过流程' });
+  const all = nodesOf(p.scenario_id).filter(function (n) { return n.type !== 'end'; });
+  const node = all.filter(function (n) { return n.id === String(b.nodeId || ''); })[0];
+  if (!node) return res.status(404).json({ error: '处置流程不存在' });
+  if (!canHandle(req.user.role, node.target)) {
+    return res.status(403).json({ error: '该流程责任角色为「' + node.target + '」，当前角色无权处置' });
+  }
+  const dup = db.prepare('SELECT id,user FROM drill_steps WHERE project_id=? AND matched_node=?').get(p.id, node.id);
+  if (dup) return res.status(409).json({ error: '该流程已由 ' + dup.user + ' 处理，不可重复跳过' });
+
+  const isCorrect = node.flowType !== 'distractor';
+  /* 不向前端下发流程属性，仅返回本次跳过带来的分值变化与最新得分 */
+  const delta = isCorrect ? 0 : SKIP_BONUS;
+  const stepTime = hhmm();
+  db.prepare('INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,choice,correct,found_at,measure,result,forms,flow_type,score,receiver,receiver_ok,skipped,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(p.id, p.scenario_id, req.user.role.id, req.user.name, node.action || '', node.title,
+      '参演人员判定该流程不执行（跳过）', stepTime, node.id, 1, 0, node.title, isCorrect ? 1 : 0,
+      now().slice(0, 16), '参演人员判定不执行，跳过该流程', '已跳过（未执行）', '', node.flowType, delta, '', 1, 1, nowSec());
+  db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')
+    .run(p.id, stepTime, req.user.name, req.user.role.id, '跳过处置流程',
+      '流程「' + node.title + '」由参演人员判定不执行（跳过）', '', null);
+  auth.audit(req, '实战版跳过流程 ' + node.id + '：' + node.title);
+  res.json({ ok: true, nodeId: node.id, skipped: true, stepTime: stepTime, delta: delta, score: score(p.id) });
+});
+
+/* 实战版：提交某个流程的实际处置情况（正确流程得分，混淆流程按分值扣分） */
+router.post('/decide', auth.requireAuth, function (req, res) {
+  if (req.user.role.external) return res.status(403).json({ error: '外部单位不参与处置记录（分级权限隔离）' });
+  const b = req.body || {};
+  const p = projectOf(String(b.projectId || ''));
+  if (!p) return res.status(404).json({ error: '演练项目不存在' });
+  if ((p.mode || '基础版') !== '实战版') return res.status(400).json({ error: '当前项目为基础版，请在角色工作台按正确流程逐步执行' });
+  if (p.status !== '演练中') return res.status(400).json({ error: '演练' + p.status + '，暂不能提交处置记录' });
+  const all = nodesOf(p.scenario_id).filter(function (n) { return n.type !== 'end'; });
+  const node = all.filter(function (n) { return n.id === String(b.nodeId || ''); })[0];
+  if (!node) return res.status(404).json({ error: '处置流程不存在' });
+  if (!canHandle(req.user.role, node.target)) {
+    return res.status(403).json({ error: '该流程责任角色为「' + node.target + '」，当前角色无权处置' });
+  }
+  const dup = db.prepare('SELECT id,user FROM drill_steps WHERE project_id=? AND matched_node=?').get(p.id, node.id);
+  if (dup) return res.status(409).json({ error: '该流程已由 ' + dup.user + ' 提交处置记录，不可重复执行' });
+
+  const measure = String(b.measure || '').trim().slice(0, 1000);
+  const result = String(b.result || '').trim().slice(0, 500);
+  const evidence = String(b.evidence || '').trim().slice(0, 300);
+  const found = String(b.found || '').trim().slice(0, 1000);
+  const forms = (b.forms && typeof b.forms === 'object') ? b.forms : {};
+  if (measure.length < 6) return res.status(400).json({ error: '请填写不少于 6 字的实际处置措施' });
+  if (!result) return res.status(400).json({ error: '请填写处置结果' });
+  const f = formFields(node.form);
+  const missing = (f.fields || []).filter(function (fl) {
+    const label = fl.label || fl.name || '';
+    return label && fl.required !== false && !String(forms[label] || '').trim();
+  });
+  if (missing.length) return res.status(400).json({ error: '请完整填写表单：' + missing.map(function (x) { return x.label || x.name; }).join('、') });
+
+  const stepTime = hhmm();
+  const limit = mins(node.time) === null ? null : mins(node.time) + (node.timeout || 0);
+  const ontime = !!(limit !== null && mins(stepTime) !== null && mins(stepTime) <= limit);
+  const isCorrect = node.flowType !== 'distractor';
+  /* 下一节点接收人：实战版由参演人员自行选择，支持多选；集合完全一致才正确，否则扣本流程 10% 分值 */
+  const wantRecv = parseReceivers(node.receiver);
+  const recv = parseReceivers(b.receiver);
+  if (isCorrect && wantRecv.length && !recv.length) {
+    return res.status(400).json({ error: '请选择下一节点接收人（可多选）' });
+  }
+  const receiver = recv.join('、');
+  const receiverOk = !wantRecv.length ? 1 : (sameReceivers(wantRecv, recv) ? 1 : 0);
+  const delta = !isCorrect
+    ? -node.score
+    : Math.round(node.score * (ontime ? 1 : 0.9) * (receiverOk ? 1 : 0.9) * 10) / 10;
+  const formText = Object.keys(forms).map(function (k) { return k + '：' + String(forms[k]).slice(0, 80); }).join('；');
+  const descr = (formText ? formText + '；' : '') + '措施：' + measure + '；结果：' + result + (found ? '；发现：' + found : '');
+  const r = db.prepare('INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,choice,correct,found_at,found,measure,result,evidence,forms,flow_type,score,receiver,receiver_ok,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(p.id, p.scenario_id, req.user.role.id, req.user.name, node.action || '', node.title, descr.slice(0, 2000), stepTime,
+      node.id, 1, ontime ? 1 : 0, node.title, isCorrect ? 1 : 0, now().slice(0, 16), found, measure, result, evidence,
+      JSON.stringify(forms), node.flowType, delta, receiver, receiverOk, nowSec());
+
+  /* 自动归档处置记录（模拟取证材料） */
+  const evId = 'E' + String(Date.now()).slice(-8);
+  const evName = '实战处置记录-' + node.id + '-' + req.user.name + (evidence ? '（' + evidence + '）' : '');
+  db.prepare('INSERT INTO evidence (id,type,name,size,time,role_id,uploader,user_id,auto,task_id,project_id,url,file_path,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(evId, '处置记录', evName.slice(0, 180), '表单', stepTime, req.user.role.id, req.user.name, req.user.id, 0, null, p.id, null, null, nowSec());
+  db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')
+    .run(p.id, stepTime, req.user.name, req.user.role.id, isCorrect ? '执行正确处置流程' : '执行混淆处置流程',
+      '流程「' + node.title + '」；' + (isCorrect ? '得分 +' + delta : '扣分 ' + delta)
+        + (isCorrect && !receiverOk ? '；下一节点接收人选择错误（扣10%）' : '')
+        + '；措施：' + measure.slice(0, 60),
+      isCorrect && receiverOk ? '' : 'P1', null);
+  auth.audit(req, '实战版处置流程 ' + node.id + '：' + (isCorrect ? '正确流程 +' + delta : '混淆流程 ' + delta) + ' 分'
+    + (receiverOk ? '' : '（接收人选择错误）'));
+
+  res.json({
+    ok: true, id: Number(r.lastInsertRowid), nodeId: node.id, stepTime: stepTime,
+    correct: isCorrect ? 1 : 0, ontime: ontime, delta: delta,
+    receiver: receiver, receiverOk: receiverOk,
+    score: score(p.id)
+  });
+});
+
+/* 演练结束：未完成的正确流程按该流程分值扣分 */
+router.post('/finish', auth.requireAuth, function (req, res) {
+  if (req.user.role.external) return res.status(403).json({ error: '外部单位不可结束演练（分级权限隔离）' });
+  const rid = req.user.role.id;
+  if (['commander', 'platformadmin', 'itlead'].indexOf(rid) < 0) {
+    return res.status(403).json({ error: '仅院应急指挥部、信息科负责人、平台管理员可结束演练' });
+  }
+  const p = projectOf(String((req.body && req.body.projectId) || ''));
+  if (!p) return res.status(404).json({ error: '演练项目不存在' });
+  if (p.status !== '演练中') return res.status(400).json({ error: '演练' + p.status + '，无需重复结束' });
+  /* 完成演练前置校验：取证材料必须全部归档，未完成不允许结束 */
+  const ev = evidenceSummary(p);
+  if (ev.pending > 0) {
+    return res.status(400).json({
+      error: '尚有 ' + ev.pending + ' 项取证材料未归档（已归档 ' + ev.done + '/' + ev.total + '），请完成取证后再结束演练',
+      pending: ev.pending, done: ev.done, total: ev.total, pendingItems: ev.pendingItems.slice(0, 10)
+    });
+  }
+  const s = score(p.id);
+  db.prepare("UPDATE projects SET status='已结束' WHERE id=?").run(p.id);
+  db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')
+    .run(p.id, hhmm(), req.user.name, rid, '演练结束',
+      '结束演练：已完成 ' + (s ? s.hit : 0) + '/' + (s ? s.total : 0) + ' 项正确流程，最终得分 ' + (s ? s.score : 0), 'P1', null);
+  auth.audit(req, '结束演练 ' + p.id + '，综合得分 ' + (s ? s.score : 0));
+  res.json({ ok: true, projectId: p.id, score: score(p.id) });
+});
+
+/* 历史兼容：旧版自主添加步骤（当前工作台已改为决策菜单，不再展示该入口） */
 router.post('/steps', auth.requireAuth, function (req, res) {
   if (req.user.role.external) return res.status(403).json({ error: '外部单位不参与处置步骤录入（分级权限隔离）' });
   const b = req.body || {};

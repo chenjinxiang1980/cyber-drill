@@ -58,9 +58,8 @@ var NAV_GROUPS = [
   { title:'演练执行', items:[
     {key:'dashboard', icon:'dashboard', label:'态势总看板', href:'dashboard.html'},
     {key:'screen', icon:'screen', label:'演练监视大屏', href:'screen.html'},
-    {key:'tasks', icon:'tasks', label:'任务协同中心', href:'tasks.html'},
     {key:'workbench', icon:'workbench', label:'角色工作台', href:'workbench.html'},
-    {key:'collab', icon:'chat', label:'协同会商中心', href:'collab.html'}
+    {key:'collab', icon:'chat', label:'演练导调中心', href:'collab.html'}
   ]},
   { title:'编排与资源', items:[
     {key:'scenarios', icon:'scenarios', label:'场景剧本库', href:'scenarios.html'},
@@ -104,7 +103,7 @@ function mountShell(pageKey){
     html += '<div class="nav-group"><div class="g-title">'+g.title+'</div>';
     items.forEach(function(it){
       var active = it.key===pageKey ? ' active':'';
-      var badge = it.key==='tasks' ? '<span class="n-badge" id="navTaskBadge"></span>' : '';
+      var badge = '';
       html += '<a class="nav-item'+active+'" href="'+it.href+'">'+icon(it.icon)+'<span>'+it.label+'</span>'+badge+'</a>';
     });
     html += '</div>';
@@ -150,19 +149,7 @@ function refreshShell(){
     if(n) n.textContent = ns.filter(function(x){ return !x.read; }).length;
   });
 
-  // 任务徽标：与任务协同中心页面同口径（当前项目 + 角色可见范围 + 未完成）
-  var b = document.getElementById('navTaskBadge');
-  if(b){
-    var MANAGED = { itlead:['itlead','duty','netsec','sysadmin'] };
-    var list = (MOCK.TASKS||[]).filter(function(t){
-      if(proj && t.projectId!==proj.id) return false;
-      if(r.id==='commander') return true;
-      if(MANAGED[r.id]) return MANAGED[r.id].indexOf(t.role)>=0;
-      return t.role===r.id;
-    });
-    var c = list.filter(function(t){ return t.status!=='已完成'; }).length;
-    b.textContent = c; b.style.display = c ? '' : 'none';
-  }
+  // 工作台待办数量在页面内展示，顶栏不再显示任务徽标
 }
 
 /* ---------- Toast / Modal / Drawer ---------- */

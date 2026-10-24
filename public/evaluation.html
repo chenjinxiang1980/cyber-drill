@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -38,7 +38,7 @@ document.addEventListener('app:ready', function(e){
   function mins(t){ var m=/^(\d{1,2}):(\d{2})/.exec(String(t||'')); return m ? (+m[1])*60 + (+m[2]) : null; }
   function grade(v){ return v>=90?'优秀':v>=80?'良好':v>=70?'合格':'不合格'; }
   function gradeCls(v){ return v>=90?'green':v>=80?'blue':v>=70?'yellow':'red'; }
-  function stateTag(s){ return s==='按时'?'<span class="tag green">按时</span>':s==='超时'?'<span class="tag yellow">超时</span>':s==='遗漏'?'<span class="tag red">遗漏</span>':'<span class="tag gray">'+App.esc(s)+'</span>'; }
+  function stateTag(s){ return s==='按时'?'<span class="tag green">按时</span>':s==='超时'?'<span class="tag yellow">超时</span>':s==='遗漏'?'<span class="tag red">遗漏</span>':s==='待处置'?'<span class="tag yellow">待处置</span>':s==='决策有误'?'<span class="tag red">决策有误</span>':'<span class="tag gray">'+App.esc(s)+'</span>'; }
 
   page.innerHTML =
     '<div class="page-head"><div><h1>复盘评估</h1><div class="sub">'+App.esc(proj.name)+' · 系统自动考评 · '+
@@ -46,7 +46,7 @@ document.addEventListener('app:ready', function(e){
     + '<div class="acts">'
     + (canEval?'<button class="btn" id="evReEval">'+App.icon('refresh')+'重新自动考评</button>':'')
     + '<button class="btn primary" id="evReport">'+App.icon('file')+'演练报告导出</button></div></div>'
-    + '<div class="sim-banner">'+App.icon('alert')+'<span>考评由系统按演练数据自动计算：<b>基础版</b>为完整诱导演练，仅对操作时限打分（逐节点时限达成率）；<b>实战版</b>由参演人员自主添加处置步骤，系统对照基础版基线判定步骤遗漏（70%）与时限（30%）。所有数据均为演练记录。</span></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>考评由系统按演练数据自动计算：<b>基础版</b>为完整诱导演练，仅对操作时限打分（逐节点时限达成率）；<b>实战版</b>任务中心只展示已发现的系统故障，由参演人员在角色工作台自主选择处置动作，按<b>与剧本基线偏离、处置超时、未处置、偏离剧本的额外操作</b>扣分。所有数据均为演练记录。</span></div>'
     + '<div class="grid" style="grid-template-columns:1.55fr 1fr;gap:16px">'
     +   '<div class="card"><div class="card-title">'+App.icon('score')+'考评明细<span class="more" id="evTitle"></span></div><div id="evItems"><div class="loading-block">正在加载考评数据…</div></div></div>'
     +   '<div class="col gap4">'
@@ -74,24 +74,16 @@ document.addEventListener('app:ready', function(e){
       '<span class="badge '+(isBase?'base':'real')+'">'+App.esc(mode)+'</span>'
       + '<span class="tiny dim">'+(isBase
         ? '诱导演练：系统逐节点下发任务与引导提示，考评仅统计操作时限达成率'
-        : '自主处置：参演人员自行添加步骤，系统对照基线判定遗漏与时限')+'</span>'
-      + (canEval && proj.status!=='已结束'
-        ? '<button class="btn sm" id="btnMode">切换为'+(isBase?'实战版':'基础版')+'</button>' : '');
-    var bm = document.getElementById('btnMode');
-    if(bm) bm.onclick = function(){
-      var target = isBase ? '实战版' : '基础版';
-      App.confirmSim('将本项目切换为「'+target+'」？切换后考评口径随之变化。', function(){
-        API.setDrillMode(proj.id, target).then(function(){
-          App.toast('已切换为「'+target+'」，正在重新加载考评数据…','ok');
-          setTimeout(function(){ location.reload(); }, 700);
-        }).catch(function(err){ App.toast((err&&err.message)||'切换失败','err'); });
-      });
-    };
+        : '自主研判：任务中心仅展示已发现故障，参演人员在角色工作台选择处置动作，按偏离剧本与时效扣分')+'</span>'
+      + '<div class="tiny dim mt2">演练模式在新建演练项目时选定，创建后不可切换（保证两种模式使用同一套剧本基线）。</div>';
   }
 
   function renderItems(){
     var s = WB.score;
-    document.getElementById('evTitle').textContent = WB.mode + ' · 考评单元 ' + s.total + ' 项 · 覆盖基线节点 ' + WB.nodes.filter(function(n){ return n.required && n.type!=='end'; }).length + ' 项';
+    var baselineCnt = WB.nodes.filter(function(n){ return n.required && n.type!=='end'; }).length;
+    document.getElementById('evTitle').textContent = WB.mode==='实战版'
+      ? WB.mode + ' · 已发现故障 ' + s.total + ' 项 · 剧本基线 ' + baselineCnt + ' 项'
+      : WB.mode + ' · 考评单元 ' + s.total + ' 项 · 覆盖基线节点 ' + baselineCnt + ' 项';
     var rows = s.nodes.map(function(n, i){
       var plan = n.plan || '—';
       var actual = n.actual || '—';
@@ -99,7 +91,11 @@ document.addEventListener('app:ready', function(e){
         + '<div class="ev-name"><div class="bold">'+(i+1)+'. '+App.esc(n.title)+'</div>'
         +   '<div class="mt2 tiny dim">'+App.esc(roleName(n.role))+' · 计划 '+App.esc(plan)+'</div></div>'
         + '<div class="ev-rule">实际：'+App.esc(actual)+'</div>'
-        + '<div class="ev-ro">'+stateTag(n.state)+(WB.mode==='实战版'&&!n.hit?'<div class="tiny" style="color:var(--err);margin-top:4px">未覆盖基线必经步骤</div>':'')+'</div>'
+        + '<div class="ev-ro">'+stateTag(n.state)+(WB.mode==='实战版'
+            ? (n.state==='遗漏'?'<div class="tiny" style="color:var(--err);margin-top:4px">未处置基线必经环节（扣15分）</div>'
+              : n.state==='决策有误'?'<div class="tiny" style="color:var(--err);margin-top:4px">与剧本基线偏离（扣20分）</div>'
+              : n.state==='超时'?'<div class="tiny" style="color:var(--err);margin-top:4px">处置超时（扣10分）</div>' : '')
+            : '')+'</div>'
         + '</div>';
     }).join('');
     if(!rows) rows = '<div class="empty">'+App.icon('file')+'<div>暂无考评单元</div></div>';
@@ -117,7 +113,7 @@ document.addEventListener('app:ready', function(e){
     document.getElementById('smMax').textContent = '/ 100 分';
     var rate = document.getElementById('smRate');
     rate.className = 'right tag ' + gradeCls(s.score);
-    rate.textContent = '得分率 '+s.score+'%';
+    rate.textContent = WB.mode==='实战版' ? ('扣分后 '+s.score+' 分') : ('得分率 '+s.score+'%');
     var bar = document.getElementById('smBar');
     bar.style.width = Math.min(100,s.score)+'%';
     bar.className = 'bar ' + (s.score>=85?'ok':s.score>=70?'warn':'err');
@@ -125,7 +121,7 @@ document.addEventListener('app:ready', function(e){
     document.getElementById('smFormula').textContent = s.formula;
     var pairs = WB.mode==='基础版'
       ? [['按时完成',s.ontime],['未完成/超时',s.total-s.ontime]]
-      : [['已覆盖必经步骤',s.hit],['遗漏步骤',s.missed],['额外步骤',s.extraSteps||0]];
+      : [['符合基线',s.hit],['待处置',s.pending||0],['决策偏离',s.wrong||0],['超时',s.late||0],['未处置',s.missed],['额外操作',s.extraSteps||0]];
     document.getElementById('smStats').innerHTML = '<div class="flex gap3 wrap">'+pairs.map(function(x){
       return '<span class="small"><b style="font-family:var(--mono)">'+x[1]+'</b> <span class="dim">'+x[0]+'</span></span>';
     }).join('')+'</div>';
@@ -141,10 +137,13 @@ document.addEventListener('app:ready', function(e){
       if(missed.length) lines.push((lines.length+1)+'. 流程执行：'+missed.length+' 项任务未按时闭环，建议在下一轮演练中重点跟踪。');
       if(!lines.length) lines.push('本次基础版演练各节点均在时限内完成，建议增加实战版无脚本抽测以验证真实处置能力。');
     } else {
-      if(missed.length) lines.push('1. 步骤遗漏：'+missed.map(function(n){ return '「'+n.title+'」（'+"计划 "+n.plan+'）'; }).join('、')+' 未在演练中体现，建议按预案补齐并明确责任岗位。');
-      if(late.length) lines.push((lines.length+1)+'. 时限超期：'+late.map(function(n){ return '「'+n.title+'」'; }).join('、')+' 处置晚于基线时限，建议优化响应流程与值班力量配置。');
-      if(s.extraSteps) lines.push((lines.length+1)+'. 额外处置：演练中另有 '+s.extraSteps+' 项步骤未匹配基线节点，如属有效补充建议纳入剧本基线。');
-      if(!lines.length) lines.push('实战版演练覆盖全部基线必经步骤且时限达标，建议固化处置经验并纳入标准剧本。');
+      var wrong = s.nodes.filter(function(n){ return n.state==='决策有误'; });
+      var omitted = s.nodes.filter(function(n){ return n.state==='遗漏'; });
+      if(wrong.length) lines.push('1. 决策偏离：'+wrong.map(function(n){ return '「'+n.title+'」'; }).join('、')+' 所选处置与剧本基线偏离（每项扣20分），建议围绕该环节开展专项研判训练。');
+      if(late.length) lines.push((lines.length+1)+'. 处置超时：'+late.map(function(n){ return '「'+n.title+'」'; }).join('、')+' 晚于基线时限（每项扣10分），建议优化响应流程与值班力量配置。');
+      if(omitted.length) lines.push((lines.length+1)+'. 环节未处置：'+omitted.map(function(n){ return '「'+n.title+'」（计划 '+n.plan+'）'; }).join('、')+' 未在演练中处置（每项扣15分），建议明确责任岗位并补齐处置流程。');
+      if(s.extraSteps) lines.push((lines.length+1)+'. 额外操作：另有 '+s.extraSteps+' 项操作偏离剧本基线（每项扣5分，上限20分），建议核实是否存在无效处置。');
+      if(!lines.length) lines.push('实战版演练全部基线环节决策正确且时限达标，无扣分项，建议固化处置经验并纳入标准剧本。');
     }
     document.getElementById('evSug').textContent = lines.join('\n');
   }
@@ -162,62 +161,30 @@ document.addEventListener('app:ready', function(e){
           }).join('')+'</tbody></table></div>';
       return;
     }
-    /* 实战版：步骤录入 + 步骤清单 */
-    card.innerHTML = '<div class="card-title">'+App.icon('edit')+'实战版处置步骤（参演人员自主录入）'
-      + '<span class="more">系统按动作类型 + 关键词自动匹配基线节点</span></div>'
-      + '<div class="filters" style="gap:10px;align-items:flex-end">'
-      +   '<div><label class="f-label">动作类型</label><select class="select" id="stAction">'
-      +     ['告警核实','隔离处置','处置恢复','业务兜底','上报审批','取证留痕','协同沟通','其他'].map(function(x){ return '<option>'+x+'</option>'; }).join('')
-      +   '</select></div>'
-      +   '<div style="flex:1;min-width:220px"><label class="f-label">步骤标题</label><input class="input" id="stTitle" placeholder="如：隔离感染主机并关闭共享写入"></div>'
-      +   '<div><label class="f-label">处置时刻</label><input class="input" id="stTime" type="time" style="width:130px"></div>'
-      +   '<button class="btn primary" id="stAdd">'+App.icon('plus')+'添加步骤</button>'
-      + '</div>'
-      + '<div class="form-row" style="margin-top:10px"><label class="f-label">处置说明（可选，可写具体主机/IP/操作）</label><input class="input" id="stDesc" placeholder="补充说明有助于系统更准确匹配基线节点"></div>'
-      + '<div class="section-title mt3">已录入步骤（'+(WB.steps||[]).length+'）</div>'
-      + '<div class="st-list" id="stList"></div>';
-
-    var now = new Date();
-    document.getElementById('stTime').value = (now.getHours()<10?'0':'')+now.getHours()+':'+(now.getMinutes()<10?'0':'')+now.getMinutes();
-
-    function renderList(){
-      var list = WB.steps || [];
-      if(!list.length){ document.getElementById('stList').innerHTML = '<div class="empty">'+App.icon('edit')+'<div>尚未录入处置步骤，请按实际处置过程添加</div></div>'; return; }
-      document.getElementById('stList').innerHTML = list.map(function(s2){
-        var node = WB.nodes.filter(function(n){ return n.id===s2.matched_node; })[0];
-        return '<div class="st-item"><div class="st-h"><span><b>'+App.esc(s2.step_time)+'</b> · '+App.esc(s2.title)+'</span>'
-          + '<span class="flex gap2">'+(s2.matched ? '<span class="tag green">已匹配 '+App.esc(node?node.id:'')+'</span>' : '<span class="tag gray">未匹配基线</span>')
-          + '<button class="btn sm danger" data-del="'+s2.id+'">删除</button></span></div>'
-          + '<div class="tiny dim mt2">'+App.esc(roleName(s2.role_id))+' · '+App.esc(s2.action||'其他')+(s2.descr?' · '+App.esc(s2.descr):'')+'</div></div>';
-      }).join('');
-      document.querySelectorAll('#stList [data-del]').forEach(function(b){
-        b.onclick = function(){
-          API.deleteDrillStep(b.dataset.del).then(function(){
-            App.toast('步骤已删除','ok');
-            load();
-          }).catch(function(err){ App.toast((err&&err.message)||'删除失败','err'); });
-        };
-      });
-    }
-    renderList();
-
-    document.getElementById('stAdd').onclick = function(){
-      var title = document.getElementById('stTitle').value.trim();
-      if(!title){ App.toast('请填写步骤标题','err'); return; }
-      var btn = this; btn.disabled = true;
-      API.addDrillStep({
-        projectId: proj.id, action: document.getElementById('stAction').value,
-        title: title, desc: document.getElementById('stDesc').value.trim(),
-        stepTime: document.getElementById('stTime').value
-      }).then(function(r){
-        btn.disabled = false;
-        App.toast(r.matchedNode ? '步骤已录入，匹配基线节点 '+r.matchedNode+(r.ontime?'（时限内）':'（超出基线时限）') : '步骤已录入（未匹配基线节点，可作为额外处置）', r.matchedNode?'ok':'warn');
-        load();
-      }).catch(function(err){
-        btn.disabled = false;
-        App.toast((err&&err.message)||'录入失败','err');
-      });
-    };
+    /* 实战版：展示角色工作台提交的处置决策记录（复盘只读） */
+    var steps = WB.steps || [];
+    /* 演练中只展示已发现故障；演练结束后展示全部基线环节 */
+    var rows = (WB.score.nodes || []).map(function(n){
+      var full = WB.nodes.filter(function(x){ return x.id===n.id; })[0] || {};
+      var st = steps.filter(function(x){ return x.matched_node===n.id; })[0];
+      var judge = st
+        ? (st.correct===0?'<span class="tag red">决策偏离</span>':'<span class="tag green">符合基线</span>')
+        : (n.state==='待处置'?'<span class="tag yellow">待处置</span>':'<span class="tag gray">未处置</span>');
+      return '<tr>'
+        + '<td class="mono small">'+App.esc(full.time||'—')+'</td>'
+        + '<td><div class="small bold">'+App.esc(n.title)+' '+(full.required?'':'<span class="tag yellow">前置告警·不计分</span>')+'</div><div class="tiny dim">'+App.esc(full.target||n.role||'')+'</div></td>'
+        + '<td class="small">'+(st?App.esc(st.choice||'—'):'—')+(st&&st.correct===0?'<div class="tiny" style="color:var(--err);margin-top:3px">正确做法：'+App.esc(n.title)+'</div>':'')+'</td>'
+        + '<td>'+judge+'</td>'
+        + '<td class="mono small">'+App.esc(st?st.step_time:'—')+'</td>'
+        + '<td class="small">'+(st?App.esc(st.found||'—')+'<div class="tiny dim mt2">措施：'+App.esc(st.measure||'—')+'</div><div class="tiny dim">结果：'+App.esc(st.result||'—')+'</div>':'—')+'</td>'
+        + '<td class="small">'+App.esc(st?st.user:'—')+'</td>'
+        + '</tr>';
+    }).join('');
+    card.innerHTML = '<div class="card-title">'+App.icon('shield')+'实战版处置决策记录<span class="more">来源：角色工作台自主提交</span></div>'
+      + '<div class="tiny dim" style="margin-bottom:10px">实战版在角色工作台只展示已发现的系统故障，不发布处置步骤与引导提示；参演人员从混淆方案中选择处置动作，并填写发现时间、发现情况、处置措施与处置结果。下表按剧本基线逐环节比对，复盘页仅展示记录，不提供补录入口。</div>'
+      + '<div class="table-wrap"><table class="table"><thead><tr>'
+      + '<th style="width:70px">计划时刻</th><th>处置环节</th><th>选择方案</th><th style="width:90px">判定</th><th style="width:70px">处置时刻</th><th>发现情况 / 措施 / 结果</th><th style="width:90px">处置人</th>'
+      + '</tr></thead><tbody>'+ (rows || '<tr><td colspan="7"><div class="empty">'+App.icon('shield')+'<div>暂无实战处置记录</div></div></td></tr>') +'</tbody></table></div>';
   }
 
   function load(){

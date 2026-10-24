@@ -121,6 +121,12 @@ window.ReportPage = (function () {
     var seqRows = d.seqFlow.map(function(x){
       return '<tr><td>'+App.esc(x.time)+'</td><td>'+App.esc(x.name)+'</td><td>'+App.esc(x.role)+'</td><td>'+App.esc(x.state||'完成')+'</td></tr>';
     }).join('');
+    var pmode = p.mode || '基础版';
+    var decisionRows = (d.decisions||[]).map(function(x){
+      return '<tr><td>'+App.esc(x.title)+'</td><td>'+App.esc(x.target||'—')+'</td><td>'+App.esc(x.choice||'—')+'</td>'
+        + '<td>'+(x.correct?'正确':'有误')+'</td><td>'+App.esc(x.stepTime||'—')+'</td><td>'+App.esc(x.user||'—')+'</td>'
+        + '<td>'+App.esc(x.found||'—')+'<br><span style="color:#444">措施：'+App.esc(x.measure||'—')+'</span><br><span style="color:#444">结果：'+App.esc(x.result||'—')+'</span></td></tr>';
+    }).join('');
     var scoreRows = d.scores.map(function(s){
       return '<tr><td>'+App.esc(s.itemId)+' '+App.esc(s.name)+'</td><td>'+s.max+'</td><td>'+(s.score===null?'未评':s.score)+'</td><td>'+App.esc(s.note||s.rule||'—')+'</td></tr>';
     }).join('');
@@ -200,22 +206,34 @@ window.ReportPage = (function () {
         + '<h3>4.2 关键操作记录</h3><table><tr><th style="width:12%">时间</th><th style="width:26%">动作</th><th style="width:20%">操作人/角色</th><th>说明</th></tr>'
         + (tlRows || '<tr><td colspan="4">暂无操作记录</td></tr>') + '</table>';
     }
-    s4 += '<p>演练按照"告警发现 → 核实研判 → 启动预案 → 分角色处置 → 业务兜底 → 上级上报 → 报案取证 → 恢复验证 → 复盘评估"的闭环流程推进，各节点任务在平台内完成接单、处置与归档。</p>';
+    s4 += pmode === '实战版'
+      ? '<p>演练按照"系统异常告警 → 参演人员自主研判 → 选择处置方案 → 分角色处置 → 业务兜底 → 上报取证 → 恢复验证 → 复盘评估"的闭环推进。系统不发布处置任务与工作提示，仅弹出系统异常故障警告，由参演人员在角色工作台自行选择处置方案并填写发现情况、处置措施与结果，全过程在平台内留痕。</p>'
+      : '<p>演练按照"告警发现 → 核实研判 → 启动预案 → 分角色处置 → 业务兜底 → 上级上报 → 报案取证 → 恢复验证 → 复盘评估"的闭环流程推进，各节点任务在平台内完成接单、处置与归档。</p>';
 
-    var s5 = '<h2>五、演练任务完成情况</h2><table><tr><th>任务总数</th><th>已完成</th><th>处理中</th><th>待处理</th><th>超时</th><th>完成率</th></tr>'
-      + '<tr><td>'+st.total+'</td><td>'+st.done+'</td><td>'+st.doing+'</td><td>'+st.pending+'</td><td>'+st.overdue+'</td><td>'+st.rate+'%</td></tr></table>'
-      + '<h3>5.1 分角色完成情况</h3><table><tr><th>接收角色</th><th>任务数</th><th>已完成</th><th>处理中</th><th>待处理</th><th>超时</th></tr>'
-      + (byRoleRows || '<tr><td colspan="6">暂无任务</td></tr>') + '</table>';
-    if(o.task){
-      s5 += '<h3>5.2 任务明细</h3><table><tr><th style="width:10%">编号</th><th>任务标题</th><th style="width:22%">接收角色</th><th style="width:8%">等级</th><th style="width:11%">时限</th><th style="width:10%">状态</th></tr>'
-        + (taskRows || '<tr><td colspan="6">暂无任务</td></tr>') + '</table>';
+    var s5 = '<h2>五、演练任务完成情况</h2>';
+    if(pmode === '实战版'){
+      var ds = d.decisionStats || { baseline:0, total:0, correct:0, wrong:0, ontime:0 };
+      s5 += '<p>本项目采用实战版演练，系统不在角色工作台发布处置步骤与工作提示，仅展示已发现的系统故障并由参演人员自主研判处置。以下统计为依据角色工作台处置记录与剧本基线环节比对的结果。</p>'
+        + '<table><tr><th>基线必经环节</th><th>已处置</th><th>决策正确</th><th>决策有误</th><th>时限内</th><th>处置覆盖率</th></tr>'
+        + '<tr><td>'+ds.baseline+'</td><td>'+ds.total+'</td><td>'+ds.correct+'</td><td>'+ds.wrong+'</td><td>'+ds.ontime+'</td><td>'+(ds.baseline?Math.round(ds.total/ds.baseline*100):0)+'%</td></tr></table>'
+        + '<h3>5.1 处置决策记录</h3><table><tr><th>处置环节</th><th style="width:12%">责任角色</th><th>选择方案</th><th style="width:7%">判定</th><th style="width:8%">处置时刻</th><th style="width:12%">处置人</th><th>发现情况 / 措施 / 结果</th></tr>'
+        + (decisionRows || '<tr><td colspan="7">暂无实战处置记录</td></tr>') + '</table>';
+    } else {
+      s5 += '<table><tr><th>任务总数</th><th>已完成</th><th>处理中</th><th>待处理</th><th>超时</th><th>完成率</th></tr>'
+        + '<tr><td>'+st.total+'</td><td>'+st.done+'</td><td>'+st.doing+'</td><td>'+st.pending+'</td><td>'+st.overdue+'</td><td>'+st.rate+'%</td></tr></table>'
+        + '<h3>5.1 分角色完成情况</h3><table><tr><th>接收角色</th><th>任务数</th><th>已完成</th><th>处理中</th><th>待处理</th><th>超时</th></tr>'
+        + (byRoleRows || '<tr><td colspan="6">暂无任务</td></tr>') + '</table>';
+      if(o.task){
+        s5 += '<h3>5.2 任务明细</h3><table><tr><th style="width:10%">编号</th><th>任务标题</th><th style="width:22%">接收角色</th><th style="width:8%">等级</th><th style="width:11%">时限</th><th style="width:10%">状态</th></tr>'
+          + (taskRows || '<tr><td colspan="6">暂无任务</td></tr>') + '</table>';
+      }
     }
 
     var s6 = '<h2>六、演练评估</h2>';
     var mode = (d.project && d.project.mode) || '基础版';
     s6 += '<p>演练模式：<b>'+App.esc(mode)+'</b>。'+(mode==='实战版'
-      ? '本项目采用实战版（自主处置），系统不提供固定流程，由参演人员自行录入处置步骤，并按基础版基线判定步骤遗漏（70%）与时限达成（30%）。'
-      : '本项目采用基础版（诱导演练），系统按剧本节点逐节点下发任务并给出引导提示，考评仅统计各节点的操作时限达成率。')+'</p>';
+      ? '本项目采用实战版（自主研判），角色工作台只展示已发现的系统故障，不发布处置步骤与引导提示；参演人员对已发现故障从混淆方案中自主选择处置动作，并实际填写发现时间、发现情况、处置措施与结果。系统以 100 分为基础，按与剧本基线偏离（每项20分）、处置超时（每项10分）、未处置（每项15分）及偏离剧本的额外操作（每项5分，上限20分）扣分。'
+      : '本项目采用基础版（诱导演练），系统按剧本节点逐节点下发任务、给出引导提示并自动填充相关表单与截图，考评仅统计各节点的操作时限达成率。')+'</p>';
     if(d.modeScore){
       s6 += '<table><tr><th style="width:32%">模式化自动考评</th><th style="width:10%">上限</th><th style="width:10%">得分</th><th>计分依据</th></tr>'
         + '<tr><td>演练模式综合评分（'+App.esc(mode)+'）</td><td>'+d.modeScore.max+'</td><td>'+d.modeScore.score+'</td><td>'+App.esc(d.modeScore.note||'—')+'</td></tr></table>';

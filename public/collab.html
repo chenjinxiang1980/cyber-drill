@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>协同会商中心 · 盘州市人民医院网络安全应急演练系统</title>
+<title>演练导调中心 · 盘州市人民医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -15,137 +15,272 @@
 document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
-  var isExternal = !!role.external;
 
-  var GROUPS = [
-    { key:'inner', label:'院内会商组', icon:'hospital' },
-    { key:'joint', label:'跨部门联合会商组', icon:'building' }
+  /* 频道权限：院内角色仅院内会商；院外单位仅院外上报；信息科负责人与指挥部可使用两部分 */
+  var CHAT_ACCESS = {
+    inner: { roles:['duty','netsec','sysadmin','medlead','clinical','itlead','commander'] },
+    external: { roles:['healthbureau','cac','cyberpolice','itlead','commander'] }
+  };
+  function canUseChat(k){ return !!(CHAT_ACCESS[k] && CHAT_ACCESS[k].roles.indexOf(role.id)>=0); }
+  var ALL_GROUPS = [
+    { key:'inner', label:'院内演练会商', icon:'hospital', desc:'院内参演角色之间同步研判结论、处置进展与资源需求；院外单位不可见本频道。' },
+    { key:'external', label:'院外上报沟通', icon:'building', desc:'向市卫健局、市网信办、市网安大队报送材料与进展，并接收上级反馈意见。' }
   ];
-  var curGroup = isExternal ? 'joint' : 'inner';
+  var GROUPS = ALL_GROUPS.filter(function(g){ return canUseChat(g.key); });
+  var curGroup = canUseChat('inner') ? 'inner' : (GROUPS[0] ? GROUPS[0].key : '');
   var pendingAtt = null;
+  var channelInfo = {};
+  var pollTimer = null;
+  var lastCount = 0;
 
-  /* 页内局部图标helper：tab处无svg尺寸规则 */
+  if(!GROUPS.length){
+    page.innerHTML = '<div class="page-head"><div><h1>演练导调中心</h1><div class="sub">院内演练会商与院外上报沟通</div></div></div>'
+      + '<div class="embed" style="min-height:320px">'
+      + '<div class="empty">'+App.icon('lock')+'<div>当前角色「'+App.esc(role.name)+'」未开通演练导调中心频道权限</div>'
+      + '<div class="tiny dim mt2">院内会商面向应急处置角色，院外上报面向外部单位；如需使用请联系演练导调组授权。</div></div></div>';
+    return;
+  }
+
   function ic(n,s){ return '<svg viewBox="0 0 24 24" style="width:'+s+'px;height:'+s+'px;flex:none">'+(App.ICONS[n]||App.ICONS.file)+'</svg>'; }
-
-  function roleName(id){ var r = MOCK.ROLES.filter(function(x){ return x.id===id; })[0]; return r ? r.name : (id==='sys'?'系统':id); }
-  function roleColor(id){ var r = MOCK.ROLES.filter(function(x){ return x.id===id; })[0]; return r ? r.color : '#5c7396'; }
+  function roleName(id){ var r = (MOCK.ROLES||[]).filter(function(x){ return x.id===id; })[0]; return r ? r.name : (id==='sys'?'系统':id); }
+  function roleColor(id){ var r = (MOCK.ROLES||[]).filter(function(x){ return x.id===id; })[0]; return r ? r.color : '#5c7396'; }
+  function groupOf(k){ return GROUPS.filter(function(g){ return g.key===k; })[0]; }
+  function isImage(name,url){ return /\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(String(url||name||'')); }
+  function esc(s){ return App.esc(s); }
 
   page.innerHTML =
-    '<div class="page-head"><div><h1>协同会商中心</h1><div class="sub">演练会商文字/附件沟通 · 会商记录自动归档至取证模块</div></div></div>'
-    + '<div class="sim-banner">'+App.icon('archive')+'<span>归档提示：本会商中心全部聊天记录（含附件）将<b>自动归档至取证与材料归档模块</b>，用于演练复盘与证据固定（演练模拟，消息仅在本原型内流转）。</span></div>'
+    '<div class="page-head"><div><h1>演练导调中心</h1>'
+    +   '<div class="sub">院内演练会商与院外上报沟通 · 消息实时同步、附件真实上传并留痕归档</div></div>'
+    +   '<div class="acts"><span class="tag green" id="liveTag">● 实时同步中</span>'
+    +   '<button class="btn" id="btnReload">'+App.icon('refresh')+'刷新消息</button></div></div>'
+    + '<div class="sim-banner">'+App.icon('archive')+'<span>当前角色可用频道：<b>'+GROUPS.map(function(g){ return g.label; }).join('、')+'</b>。院外单位仅可使用「院外上报沟通」，院内应急处置角色仅可使用「院内演练会商」，信息科负责人与院应急指挥部可使用两部分。消息与附件写入演练数据库并记入审计日志；聊天附件自动归档至取证模块。演练数据均为模拟，不得发送真实患者信息或恶意样本。</span></div>'
     + '<div class="tabs" id="chatTabs"></div>'
     + '<div class="card" style="padding:0;overflow:hidden">'
-    +   '<div id="chatPanel" style="display:flex;flex-direction:column;height:520px"></div>'
+    +   '<div class="collab-split">'
+    +     '<div class="prog-panel">'
+    +       '<div class="prog-head">'+App.icon('tasks')+'<b>演练节点操作情况</b><span class="tiny dim" id="progSub"></span></div>'
+    +       '<div class="prog-list" id="progList"><div class="tiny dim" style="padding:10px">加载中…</div></div>'
+    +     '</div>'
+    +     '<div id="chatPanel" style="display:flex;flex-direction:column;flex:1;min-width:0;height:620px"></div>'
+    +   '</div>'
     + '</div>';
 
   function renderTabs(){
-    document.getElementById('chatTabs').innerHTML = GROUPS.map(function(g){
-      var cnt = (MOCK.CHAT[g.key]||[]).length;
-      return '<span class="tab'+(curGroup===g.key?' active':'')+'" data-k="'+g.key+'">'+ic(g.icon,15)+g.label+'<span class="cnt">'+cnt+'</span>'+(isExternal&&g.key==='inner'?'<span class="tiny" style="color:var(--err)">受限</span>':'')+'</span>';
+    var tabs = GROUPS.map(function(g){
+      var info = channelInfo[g.key] || {};
+      var cnt = (info.count||0);
+      return '<span class="tab'+(curGroup===g.key?' active':'')+'" data-k="'+g.key+'">'
+        + ic(g.icon,15)+g.label
+        + '<span class="cnt">'+cnt+'</span></span>';
     }).join('');
+    document.getElementById('chatTabs').innerHTML = tabs;
     document.querySelectorAll('#chatTabs .tab').forEach(function(el){
       el.onclick = function(){
         var k = el.dataset.k;
-        if(isExternal && k==='inner'){
-          App.toast('外部单位仅可发言于跨部门联合会商组（授权组）','warn');
+        if(!canUseChat(k)){
+          App.toast('当前角色不具备该频道权限','warn');
           return;
         }
-        curGroup = k; renderTabs(); renderPanel();
+        if(curGroup===k) return;
+        curGroup = k; pendingAtt = null;
+        renderTabs(); renderPanel();
       };
     });
   }
 
   function renderPanel(){
     var panel = document.getElementById('chatPanel');
-    if(isExternal && curGroup==='inner'){
-      panel.innerHTML = '<div class="empty" style="margin:auto">'+App.icon('lock')+'<div>院内敏感讨论页签对「'+App.esc(role.name)+'」受限</div>'
-        + '<div class="tiny dim mt2">依据分级权限策略，外部单位仅可进入跨部门联合会商组，查看医院主动报送相关内容（演练模拟权限隔离）</div></div>';
-      return;
-    }
+    var g = groupOf(curGroup);
     panel.innerHTML =
-      '<div class="chat grow" id="chatBox" style="flex:1;overflow-y:auto"></div>'
+        '<div class="flex" style="justify-content:space-between;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--elev)">'
+      +   '<div class="small" style="color:var(--text2)">'+ic(g.icon,14)+' <b style="color:var(--text)">'+g.label+'</b> · '+esc(g.desc)+'</div>'
+      +   '<span class="tiny dim" id="chatHint">正在加载…</span>'
+      + '</div>'
+      + '<div class="chat grow" id="chatBox" style="flex:1;overflow-y:auto"></div>'
       + '<div style="border-top:1px solid var(--border);padding:12px 16px;background:var(--elev)">'
       +   '<div id="attChip" style="margin-bottom:8px"></div>'
-      +   '<div class="flex gap2">'
-      +     '<button class="btn icon" id="btnAttach" title="附件（模拟上传）">'+App.icon('upload')+'</button>'
-      +     '<input class="input grow" id="chatInput" placeholder="'+(isExternal?'向会商组发言（演练模拟）…':'输入会商内容，回车发送（演练模拟）…')+'" maxlength="200">'
+      +   '<div class="flex gap2" style="align-items:flex-end">'
+      +     '<input type="file" id="chatFile" style="display:none" accept=".png,.jpg,.jpeg,.gif,.webp,.txt,.log,.csv,.json,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.pcap,.pcapng">'
+      +     '<button class="btn icon" id="btnAttach" title="上传真实附件（单文件≤20MB）">'+App.icon('upload')+'</button>'
+      +     '<textarea class="textarea grow" id="chatInput" rows="1" maxlength="2000" placeholder="输入'+g.label+'内容，Enter 发送，Shift+Enter 换行…" style="min-height:40px;max-height:120px;resize:vertical"></textarea>'
       +     '<button class="btn primary" id="btnSend">'+App.icon('send')+'发送</button>'
       +   '</div>'
-      +   '<div class="tiny dim mt2">'+App.esc(role.name)+' · '+App.esc(App.curUser())+' 正在「'+GROUPS.filter(function(g){return g.key===curGroup;})[0].label+'」发言'+(isExternal?' · 仅授权组可发言':'')+' · 发言自动归档至取证模块</div>'
+      +   '<div class="tiny dim mt2" id="chatFoot">'+esc(role.name)+' · '+esc(App.curUser())+' 正在「'+g.label+'」发言 · 消息与附件持久化保存并归档审计</div>'
       + '</div>';
-    loadChat();
+    loadChat(true);
+    loadProgress();
     document.getElementById('btnSend').onclick = doSend;
-    document.getElementById('chatInput').addEventListener('keydown', function(ev){ if(ev.key==='Enter') doSend(); });
-    document.getElementById('btnAttach').onclick = openAttachModal;
+    document.getElementById('chatInput').addEventListener('keydown', function(ev){
+      if(ev.key==='Enter' && !ev.shiftKey){ ev.preventDefault(); doSend(); }
+    });
+    document.getElementById('btnAttach').onclick = function(){ document.getElementById('chatFile').click(); };
+    document.getElementById('chatFile').onchange = onFilePicked;
     renderAttChip();
   }
 
   function renderAttChip(){
     var box = document.getElementById('attChip');
     if(!box) return;
-    box.innerHTML = pendingAtt
-      ? '<span class="file-chip">'+App.icon('file')+App.esc(pendingAtt)+'<span class="fc-size">待发送附件（模拟）</span><span class="x" style="cursor:pointer;color:var(--text3)">×</span></span>'
-      : '';
-    if(pendingAtt){
-      box.querySelector('.x').onclick = function(){ pendingAtt=null; renderAttChip(); };
-    }
+    if(!pendingAtt){ box.innerHTML=''; return; }
+    box.innerHTML = '<span class="file-chip">'+App.icon('file')+esc(pendingAtt.name)
+      + '<span class="fc-size">'+esc(pendingAtt.size||'')+'</span>'
+      + '<span class="x" style="cursor:pointer;color:var(--text3)" title="移除">×</span></span>';
+    box.querySelector('.x').onclick = function(){ pendingAtt = null; renderAttChip(); };
   }
 
-  function loadChat(){
-    API.getChat(curGroup).then(renderChat);
+  function onFilePicked(){
+    var input = document.getElementById('chatFile');
+    var f = (input.files||[])[0];
+    input.value = '';
+    if(!f) return;
+    if(f.size > 20*1024*1024){ App.toast('单个附件不能超过 20MB','err'); return; }
+    if(/\.(exe|bat|cmd|vbs|scr|msi|com|pif|jar|ps1|sh|dll|sys|lnk)$/i.test(f.name)){
+      App.toast('禁止上传可执行程序/脚本类文件','err'); return;
+    }
+    var btn = document.getElementById('btnAttach');
+    btn.disabled = true;
+    App.toast('正在上传附件…','info');
+    var fd = new FormData(); fd.append('file', f);
+    API.uploadChatAttachment(curGroup, fd).then(function(r){
+      pendingAtt = { name: r.name, size: r.size, url: r.url, path: r.path };
+      renderAttChip();
+      App.toast('附件已上传，点击发送即可随消息发出','ok');
+    }).catch(function(err){
+      App.toast((err&&err.message)||'附件上传失败','err');
+    }).then(function(){ btn.disabled = false; });
+  }
+
+  function loadChat(scroll){
+    var box = document.getElementById('chatBox');
+    if(!box) return;
+    API.getChat(curGroup).then(function(msgs){
+      var atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+      renderChat(msgs||[]);
+      if(scroll || atBottom || msgs.length!==lastCount) box.scrollTop = box.scrollHeight;
+      lastCount = msgs.length;
+      var hint = document.getElementById('chatHint');
+      if(hint) hint.textContent = '共 '+msgs.length+' 条 · 每 4 秒自动同步';
+      loadChannelInfo();
+    }).catch(function(err){
+      var hint = document.getElementById('chatHint');
+      if(hint) hint.textContent = '同步失败：'+((err&&err.message)||'请稍后刷新');
+    });
   }
 
   function renderChat(msgs){
     var box = document.getElementById('chatBox');
     if(!box) return;
+    if(!msgs.length){
+      box.innerHTML = '<div class="empty" style="margin:auto">'+App.icon('chat')+'<div>暂无消息，发送第一条'+esc(groupOf(curGroup).label)+'消息</div>'
+        + '<div class="tiny dim mt2">消息将持久化保存，其他参演角色刷新或等待自动同步即可看到</div></div>';
+      return;
+    }
     box.innerHTML = msgs.map(function(m){
-      var cls = m.role==='sys' ? 'sys' : (m.role===role.id ? 'self' : '');
       if(m.role==='sys'){
-        return '<div class="msg sys"><div class="m-body">'+App.esc(m.text)+'<div class="tiny dim" style="margin-top:2px">'+m.time+' · 系统（演练模拟）</div></div></div>';
+        return '<div class="msg sys"><div class="m-body">'+esc(m.text)+'<div class="tiny dim" style="margin-top:2px">'+esc(m.time)+' · 系统</div></div></div>';
       }
-      return '<div class="msg '+cls+'">'
-        + '<span class="av" style="background:'+roleColor(m.role)+'">'+App.esc((m.sender||'?').slice(0,1))+'</span>'
-        + '<div class="m-body"><div class="m-meta"><span>'+App.esc(m.sender)+'</span><span>'+App.esc(roleName(m.role))+'</span><span>'+m.time+'</span></div>'
-        + '<div class="m-text">'+App.esc(m.text)+'</div>'
-        + (m.att ? '<div class="m-att">'+App.icon('file')+App.esc(m.att)+'</div>' : '')
-        + '</div></div>';
+      var self = m.role===role.id;
+      var attHtml = '';
+      if(m.att){
+        var img = m.url && isImage(m.att, m.url);
+        attHtml = img
+          ? '<a class="m-att" href="'+esc(m.url)+'" target="_blank" rel="noopener">'+App.icon('image')+esc(m.att)+'<span class="tiny dim">点击查看原图</span></a>'
+          : (m.url
+              ? '<a class="m-att" href="'+esc(m.url)+'" target="_blank" rel="noopener" download>'+App.icon('file')+esc(m.att)+'<span class="tiny dim">下载附件</span></a>'
+              : '<div class="m-att">'+App.icon('file')+esc(m.att)+'<span class="tiny dim">历史归档附件</span></div>');
+      }
+      return '<div class="msg '+(self?'self':'')+'">'
+        + '<span class="av" style="background:'+roleColor(m.role)+'">'+esc((m.sender||'?').slice(0,1))+'</span>'
+        + '<div class="m-body"><div class="m-meta"><span>'+esc(m.sender)+'</span><span>'+esc(roleName(m.role))+'</span><span>'+esc(m.time)+'</span></div>'
+        + (m.text?'<div class="m-text">'+esc(m.text)+'</div>':'')
+        + attHtml + '</div></div>';
     }).join('');
-    box.scrollTop = box.scrollHeight;
+  }
+
+  function loadChannelInfo(){
+    API.getChatChannels().then(function(list){
+      channelInfo = {};
+      (list||[]).forEach(function(c){ channelInfo[c.key] = c; });
+      var tabs = document.querySelectorAll('#chatTabs .tab');
+      tabs.forEach(function(el){
+        var k = el.dataset.k, info = channelInfo[k];
+        if(!info) return;
+        var cnt = el.querySelector('.cnt');
+        if(cnt) cnt.textContent = info.count;
+      });
+    }).catch(function(){});
+  }
+
+  /* ---------- 演练节点操作情况（院内频道看院内+院外，院外频道仅上报沟通阶段） ---------- */
+  var STATUS_LABEL = { done: ['green', '已完成'], wrong: ['red', '决策偏离'], doing: ['blue', '处置中'] };
+  function pad2(n){ return n<10 ? '0'+n : ''+n; }
+  function loadProgress(){
+    API.getDrillProgress(curGroup).then(function(d){
+      var box = document.getElementById('progList');
+      if(!box) return;
+      var sub = document.getElementById('progSub');
+      if(sub) sub.textContent = (d && d.project) ? (d.project.name + ' · ' + d.mode) : '暂无演练项目';
+      var nodes = (d && d.nodes) || [];
+      if(!nodes.length){
+        box.innerHTML = '<div class="empty" style="padding:24px 10px">'+App.icon('tasks')
+          + '<div class="small dim">'+(d&&d.project ? '当前频道暂无处置中或已完成的节点' : '暂无进行中的演练项目')+'</div>'
+          + '<div class="tiny dim mt2">'+esc(curGroup==='external' ? '院外频道仅展示院外上报沟通阶段节点' : '节点打开处置表单后显示为处置中')+'</div></div>';
+        return;
+      }
+      box.innerHTML = nodes.map(function(n){
+        var lab = STATUS_LABEL[n.status] || STATUS_LABEL.doing;
+        return '<div class="pg-row '+n.status+'">'
+          + '<div class="pg-top"><span class="pg-seq">'+pad2(n.seq)+'</span>'
+          +   '<span class="pg-title" title="'+esc(n.title)+'">'+esc(n.title)+'</span>'
+          +   '<span class="tag '+lab[0]+'">'+lab[1]+'</span></div>'
+          + '<div class="pg-meta">'+App.icon('user')+'<span>责任：'+esc(n.target||'—')+'</span></div>'
+          + '<div class="pg-meta">'+App.icon('clock')+'<span>'+(n.opTime ? ('操作：'+esc(n.actor||'—')+' · '+esc(n.opTime)) : ('计划：'+esc(n.planTime||'—')))+'</span></div>'
+          + (n.scope==='external' ? '<div class="pg-tags"><span class="tag yellow">院外上报沟通</span></div>' : '')
+          + '</div>';
+      }).join('');
+    }).catch(function(err){
+      var box = document.getElementById('progList');
+      if(box) box.innerHTML = '<div class="tiny dim" style="padding:10px">节点情况加载失败：'+esc((err&&err.message)||'请刷新')+'</div>';
+    });
   }
 
   function doSend(){
     var input = document.getElementById('chatInput');
     var text = (input.value||'').trim();
-    if(!text){ App.toast('请输入会商内容','warn'); return; }
-    API.sendChat(curGroup, '【演练模拟】'+text, pendingAtt).then(function(){
-      if(pendingAtt){
-        API.addEvidence({ type:'聊天记录', name:'会商附件-'+pendingAtt+'(演练模拟)', size:'18 KB' });
-      }
-      pendingAtt = null;
+    if(!text && !pendingAtt){ App.toast('请输入内容或上传附件','warn'); return; }
+    var btn = document.getElementById('btnSend');
+    btn.disabled = true;
+    var att = pendingAtt;
+    API.sendChat(curGroup, text, att?att.name:null, att?att.path:null, att?att.size:null).then(function(){
       input.value = '';
-      loadChat(); renderTabs();
+      pendingAtt = null;
+      renderAttChip();
+      loadChat(true);
+      App.toast('已发送到「'+groupOf(curGroup).label+'」','ok');
+    }).catch(function(err){
+      App.toast((err&&err.message)||'发送失败','err');
+    }).then(function(){ btn.disabled = false; input.focus(); });
+  }
+
+  function startPolling(){
+    if(pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(function(){
+      if(document.hidden) return;
+      loadChat(false);
+      loadProgress();
+    }, 4000);
+    document.addEventListener('visibilitychange', function(){
+      if(!document.hidden) { loadChat(false); loadProgress(); }
     });
   }
 
-  function openAttachModal(){
-    App.modal({ title:'添加附件（模拟上传）', body:'<div class="sim-banner">'+App.icon('alert')+'<span>原型演示：仅登记文件名作为模拟附件，不读取真实文件内容，不含恶意样本。</span></div>'
-      + '<div class="form-row"><label class="f-label">文件名</label><input class="input" id="attName" value="处置进展简报.pdf" placeholder="如：告警截图.png"></div>'
-      + '<div class="upload-box">'+App.icon('upload')+'模拟选择文件 · 支持 pdf / png / txt / docx（演练模拟）</div>',
-      foot:'<button class="btn" id="atNo">取消</button><button class="btn primary" id="atYes">确认添加</button>',
-      onOpen:function(ov){
-        ov.querySelector('#atNo').onclick = ov.close;
-        ov.querySelector('#atYes').onclick = function(){
-          var n = (ov.querySelector('#attName').value||'').trim();
-          if(!n){ App.toast('请填写模拟文件名','warn'); return; }
-          pendingAtt = n;
-          ov.close();
-          renderAttChip();
-          App.toast('模拟附件已挂载：'+n,'ok');
-        };
-      } });
-  }
+  var btnReload = document.getElementById('btnReload');
+  if(btnReload) btnReload.onclick = function(){ loadChat(true); loadProgress(); App.toast('消息与节点操作情况已刷新','ok'); };
 
-  renderTabs(); renderPanel();
+  loadChannelInfo();
+  renderTabs();
+  renderPanel();
+  startPolling();
 });
 App.boot('collab');
 </script>

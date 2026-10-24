@@ -3,16 +3,16 @@ window.MOCK = (function(){
 "use strict";
 
 var ROLES = [
-  { id:'commander', name:'院应急指挥部', short:'指挥部', desc:'分管院长牵头：研判决策、启动/终止预案、审批上报与口径', nav:['dashboard','tasks','workbench','collab','projects','evidence','replay','evaluation','ledger','opinion','knowledge'], color:'#2f81f7' },
-  { id:'duty', name:'信息科值班员', short:'值班员', desc:'接收模拟告警、核实记录、第一时间上报，无封堵/系统操作权限', nav:['tasks','workbench','collab','knowledge'], color:'#58a6ff' },
-  { id:'netsec', name:'网络安全管理员', short:'网安员', desc:'网络侧模拟处置：IP封堵、ACL调整、断网隔离、流量排查、样本上传', nav:['tasks','workbench','collab','evidence','knowledge'], color:'#a371f7' },
-  { id:'sysadmin', name:'系统管理员', short:'系统员', desc:'核心系统模拟处置：HIS/EMR/LIS/PACS停机、灾备切换、备份校验、恢复', nav:['tasks','workbench','collab','evidence','knowledge'], color:'#3fb950' },
-  { id:'itlead', name:'信息科负责人', short:'信息科长', desc:'科内统筹、组织研判、汇总简报、向指挥部汇报、分配技术任务', nav:['dashboard','tasks','workbench','collab','evidence','replay','knowledge'], color:'#d29922' },
-  { id:'medlead', name:'医务部/门诊部负责人', short:'医务部', desc:'业务影响评估、组织纸质兜底流程、患者风险评估、临床工作指引', nav:['tasks','workbench','collab','knowledge'], color:'#f85149' },
-  { id:'clinical', name:'临床科室/收费窗口', short:'临床窗口', desc:'患者沟通解释、公告张贴、诉求投诉登记、业务卡点上报', nav:['tasks','workbench','collab','knowledge'], color:'#e3b341' },
-  { id:'healthbureau', name:'市卫生健康局', short:'卫健局', desc:'行业主管：接收上报、督办处置、统筹区域资源、查看上报文书（仅报送材料）', nav:['tasks','workbench','collab','knowledge'], external:true, color:'#56d364' },
-  { id:'cac', name:'市网信办', short:'网信办', desc:'舆情管控指导、依法监管、接收事件通报、口径指导（仅报送材料）', nav:['tasks','workbench','collab','opinion','knowledge'], external:true, color:'#39c5cf' },
-  { id:'cyberpolice', name:'市网安大队', short:'网安大队', desc:'接收报案材料、登记报案、取证指引、固定证据、反馈受理状态（仅报送材料）', nav:['tasks','workbench','collab','evidence','knowledge'], external:true, color:'#ff7b72' },
+  { id:'commander', name:'院应急指挥部', short:'指挥部', desc:'分管院长牵头：研判决策、启动/终止预案、审批上报与口径', nav:['dashboard','workbench','collab','projects','evidence','replay','evaluation','ledger','opinion','knowledge'], color:'#2f81f7' },
+  { id:'duty', name:'信息科值班员', short:'值班员', desc:'接收模拟告警、核实记录、第一时间上报，无封堵/系统操作权限', nav:['workbench','collab','knowledge'], color:'#58a6ff' },
+  { id:'netsec', name:'网络安全管理员', short:'网安员', desc:'网络侧模拟处置：IP封堵、ACL调整、断网隔离、流量排查、样本上传', nav:['workbench','collab','evidence','knowledge'], color:'#a371f7' },
+  { id:'sysadmin', name:'系统管理员', short:'系统员', desc:'核心系统模拟处置：HIS/EMR/LIS/PACS停机、灾备切换、备份校验、恢复', nav:['workbench','collab','evidence','knowledge'], color:'#3fb950' },
+  { id:'itlead', name:'信息科负责人', short:'信息科长', desc:'科内统筹、组织研判、汇总简报、向指挥部汇报、分配技术任务', nav:['dashboard','workbench','collab','evidence','replay','knowledge'], color:'#d29922' },
+  { id:'medlead', name:'医务部/门诊部负责人', short:'医务部', desc:'业务影响评估、组织纸质兜底流程、患者风险评估、临床工作指引', nav:['workbench','collab','knowledge'], color:'#f85149' },
+  { id:'clinical', name:'临床科室/收费窗口', short:'临床窗口', desc:'患者沟通解释、公告张贴、诉求投诉登记、业务卡点上报', nav:['workbench','collab','knowledge'], color:'#e3b341' },
+  { id:'healthbureau', name:'市卫生健康局', short:'卫健局', desc:'行业主管：接收上报、督办处置、统筹区域资源、查看上报文书（仅报送材料）', nav:['workbench','collab','knowledge'], external:true, color:'#56d364' },
+  { id:'cac', name:'市网信办', short:'网信办', desc:'舆情管控指导、依法监管、接收事件通报、口径指导（仅报送材料）', nav:['workbench','collab','opinion','knowledge'], external:true, color:'#39c5cf' },
+  { id:'cyberpolice', name:'市网安大队', short:'网安大队', desc:'接收报案材料、登记报案、取证指引、固定证据、反馈受理状态（仅报送材料）', nav:['workbench','collab','evidence','knowledge'], external:true, color:'#ff7b72' },
   { id:'platformadmin', name:'平台系统管理员', short:'平台管理员', desc:'账号/角色/剧本/字典维护、日志审计、数据备份，不参与业务推演', nav:['scenarios','script-editor','projects','ledger','admin','knowledge'], color:'#8f9aa8' }
 ];
 
@@ -31,14 +31,14 @@ var USERS = [
 ];
 
 var SCENARIOS = [
-  { id:'S01', name:'勒索病毒攻击演练', type:'勒索病毒', level:'重大', difficulty:'实战版', status:'启用', version:'v2.1', updated:'2026-09-12', nodes:14, desc:'内网终端中招、文件加密、勒索提示，评估HIS服务器感染风险，推演断网隔离、备份恢复与上报流程。' },
-  { id:'S02', name:'内网横向渗透/账号泄露', type:'内网渗透', level:'较大', difficulty:'基础版', status:'启用', version:'v1.3', updated:'2026-08-25', nodes:11, desc:'弱口令入侵后横向移动，电子病历数据遭非法访问，推演账号排查、终端隔离与取证。' },
-  { id:'S03', name:'DDoS攻击致门诊收费卡顿', type:'DDoS攻击', level:'较大', difficulty:'实战版', status:'启用', version:'v1.1', updated:'2026-07-30', nodes:9, desc:'门诊收费系统遭流量攻击卡顿，推演流量清洗协调、窗口纸质兜底与业务恢复确认。' },
-  { id:'S04', name:'钓鱼邮件跳板入侵', type:'钓鱼邮件', level:'一般', difficulty:'基础版', status:'启用', version:'v2.0', updated:'2026-09-02', nodes:10, desc:'信息科人员点击木马邮件，攻击者获取跳板，推演邮件排查、全员通报与账号重置。' },
-  { id:'S05', name:'核心存储故障系统宕机', type:'系统宕机', level:'重大', difficulty:'实战版', status:'启用', version:'v1.5', updated:'2026-08-18', nodes:13, desc:'核心存储/数据库故障致HIS、EMR整体宕机，推演灾备切换、兜底流程与恢复验证。' },
-  { id:'S06', name:'患者隐私数据泄露（舆情发酵）', type:'数据泄露', level:'重大', difficulty:'实战版', status:'启用', version:'v1.2', updated:'2026-09-20', nodes:15, desc:'虚拟患者数据在外部论坛售卖引发舆情，推演上报、口径审批、舆情管控与报案取证。' },
-  { id:'S07', name:'外网边界防火墙被突破', type:'边界突破', level:'较大', difficulty:'实战版', status:'启用', version:'v1.0', updated:'2026-06-28', nodes:12, desc:'边界设备被突破、多业务系统并发告警，推演边界收敛、策略调整与全网排查。' },
-  { id:'S08', name:'恶意代码批量感染办公网', type:'恶意代码', level:'一般', difficulty:'基础版', status:'停用', version:'v1.4', updated:'2026-05-15', nodes:8, desc:'办公网终端批量感染恶意代码，业务网暂未波及，推演批量断网、样本摘要提取与查杀。' }
+  { id:'S01', name:'勒索病毒攻击演练', type:'勒索病毒', level:'重大', difficulty:'实战版', status:'启用', version:'v2.1', updated:'2026-09-12', nodes:14, desc:'内网终端中招、文件加密、勒索提示，评估HIS服务器感染风险，推演断网隔离、备份恢复与上报流程。', alert:'T+0 监控平台推送紧急告警：HIS 门诊工作站与共享文件服务器出现大量文件被加密（扩展名变为 .locked），桌面弹出勒索信；已有 3 台终端无法打开业务系统，疑似勒索病毒正在院内网横向扩散。' },
+  { id:'S02', name:'内网横向渗透/账号泄露', type:'内网渗透', level:'较大', difficulty:'基础版', status:'启用', version:'v1.3', updated:'2026-08-25', nodes:11, desc:'弱口令入侵后横向移动，电子病历数据遭非法访问，推演账号排查、终端隔离与取证。', alert:'T+0 监测发现电子病历系统存在异常账号登录与批量查询行为：同一账号在 10 分钟内从 4 台不同终端访问病历，疑似弱口令被利用并横向渗透，部分病历数据可能已被非法访问。' },
+  { id:'S03', name:'DDoS攻击致门诊收费卡顿', type:'DDoS攻击', level:'较大', difficulty:'实战版', status:'启用', version:'v1.1', updated:'2026-07-30', nodes:9, desc:'门诊收费系统遭流量攻击卡顿，推演流量清洗协调、窗口纸质兜底与业务恢复确认。', alert:'T+0 门诊收费系统出现大面积卡顿并间歇性超时，外网出口流量异常激增（峰值约为日常的 30 倍），收费窗口排队积压，疑似遭受 DDoS 流量攻击。' },
+  { id:'S04', name:'钓鱼邮件跳板入侵', type:'钓鱼邮件', level:'一般', difficulty:'基础版', status:'启用', version:'v2.0', updated:'2026-09-02', nodes:10, desc:'信息科人员点击木马邮件，攻击者获取跳板，推演邮件排查、全员通报与账号重置。', alert:'T+0 信息科多名人员收到伪装为“医保结算通知”的邮件并点击附件，随后终端出现可疑外联行为与异常进程，疑似钓鱼木马已在办公终端取得跳板权限。' },
+  { id:'S05', name:'核心存储故障系统宕机', type:'系统宕机', level:'重大', difficulty:'实战版', status:'启用', version:'v1.5', updated:'2026-08-18', nodes:13, desc:'核心存储/数据库故障致HIS、EMR整体宕机，推演灾备切换、兜底流程与恢复验证。', alert:'T+0 核心存储阵列发出硬件告警，HIS、EMR 等业务系统整体无法访问，数据库连接持续失败，门诊挂号、收费与住院医嘱业务中断，需立即启动应急与业务兜底。' },
+  { id:'S06', name:'患者隐私数据泄露（舆情发酵）', type:'数据泄露', level:'重大', difficulty:'实战版', status:'启用', version:'v1.2', updated:'2026-09-20', nodes:15, desc:'虚拟患者数据在外部论坛售卖引发舆情，推演上报、口径审批、舆情管控与报案取证。', alert:'T+0 监测发现虚拟患者数据在外部论坛被公开售卖，样本包含姓名、就诊科室与就诊记录；相关截图已在社交媒体传播，存在舆情快速发酵与监管问责风险。' },
+  { id:'S07', name:'外网边界防火墙被突破', type:'边界突破', level:'较大', difficulty:'实战版', status:'启用', version:'v1.0', updated:'2026-06-28', nodes:12, desc:'边界设备被突破、多业务系统并发告警，推演边界收敛、策略调整与全网排查。', alert:'T+0 外网边界防火墙检测到异常穿透与策略篡改行为，多个业务系统同时出现异常访问告警，疑似边界设备已被突破并建立外联通道，需立即收敛边界并开展全网排查。' },
+  { id:'S08', name:'恶意代码批量感染办公网', type:'恶意代码', level:'一般', difficulty:'基础版', status:'停用', version:'v1.4', updated:'2026-05-15', nodes:8, desc:'办公网终端批量感染恶意代码，业务网暂未波及，推演批量断网、样本摘要提取与查杀。', alert:'T+0 办公网多台终端批量弹出异常进程提示并生成可疑文件，终端资源占用异常升高；业务网暂未发现波及，疑似恶意代码在办公网批量感染。' }
 ];
 
 var PROJECTS = [
@@ -85,7 +85,7 @@ var CHAT = {
     { sender:'张副院长', role:'commander', time:'10:20', text:'启动Ⅱ级响应。信息科每30分钟报一次处置进展，医务部同步兜底情况。' },
     { sender:'系统', role:'sys', time:'10:21', text:'【演练模拟】院应急指挥部下达指令：启动Ⅱ级应急响应' }
   ],
-  joint: [ // 跨部门联合会商组
+  external: [ // 院外上报沟通组（外部单位与院内报送角色）
     { sender:'周科员', role:'healthbureau', time:'11:10', text:'收到医院上报材料。请保持处置进展同步，如需区域资源支持可提出。' },
     { sender:'陈主任', role:'itlead', time:'11:15', text:'目前感染已控制在办公网3台终端，业务网正在恢复验证。' },
     { sender:'郑警官', role:'cyberpolice', time:'11:22', text:'报案材料请包含：勒索信截图、样本哈希摘要、加密文件清单（虚拟数据）。', att:'取证指引单.pdf' },

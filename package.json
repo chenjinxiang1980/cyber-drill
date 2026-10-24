@@ -1,6 +1,6 @@
 {
   "name": "cyber-drill-system",
-  "version": "1.0.0",
+  "version": "0.1.5",
   "description": "盘州市人民医院网络安全应急演练系统（局域网部署版）",
   "main": "server.js",
   "private": true,

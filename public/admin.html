@@ -36,7 +36,7 @@ document.addEventListener('app:ready', function(e){
     { name:'邮件（模拟）', desc:'日报与归档通知，演练中不真实发送', on:false }
   ];
 
-  var MODS = [['dashboard','演练看板'],['tasks','任务协同'],['workbench','角色工作台'],['collab','协同会商'],['scenarios','场景剧本库'],['projects','演练项目'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['ledger','台账统计'],['opinion','公告舆情'],['knowledge','预案知识库'],['admin','系统管理']];
+  var MODS = [['dashboard','演练看板'],['workbench','角色工作台'],['collab','演练导调'],['scenarios','场景剧本库'],['projects','演练项目'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['ledger','台账统计'],['opinion','公告舆情'],['knowledge','预案知识库'],['admin','系统管理']];
   function roleName(id){ var r = MOCK.ROLES.filter(function(x){ return x.id===id; })[0]; return r ? r.name : id; }
   function objOf(a){ var m = a.match(/《(.+?)》/); if(m) return m[1]; var i = a.indexOf('：'); return i>=0 ? a.slice(i+1) : '—'; }
 

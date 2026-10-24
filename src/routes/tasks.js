@@ -25,6 +25,10 @@ function taskAccess(user, task) {
 function loadTask(req, res, next) {
   const t = db.prepare('SELECT * FROM tasks WHERE id=?').get(req.params.id);
   if (!t) return res.status(404).json({ error: '任务不存在' });
+  const p = db.prepare('SELECT mode FROM projects WHERE id=?').get(t.project_id);
+  if (p && p.mode === '实战版') {
+    return res.status(403).json({ error: '实战版不在任务列表发布处置任务，请在角色工作台自主研判处置' });
+  }
   if (!taskAccess(req.user, t)) {
     return res.status(403).json({ error: '当前角色无权操作该任务（分级权限隔离）' });
   }
@@ -40,13 +44,17 @@ function activeProjectId() {
 /* 列表 */
 router.get('/', auth.requireAuth, function (req, res) {
   const rows = db.prepare('SELECT * FROM tasks ORDER BY seq').all();
+  const practical = {};
+  db.prepare("SELECT id FROM projects WHERE mode='实战版'").all().forEach(function (p) { practical[p.id] = true; });
   const atts = db.prepare('SELECT * FROM task_attachments ORDER BY id').all();
   const byTask = {};
   atts.forEach(function (a) { (byTask[a.task_id] = byTask[a.task_id] || []).push(a); });
-  res.json(rows.filter(function (t) { return taskAccess(req.user, t); }).map(function (t) {
+  res.json(rows.filter(function (t) {
+    return !practical[t.project_id] && taskAccess(req.user, t);
+  }).map(function (t) {
     return {
       id: t.id, projectId: t.project_id, role: t.role_id, title: t.title, desc: t.descr,
-      deadline: t.deadline, status: t.status, level: t.level,
+      deadline: t.deadline, status: t.status, level: t.level, nodeId: t.node_id || null,
       forms: parseJson(t.forms, []),
       atts: (byTask[t.id] || []).map(function (a) {
         return { id: a.id, name: a.name, type: a.type, size: a.size, url: a.url, by: a.uploader, time: a.time, auto: !!a.auto };

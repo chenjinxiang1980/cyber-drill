@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS scenarios (
   version    TEXT,
   updated    TEXT,
   nodes      INTEGER,
-  descr      TEXT
+  descr      TEXT,
+  alert      TEXT
 );
 
 -- 剧本节点
@@ -84,10 +85,15 @@ CREATE TABLE IF NOT EXISTS script_nodes (
   guide      TEXT,   -- 基础版引导提示（实战版不下发）
   keywords   TEXT,   -- 实战版判定关键词（逗号分隔）
   action     TEXT,   -- 对应动作类型（实战版步骤归类）
-  required   INTEGER DEFAULT 1  -- 是否基础版必经步骤（实战版据此判定遗漏）
+  wrong      TEXT,   -- JSON：实战版干扰选项（2 项，未配置时按动作类型自动生成）
+  evidence_req TEXT, -- JSON：剧本要求取证材料（类型/名称/说明）
+  required   INTEGER DEFAULT 1,  -- 是否必经步骤（实战版据此判定遗漏）
+  flow_type  TEXT DEFAULT 'correct', -- correct=正确流程 / distractor=混淆流程（基础版不显示）
+  score      INTEGER DEFAULT 0,  -- 本步骤分值（正确流程得分，混淆流程选错扣分；正确流程合计应≤100）
+  receiver   TEXT   -- 下一节点接收角色名称（基础版默认按剧本流转，实战版由参演人员选择）
 );
 
--- 实战版自主处置步骤（参演人员自行添加，系统按基础版判定遗漏与时限）
+-- 实战版自主处置记录（按剧本节点自主选择处置方案并填写实际情况）
 CREATE TABLE IF NOT EXISTS drill_steps (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id  TEXT,
@@ -101,9 +107,32 @@ CREATE TABLE IF NOT EXISTS drill_steps (
   matched_node TEXT,  -- 匹配到的剧本节点ID（空=未匹配/冗余）
   matched     INTEGER DEFAULT 0,
   ontime      INTEGER DEFAULT 0,
+  choice      TEXT,   -- 选择的处置方案
+  correct     INTEGER DEFAULT 1, -- 选择是否正确
+  found_at    TEXT,   -- 发现时间
+  found       TEXT,   -- 发现情况
+  measure     TEXT,   -- 处置措施
+  result      TEXT,   -- 处置结果
+  evidence    TEXT,   -- 证据材料说明
+  forms       TEXT,   -- JSON：实战版实际填报的表单字段
+  flow_type   TEXT DEFAULT 'correct', -- 提交时该流程的属性（correct/distractor）
+  score       REAL DEFAULT 0,        -- 本次流程得分/扣分
+  receiver    TEXT,                  -- 实战版选择的下一节点接收人（多选，逗号分隔）
+  receiver_ok INTEGER DEFAULT 1,     -- 接收人是否选择正确（错误扣本流程10%分值）
+  skipped     INTEGER DEFAULT 0,     -- 1=参演人员判定“不执行”跳过该流程
   created_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_drill_steps_proj ON drill_steps(project_id);
+
+-- 节点处置中状态（参演人员打开处置表单即视为处置中，仅用于导调中心节点操作情况展示）
+CREATE TABLE IF NOT EXISTS drill_node_state (
+  project_id TEXT NOT NULL,
+  node_id    TEXT NOT NULL,
+  role_id    TEXT,
+  user       TEXT,
+  started_at TEXT,
+  PRIMARY KEY (project_id, node_id)
+);
 
 -- 演练任务
 CREATE TABLE IF NOT EXISTS tasks (
@@ -116,6 +145,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   status     TEXT,
   level      TEXT,
   forms      TEXT,   -- JSON
+  node_id    TEXT,   -- 基础版自动生成任务对应的剧本节点
   seq        INTEGER
 );
 
@@ -211,7 +241,10 @@ CREATE TABLE IF NOT EXISTS evidence (
   project_id TEXT,
   url        TEXT,
   file_path  TEXT,
-  created_at TEXT
+  created_at TEXT,
+  note       TEXT,   -- 取证说明 / 预填材料备注
+  node_id    TEXT,   -- 关联剧本节点（剧本要求取证时记录）
+  req_key    TEXT    -- 剧本取证材料项标识（nodeId#index）
 );
 
 -- 状态快照

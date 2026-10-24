@@ -53,6 +53,33 @@ document.addEventListener('app:ready', function(e){
   function clone(x){ return JSON.parse(JSON.stringify(x)); }
   var ACTION_TYPES = ['告警核实','隔离处置','处置恢复','取证留痕','上报审批','业务兜底','协同沟通','其他'];
   function kwText(n){ var k = n.keywords; return Array.isArray(k) ? k.join(',') : (k||''); }
+  /* 需取证材料：内部结构 [{type,name,note}] ↔ 文本行「类型|名称|说明」 */
+  function evText(n){
+    return (Array.isArray(n.evidenceReq) ? n.evidenceReq : []).map(function(x){
+      return [x.type||'处置记录', x.name||'', x.note||''].join('|');
+    }).join('\n');
+  }
+  /* 按剧本节点内容自动生成相符的取证材料（与后端规则一致） */
+  function autoEv(n){
+    var title = n.title||'处置环节', target = n.target||'—';
+    var action = n.action||'', guide = n.guide||n.desc||'按预案执行处置';
+    var out = [{ type:'处置记录', name:'处置记录-'+title+'.md', note:'责任角色：'+target+'；处置要点：'+String(guide).slice(0,80) }];
+    if(n.form) out.push({ type:'表单文书', name:'表单文书-'+title+'.md', note:'节点关联表单 '+n.form+' 提交后的归档文书（演练虚拟版本）。' });
+    if(/取证|样本|日志|排查|分析/.test(action+title+guide)) out.push({ type:'样本摘要', name:'样本摘要-'+title+'.txt', note:'虚拟样本摘要（仅哈希与特征描述，不含真实恶意程序）。' });
+    if(/隔离|断网|封堵|切换|恢复|停机/.test(action+title)) out.push({ type:'操作日志', name:'操作日志-'+title+'.md', note:'系统/网络设备操作记录片段（演练虚拟日志）。' });
+    return out.slice(0, 6);
+  }
+  function parseEvText(text){
+    return String(text||'').split('\n').map(function(line){
+      var p = line.split('|');
+      if(p.length<2) return null;
+      var name = String(p[1]||'').trim();
+      if(!name) return null;
+      var type = String(p[0]||'').trim();
+      if(['附件截图','操作日志','处置记录','样本摘要','表单文书','上报材料','报案材料','附件'].indexOf(type)<0) type = '处置记录';
+      return { type:type, name:name.slice(0,160), note:String(p.slice(2).join('|')||'').trim().slice(0,400) };
+    }).filter(function(x){ return !!x; }).slice(0,6);
+  }
   function fallbackNodes(s){
     return [
       { id:'FN1', type:'alert', title:'T+0 '+s.type+'模拟告警推送', target:'信息科值班员', time:'09:00', timeout:10, desc:'推送「'+s.name+'」场景模拟告警（实战版仅原始告警）' },
@@ -89,21 +116,55 @@ document.addEventListener('app:ready', function(e){
     + '<button class="btn" id="btnPlay">'+App.icon('play')+'预览推演</button>'
     + '<button class="btn primary" id="btnSave">'+App.icon('check')+'保存剧本</button></div></div>'
     + '<div class="sim-banner">'+App.icon('alert')+'<span>编排操作仅写入演练平台剧本库（模拟），不会向任何真实网络、系统下发指令。节点数据为虚拟演练内容。</span></div>'
+    + '<div class="card" style="margin-bottom:16px;border-color:rgba(248,81,73,.35)">'
+    +   '<div class="card-title">'+App.icon('alert')+'演练初始故障通报<span class="more">工作台弹窗 + 顶部固定告警</span></div>'
+    +   '<div class="tiny dim mb2">演练开始后，角色工作台先弹窗展示该故障内容，随后在页面正上方以醒目红色告警条常驻显示。基础版与实战版共用同一份通报，各角色内容一致。</div>'
+    +   '<div class="form-row"><label class="f-label">故障通报内容</label><textarea class="textarea" id="seAlert" rows="3" placeholder="如：T+0 监控平台推送紧急告警：……">'+App.esc(scenarioById(curId).alert||'')+'</textarea></div>'
+    + '</div>'
     + '<div class="se-layout">'
     +   '<div class="card se-palette">'
     +     '<div class="card-title">'+App.icon('flow')+'节点类型</div>'
     +     Object.keys(TYPES).map(function(k){ return '<div class="pal-item" data-type="'+k+'"><span style="color:'+TYPES[k].color+'">'+App.icon(TYPES[k].icon)+'</span>'+TYPES[k].label+'节点<small>点击添加</small></div>'; }).join('')
     +     '<div class="divider"></div>'
-    +     '<div class="section-title">演练难度</div>'
+    +     '<div class="section-title">剧本难度标注</div>'
     +     '<div class="seg" style="width:100%"><div class="s-opt'+(diff==='基础版'?' on':'')+'" data-d="基础版" style="flex:1;text-align:center">基础版</div><div class="s-opt'+(diff==='实战版'?' on':'')+'" data-d="实战版" style="flex:1;text-align:center">实战版</div></div>'
-    +     '<div class="tiny dim mt2">'+(diff==='基础版'?'基础版：节点附引导提示与表单预填。':'实战版：仅推送原始告警，无引导提示。')+'</div>'
+    +     '<div class="tiny dim mt2">两种演练模式共用同一套剧本：基础版在工作台逐步提示正确流程；实战版在正确流程之外额外加入混淆流程，参演人员需自主研判，误选按该流程分值扣分。实际演练模式在新建项目时选择。</div>'
+    +     '<div class="divider"></div>'
+    +     '<div class="section-title">流程分值</div>'
+    +     '<div id="seSum" class="small muted"></div>'
     +   '</div>'
     +   '<div class="canvas se-canvas" id="canvasFlow"></div>'
     + '</div>';
 
   function formName(fid){ var t = MOCK.FORM_TEMPLATES.filter(function(x){ return x.id===fid; })[0]; return t?t.name:''; }
 
+  function roleNames(){
+    var list = (MOCK.ROLES || []).map(function(r){ return r.name; });
+    ['院应急指挥部', '信息科负责人', '信息科值班员', '网络安全管理员', '系统管理员', '医务科主任', '临床科室'].forEach(function(x){
+      if(list.indexOf(x) < 0) list.push(x);
+    });
+    return list;
+  }
+  function recvList(n){
+    return String((n&&n.receiver)||'').split(/[、,，;；]/).map(function(x){ return x.trim(); }).filter(Boolean);
+  }
+  function scoreTotal(){
+    return nodes.filter(function(x){ return x.type!=='end' && x.flowType!=='distractor'; })
+      .reduce(function(a,x){ return a + (Number(x.score)||0); },0);
+  }
+  function renderSum(){
+    var el = document.getElementById('seSum');
+    if(!el) return;
+    var total = scoreTotal();
+    var dis = nodes.filter(function(x){ return x.type!=='end' && x.flowType==='distractor'; }).length;
+    el.innerHTML = '正确流程合计 <b>'+total+'</b> / 100 分 · 混淆流程 <b>'+dis+'</b> 条'
+      + (total>100?'<br><span style="color:var(--err)">已超出 '+(total-100)+' 分，请下调各节点分值</span>'
+                  :(total<100?'<br><span style="color:var(--warn)">未满 100 分，请分配剩余分值</span>'
+                             :'<br><span style="color:var(--ok)">分值已满 100 分</span>'));
+  }
+
   function render(){
+    renderSum();
     var c = document.getElementById('canvasFlow');
     if(!nodes.length){ c.innerHTML = '<div class="empty">'+App.icon('flow')+'<div>画布为空，从左侧类型面板添加节点</div></div>'; return; }
     c.innerHTML = nodes.map(function(n,i){
@@ -118,7 +179,13 @@ document.addEventListener('app:ready', function(e){
       + (n.timeout?'<span>超时 '+n.timeout+' 分钟提醒</span>':'')
       + (n.action?'<span class="tag blue" style="font-size:10px">'+App.esc(n.action)+'</span>':'')
       + (n.required===false?'<span class="tag gray" style="font-size:10px">可选步骤</span>':'<span class="tag green" style="font-size:10px">必经</span>')
+      + (n.type!=='end'
+          ? (n.flowType==='distractor'
+              ? '<span class="tag red" style="font-size:10px">混淆流程 '+ (Number(n.score)||0) +' 分</span>'
+              : '<span class="tag blue" style="font-size:10px">正确流程 '+ (Number(n.score)||0) +' 分</span>')
+          : '')
       + (kwText(n)?'<span>关键词：'+App.esc(kwText(n))+'</span>':'')
+      + (n.type!=='end'&&n.flowType!=='distractor'?'<span>流转 → '+App.esc(n.receiver||'院应急指挥部')+'</span>':'')
       + '<span class="tag gray" style="font-size:10px">'+t.label+'</span></div>'
       + branchHtml + '</div>'
       + '<div class="nd-ops"><button class="btn sm" data-edit="'+i+'">'+App.icon('edit')+'配置</button>'
@@ -165,13 +232,26 @@ document.addEventListener('app:ready', function(e){
       + '<div class="form-row"><label class="f-label">超时提醒（分钟）</label><input class="input" id="ndTimeout" type="number" min="1" value="'+(n.timeout||'')+'" placeholder="留空则不提醒"></div>'
       + '</div>'
       + '<div class="form-row"><label class="f-label">消息内容 / 处置说明</label><textarea class="textarea" id="ndDesc">'+App.esc(n.desc||'')+'</textarea></div>'
-      + '<div class="divider"></div><div class="section-title">判定与引导配置（基础版引导 / 实战版评分基准）</div>'
+      + '<div class="divider"></div><div class="section-title">流程属性与分值（基础版按正确流程顺序执行 / 实战版额外加入混淆流程）</div>'
+      + '<div class="form-grid">'
+      + '<div class="form-row"><label class="f-label">流程属性</label><select class="select" id="ndFlow"><option value="correct"'+(n.flowType==='distractor'?'':' selected')+'>正确流程（基础版显示）</option><option value="distractor"'+(n.flowType==='distractor'?' selected':'')+'>混淆流程（仅实战版显示）</option></select></div>'
+      + '<div class="form-row"><label class="f-label">本步骤分值（0-100）</label><input class="input" id="ndScore" type="number" min="0" max="100" step="1" value="'+(Number(n.score)||0)+'"></div>'
+      + '<div class="form-row span2"><label class="f-label">下一节点接收人 <span class="tiny dim">（可多选）</span></label>'
+      +   '<div class="flex gap3 wrap" id="ndReceiverBox">'
+      +   roleNames().map(function(x){ return '<label class="check"><input type="checkbox" value="'+App.esc(x)+'"'+(recvList(n).indexOf(x)>=0?' checked':'')+'>'+App.esc(x)+'</label>'; }).join('')
+      +   '</div><div class="tiny dim" style="margin-top:4px">本流程完成后的流转对象，可多选；未勾选时按剧本下一流程责任角色自动填充（最后一个流转至院应急指挥部）。基础版按预设接收人自动流转；实战版由参演人员在处置表单中自行选择，所选接收人与预设集合完全一致才正确，多选、漏选均扣本流程 10% 分值。</div></div>'
+      + '</div>'
+      + '<div id="ndScoreTip" class="tiny dim mb2">正确流程完成按本分值得分（超时完成按 90% 计）；混淆流程被选中按本分值直接扣分，不计入满分。</div>'
       + '<div class="form-grid">'
       + '<div class="form-row"><label class="f-label">动作类型</label><select class="select" id="ndAction"><option value="">— 未分类 —</option>'+ACTION_TYPES.map(function(a){ return '<option value="'+a+'"'+(n.action===a?' selected':'')+'>'+a+'</option>'; }).join('')+'</select></div>'
       + '<div class="form-row"><label class="f-label">必经步骤</label><div class="flex gap2" style="align-items:center;min-height:34px"><label class="check"><input type="checkbox" id="ndRequired"'+(n.required===false?'':' checked')+'>实战版遗漏判定必查</label></div></div>'
       + '</div>'
       + '<div class="form-row"><label class="f-label">判定关键词（逗号分隔，实战版匹配用）</label><input class="input" id="ndKeywords" value="'+App.esc(kwText(n))+'"+ placeholder="如：隔离,断网,封堵"></div>'
-      + '<div class="form-row"><label class="f-label">引导提示（基础版下发给参演人员）</label><textarea class="textarea" id="ndGuide" placeholder="如：隔离前记录主机IP与MAC，隔离后确认无新增加密告警。">'+App.esc(n.guide||'')+'</textarea></div>'
+      + '<div class="form-row"><label class="f-label">引导提示（基础版在工作台展示的正确流程）</label><textarea class="textarea" id="ndGuide" placeholder="如：隔离前记录主机IP与MAC，隔离后确认无新增加密告警。">'+App.esc(n.guide||'')+'</textarea></div>'
+      + '<div class="divider"></div><div class="section-title">需取证材料（每行一项，格式：类型|材料名称|取证说明）</div>'
+      + '<div class="tiny dim mb2">演练时会在「取证与材料归档」中逐项提醒参演人员取证；点击「按剧本自动生成」可根据本节点动作自动生成相符的模拟取证材料，参演人员可一键导入后再核对修改。</div>'
+      + '<div class="flex gap2 mb2"><button class="btn sm outline" id="ndEvAuto" type="button">'+App.icon('file')+'按剧本自动生成</button><span class="tiny dim">类型可选：附件截图 / 操作日志 / 处置记录 / 样本摘要 / 表单文书</span></div>'
+      + '<div class="form-row"><textarea class="textarea" id="ndEv" rows="4" placeholder="处置记录|处置记录-隔离感染终端.md|责任角色：网络安全管理员；记录隔离终端IP与时间&#10;附件截图|告警界面截图.svg|告警时刻与受影响终端">'+App.esc(evText(n))+'</textarea></div>'
       + '<div id="ndBranchRow"'+(n.type==='branch'?'':' style="display:none"')+'>'
       + '<div class="divider"></div><div class="section-title">分支判断条件</div>'
       + '<div class="form-grid"><div class="form-row"><label class="f-label">条件「是」去向描述</label><input class="input" id="ndB0" value="'+App.esc((n.branches&&n.branches[0])||'')+'" placeholder="如：一般事件 → 科内处置"></div>'
@@ -179,6 +259,43 @@ document.addEventListener('app:ready', function(e){
       + '<div class="tiny dim">节点时刻：'+n.time+'（拖拽画布行可调整顺序）</div>';
     App.drawer({ title:'节点配置 · '+App.esc(n.title), body:body, onOpen:function(ov){
       ov.querySelector('#ndType').onchange = function(){ ov.querySelector('#ndBranchRow').style.display = this.value==='branch'?'':'none'; };
+      /* 实时统计正确流程总分，超过 100 分给出超分提醒 */
+      function refreshScoreTip(){
+        var isDis = ov.querySelector('#ndFlow').value==='distractor';
+        var v = parseInt(ov.querySelector('#ndScore').value,10);
+        if(isNaN(v) || v<0) v = 0;
+        if(v>100) v = 100;
+        var others = nodes.reduce(function(a,x,xi){
+          if(xi===i || x.type==='end' || x.flowType==='distractor') return a;
+          return a + (Number(x.score)||0);
+        },0);
+        var all = others + (isDis ? 0 : v);
+        var tip = ov.querySelector('#ndScoreTip');
+        if(isDis){
+          tip.innerHTML = '混淆流程不计入满分：被参演人员选中时按 <b>'+v+'</b> 分直接扣分；当前正确流程合计 <b>'+others+'</b> / 100 分。';
+        } else {
+          tip.innerHTML = '本步骤完成可得 <b>'+v+'</b> 分（超时按 '+(Math.round(v*0.9*10)/10)+' 分计），设置后正确流程合计 <b>'+all+'</b> / 100 分'
+            + (all>100?'，<span style="color:var(--err)">已超出 '+(all-100)+' 分，请下调分值</span>'
+                      :(all<100?'，<span style="color:var(--warn)">未满 100 分</span>':'，<span style="color:var(--ok)">分值已满</span>'));
+        }
+      }
+      ov.querySelector('#ndFlow').onchange = refreshScoreTip;
+      ov.querySelector('#ndScore').oninput = refreshScoreTip;
+      refreshScoreTip();
+      ov.querySelector('#ndEvAuto').onclick = function(){
+        var draft = {
+          title: ov.querySelector('#ndTitle').value.trim() || n.title,
+          target: ov.querySelector('#ndTarget').value,
+          action: ov.querySelector('#ndAction').value,
+          guide: ov.querySelector('#ndGuide').value.trim(),
+          desc: ov.querySelector('#ndDesc').value.trim(),
+          form: ov.querySelector('#ndForm').value
+        };
+        ov.querySelector('#ndEv').value = autoEv(draft).map(function(x){
+          return [x.type, x.name, x.note].join('|');
+        }).join('\n');
+        App.toast('已按剧本节点自动生成需取证材料，可逐项修改后保存','ok');
+      };
       ov.querySelector('.d-body').insertAdjacentHTML('beforeend','<div class="mt4 flex gap2"><button class="btn grow" id="ndCancel">取消</button><button class="btn primary grow" id="ndSave">保存节点</button></div>');
       ov.querySelector('#ndCancel').onclick = ov.close;
       ov.querySelector('#ndSave').onclick = function(){
@@ -194,17 +311,26 @@ document.addEventListener('app:ready', function(e){
         n.action = ov.querySelector('#ndAction').value;
         n.required = ov.querySelector('#ndRequired').checked;
         n.guide = ov.querySelector('#ndGuide').value.trim();
+        n.flowType = ov.querySelector('#ndFlow').value === 'distractor' ? 'distractor' : 'correct';
+        var scv = parseInt(ov.querySelector('#ndScore').value,10);
+        n.score = isNaN(scv) ? 0 : Math.max(0, Math.min(100, scv));
+        n.receiver = Array.prototype.slice.call(ov.querySelectorAll('#ndReceiverBox input:checked')).map(function(c){ return c.value; }).join('、');
+        n.evidenceReq = parseEvText(ov.querySelector('#ndEv').value);
         n.keywords = ov.querySelector('#ndKeywords').value.split(/[,，、;；\s]+/).filter(function(x){ return !!x; });
         if(ty==='branch'){ n.branches = [ ov.querySelector('#ndB0').value.trim()||'条件成立', ov.querySelector('#ndB1').value.trim()||'条件不成立' ]; }
         else { delete n.branches; }
-        ov.close(); render(); App.toast('节点配置已更新（演练模拟），保存剧本后生效为新版本','ok');
+        ov.close(); render();
+        var tot = scoreTotal();
+        App.toast(tot>100
+          ? '节点配置已更新，但正确流程合计 '+tot+' 分已超出 100 分，请下调各节点分值'
+          : '节点配置已更新（演练模拟），保存剧本后生效为新版本', tot>100?'warn':'ok');
       };
     } });
   }
 
   function addNode(type){
     var t = TYPES[type]||TYPES.task;
-    var n = { id:'N'+Date.now(), type:type, title:'新'+t.label+'节点', target:'信息科值班员', time:nextTime(), desc:'' };
+    var n = { id:'N'+Date.now(), type:type, title:'新'+t.label+'节点', target:'信息科值班员', time:nextTime(), desc:'', flowType:'correct', score:0, receiver:'' };
     if(type==='branch'){ n.branches = ['条件成立','条件不成立']; }
     nodes.push(n); render();
     openDrawer(nodes.length-1);
@@ -216,21 +342,27 @@ document.addEventListener('app:ready', function(e){
   page.querySelectorAll('.seg .s-opt').forEach(function(o){ o.onclick = function(){
     diff = o.dataset.d;
     page.querySelectorAll('.seg .s-opt').forEach(function(x){ x.classList.toggle('on', x===o); });
-    App.toast('演练模拟：难度已切换为'+diff+(diff==='实战版'?'（隐藏引导提示与表单预填）':'（附引导提示）'),'ok');
+    App.toast('演练模拟：剧本难度标注已切换为'+diff+'（两种模式共用同一剧本，实际模式在新建项目时选择）','ok');
   }; });
 
   document.getElementById('scSel').onchange = function(){
     curId = this.value; nodes = loadNodes(curId);
     diff = (scenarioById(curId).difficulty||'基础版').indexOf('实战')>=0?'实战版':'基础版';
     page.querySelectorAll('.seg .s-opt').forEach(function(x){ x.classList.toggle('on', x.dataset.d===diff); });
+    var alertBox = document.getElementById('seAlert');
+    if(alertBox) alertBox.value = scenarioById(curId).alert || '';
     render();
     App.toast('已切换至场景 '+curId+(curId==='S01'?'（完整节点数据）':'（示例节点结构，演练模拟）'),'ok');
   };
 
   document.getElementById('btnSave').onclick = function(){
     var s = scenarioById(curId);
-    App.confirmSim('保存《'+App.esc(s.name)+'》当前编排（共 '+nodes.length+' 个节点，难度：'+diff+'）为新版本。', function(){
-      API.saveScriptNodes(curId, nodes, diff).then(function(r){
+    var alertText = String((document.getElementById('seAlert')||{}).value||'').trim();
+    var tot = scoreTotal();
+    var dis = nodes.filter(function(x){ return x.type!=='end' && x.flowType==='distractor'; }).length;
+    App.confirmSim('保存《'+App.esc(s.name)+'》当前编排（共 '+nodes.length+' 个节点，正确流程合计 '+tot+' 分，混淆流程 '+dis+' 条，难度：'+diff+'，含初始故障通报）为新版本。'
+      + (tot>100?' 注意：正确流程分值已超出 100 分，请下调后再开展正式演练。':''), function(){
+      API.saveScriptNodes(curId, nodes, diff, alertText).then(function(r){
         App.toast('剧本《'+s.name+'》已保存，场景剧本库版本更新为 '+r.version+'（共 '+r.count+' 个节点）','ok');
       }).catch(function(e){
         App.toast((e && e.message) || '剧本保存失败，请稍后重试','err');

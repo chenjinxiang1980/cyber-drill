@@ -74,7 +74,7 @@ function run() {
     /* 角色 */
     const ri = db.prepare('INSERT INTO roles (id,name,short,icon,color,descr,nav,external,seq) VALUES (?,?,?,?,?,?,?,?,?)');
     M.ROLES.forEach(function (r, i) {
-      const nav = (r.nav || []).slice();
+      const nav = (r.nav || []).filter(function (k) { return k !== 'tasks'; });
       /* 演练报告导出归入「复盘与报送」栏目，仅平台系统管理员可见；平台管理员同时具备时序回放（整体复盘分析）权限 */
       if (r.id === 'platformadmin' && nav.indexOf('report') < 0) nav.push('report');
       if (r.id === 'platformadmin' && nav.indexOf('replay') < 0) nav.push('replay');
@@ -93,9 +93,9 @@ function run() {
     });
 
     /* 场景 */
-    const si = db.prepare('INSERT INTO scenarios (id,name,type,level,difficulty,status,version,updated,nodes,descr) VALUES (?,?,?,?,?,?,?,?,?,?)');
+    const si = db.prepare('INSERT INTO scenarios (id,name,type,level,difficulty,status,version,updated,nodes,descr,alert) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
     M.SCENARIOS.forEach(function (s) {
-      si.run(s.id, s.name, s.type, s.level, s.difficulty, s.status, s.version, s.updated, s.nodes || 0, s.desc || '');
+      si.run(s.id, s.name, s.type, s.level, s.difficulty, s.status, s.version, s.updated, s.nodes || 0, s.desc || '', s.alert || '');
     });
 
     /* 项目 */
@@ -132,10 +132,11 @@ function run() {
     const noi = db.prepare('INSERT INTO notifs (id,time,level,source,title,descr,seq) VALUES (?,?,?,?,?,?,?)');
     M.NOTIFS.forEach(function (n, i) { noi.run(n.id, n.time, n.level, n.source || '系统', n.title, n.desc, i); });
 
-    /* 会商 */
+    /* 会商（时间统一为完整日期时间格式） */
+    const todayStr = nowSec().slice(0, 10);
     const ci = db.prepare('INSERT INTO chat_messages (grp,sender,role_id,time,text,att) VALUES (?,?,?,?,?,?)');
     Object.keys(M.CHAT).forEach(function (g) {
-      M.CHAT[g].forEach(function (c) { ci.run(g, c.sender, c.role, c.time, c.text, c.att || null); });
+      M.CHAT[g].forEach(function (c) { ci.run(g, c.sender, c.role, /^\d{4}-/.test(c.time) ? c.time : (todayStr + ' ' + c.time), c.text, c.att || null); });
     });
 
     /* 取证 */

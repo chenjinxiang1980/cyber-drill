@@ -106,7 +106,7 @@ document.addEventListener('app:ready', function(e){
       var done = ts.filter(function(t){ return t.status==='已完成'; }).length;
       var od = ts.filter(function(t){ return t.status==='超时'; }).length;
       var pct = ts.length? Math.round(done/ts.length*100):0;
-      return '<div style="margin-bottom:12px"><div class="flex small" style="justify-content:space-between"><span>'+r.name+'<span class="dim"> · '+m.user+'</span></span><span class="mono dim">'+done+'/'+ts.length+(od?' <b style="color:var(--err)">超时'+od+'</b>':'')+'</span></div><div class="progress mt2"><div class="bar '+(od?'err':pct===100?'ok':'')+'" style="width:'+pct+'%"></div></div></div>';
+      return '<div style="margin-bottom:12px"><div class="flex small" style="justify-content:space-between"><span>'+r.name+'<span class="dim"> · '+(m.user||'按角色参演')+'</span></span><span class="mono dim">'+done+'/'+ts.length+(od?' <b style="color:var(--err)">超时'+od+'</b>':'')+'</span></div><div class="progress mt2"><div class="bar '+(od?'err':pct===100?'ok':'')+'" style="width:'+pct+'%"></div></div></div>';
     }).join('');
     autoScroll(document.getElementById('roleBox'), rows || '<div class="tiny dim">暂无参演角色</div>');
   }
