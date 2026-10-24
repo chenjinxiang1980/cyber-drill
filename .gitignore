@@ -1,5 +1,4 @@
-node_modules/
-data/
-uploads/
 *.log
 .gh-config/
+*.db-wal
+*.db-shm
