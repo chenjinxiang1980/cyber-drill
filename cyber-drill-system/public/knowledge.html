@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>预案知识库 · 盘州市人民医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="knowledge">
+<script src="system.js"></script>
+<script src="app.js"></script>
+<script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+
+  var docs = MOCK.KNOWLEDGE;
+  var cats = ['全部'];
+  /* 知识库维护权限：平台管理员、院应急指挥部、信息科负责人 */
+  var canEdit = ['platformadmin','commander','itlead'].indexOf(role.id)>=0;
+  var curCat = '全部', kw = '';
+
+  function refreshCats(){
+    cats = ['全部'];
+    docs.forEach(function(d){ if(cats.indexOf(d.cat)<0) cats.push(d.cat); });
+    if(cats.indexOf(curCat)<0) curCat = '全部';
+  }
+  refreshCats();
+
+  /* 页内局部图标helper：表格链接/section-title处无svg尺寸规则 */
+  function ic(n,s){ return '<svg viewBox="0 0 24 24" style="width:'+s+'px;height:'+s+'px;flex:none;vertical-align:-2px">'+(App.ICONS[n]||App.ICONS.file)+'</svg>'; }
+
+  /* 文档结构化正文（条目化模拟，全角色可查） */
+  var CONTENT = {
+    KB1: { ver:'2026版 · v3.2', scope:'全院各科室、各信息系统运维班组', steps:[
+      '事件分级：依据影响范围与业务中断时长，划分为一般/较大/重大/特别重大四级',
+      '应急组织：院应急指挥部统筹，信息科技术处置，医务部业务兜底，院办对外口径',
+      '监测报告：值班员接收告警→10分钟内核实→逐级上报信息科负责人',
+      '响应启动：指挥部研判后批准启动对应等级响应，各科室按预案执行',
+      '处置与兜底：断网隔离、系统停机、纸质流程兜底同步展开',
+      '恢复与复盘：业务恢复验证后提交确认单，进入时序回放与评估' ] },
+    KB2: { ver:'2026版 · v1.4', scope:'信息科网络安全组、系统运维组、临床相关科室', steps:[
+      '感染终端立即断网隔离，保留现场，禁止重启与杀毒（先取证）',
+      '截图取证并提取勒索信文本摘要、样本哈希（演练模拟，不接触真实恶意样本）',
+      '核查HIS/EMR/LIS数据库服务器是否被波及，确认扩散边界',
+      '校验最近存储快照与备份有效性，评估可恢复时间点',
+      '感染终端格式化重装，业务系统按优先级分批恢复',
+      '按事件等级填报《网络安全事件上报表》，经指挥部审批后上报' ] },
+    KB3: { ver:'2026版 · v2.0', scope:'信息科、院应急指挥部、对外报送联络人', steps:[
+      '信息科核实事件等级（对照《网络安全事件应急预案》分级标准）',
+      '填写《网络安全事件上报表》：事发单位/事件类型/等级/影响范围/已采取措施',
+      '院应急指挥部审批报送口径与材料',
+      '报送市卫生健康局值班室（重大事件2小时内）',
+      '视情况同步报送市委网信办、市公安局网安大队',
+      '记录接收回执与督办反馈，归档至取证模块' ] },
+    KB4: { ver:'2026版 · v1.1', scope:'门诊/住院收费窗口、药房、护士站、医务部', steps:[
+      '业务系统中断确认后30分钟内启用纸质流程，由医务部统一宣布',
+      '处方：改用手工纸质处方，药师按手工台账发药',
+      '登记：护士站手工登记治疗、护理与出入转记录',
+      '收费：启动人工收费与手工票据，患者费用事后补录',
+      '窗口张贴经审批的公告口径，做好患者解释与诉求登记',
+      '系统恢复后当日完成补录、票据核对与流程撤销' ] },
+    KB5: { ver:'2026-09更新 · v5.0', scope:'指挥部成员、各科室应急联络员、主管单位联络人', steps:[
+      '院应急指挥部值班电话：0858-3XX0001（虚拟号码）',
+      '信息科值班员/负责人：0858-3XX0002 / 138XXXX0002（虚拟号码）',
+      '网络安全组 / 系统运维组：内线 8021 / 8022（虚拟号码）',
+      '医务部 / 门诊护士长：内线 6601 / 6102（虚拟号码）',
+      '市卫生健康局应急值班室：0858-3XX9001（虚拟号码）',
+      '市委网信办 / 市公安局网安大队：0858-3XX9002 / 0858-3XX9110（虚拟号码）' ] },
+    KB6: { ver:'2026版 · v1.0', scope:'院应急指挥部、信息科、法务/院办', steps:[
+      '固定泄露样本截图与论坛发帖链接快照（演练模拟数据）',
+      '提取涉及样本哈希摘要与虚拟患者字段清单（不含真实患者信息）',
+      '统计泄露数据类型、可能规模与影响范围，形成事件经过说明',
+      '填写《报案登记表》：报案单位/报案人/事件经过/损失情况（演练虚拟）',
+      '向市公安局网安大队报案，索取受理回执与取证指引',
+      '全程留痕归档，配合后续调查与舆情口径管理' ] }
+  };
+  var GENERIC = { ver:'当前有效版', scope:'全院参演角色（全角色可查）', steps:[
+    '总则：编制目的、适用范围与依据',
+    '组织与职责：指挥体系与分工',
+    '处置流程：发现→核实→上报→处置→恢复',
+    '保障措施：通讯、物资与技术支撑' ] };
+
+  /* 后端知识库 content 可能为结构化 JSON（依据正式预案修订的条目化正文） */
+  function parseStructured(d){
+    if(!d || !d.content) return null;
+    var t = String(d.content).trim();
+    if(t.charAt(0) !== '{') return null;
+    try {
+      var o = JSON.parse(t);
+      return (o && o.sections && o.sections.length) ? o : null;
+    } catch(err){ return null; }
+  }
+  function renderStructured(st){
+    return st.sections.map(function(sec){
+      return '<div class="section-title" style="margin-top:14px">'+App.esc(sec.t)+'</div>'
+        + '<div class="card" style="padding:12px 14px">'
+        + (sec.items||[]).map(function(it,i){
+            return '<div style="display:flex;gap:8px;font-size:12.5px;line-height:1.75;color:var(--text2);'+(i===sec.items.length-1?'':'margin-bottom:6px')+'">'
+              + '<span class="mono" style="color:var(--accent);flex:none">'+(i+1)+'.</span><div>'+App.esc(it)+'</div></div>';
+          }).join('')
+        + '</div>';
+    }).join('');
+  }
+
+  /* 内置文档下载：由结构化正文生成 txt 文件（上传文档则下载服务器原件） */
+  function docText(d){
+    var st = parseStructured(d);
+    var c = st || CONTENT[d.id] || GENERIC;
+    var lines = [];
+    lines.push(d.name);
+    lines.push('文档编号：'+d.id+'　分类：'+d.cat+'　版本：'+c.ver);
+    lines.push('更新时间：'+d.updated+'　适用范围：'+c.scope);
+    if(st && st.base) lines.push('依据文件：'+st.base);
+    lines.push('');
+    if(st){
+      st.sections.forEach(function(sec){
+        lines.push(sec.t);
+        (sec.items||[]).forEach(function(it,i){ lines.push('  '+(i+1)+'. '+it); });
+        lines.push('');
+      });
+    } else {
+      c.steps.forEach(function(s,i){ lines.push((i+1)+'. '+s); });
+    }
+    lines.push('—— 盘州市人民医院网络安全应急演练系统（演练用虚拟文档）');
+    return lines.join('\r\n');
+  }
+  function downloadDoc(d){
+    var blob = new Blob(['\ufeff'+docText(d)], { type:'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = d.id+'-'+d.name+'.txt';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    API.addAudit('下载预案文档：'+d.name);
+    App.toast('已下载「'+d.name+'」','ok');
+  }
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>预案知识库</h1><div class="sub">应急预案 · 处置流程图 · 兜底流程 · 通讯录 · 制度文书 · 全角色可查</div></div>'
+    + '<div class="acts"><input class="input" id="kbSearch" placeholder="搜索文档标题…" style="width:220px">'
+    + (canEdit ? '<button class="btn primary" id="kbUpload">'+App.icon('upload')+'上传文档</button>' : '')
+    + '</div></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>知识库文档为<b>演练用虚拟制度文本</b>（含虚拟号码/虚拟数据），预览与下载行为将记录至审计日志，不涉及真实生产文件。</span></div>'
+    + '<div class="tabs" id="kbTabs"></div>'
+    + '<div class="table-wrap"><table class="table"><thead><tr>'
+    + '<th>编号</th><th>文档名称</th><th>分类</th><th>最近更新</th><th>大小</th><th>页数</th><th>操作</th>'
+    + '</tr></thead><tbody id="kbTbody"></tbody></table></div>';
+
+  document.getElementById('kbSearch').oninput = function(){ kw = this.value.trim(); renderTable(); };
+  var kbUpBtn = document.getElementById('kbUpload');
+  if(kbUpBtn) kbUpBtn.onclick = openUpload;
+
+  function renderTabs(){
+    document.getElementById('kbTabs').innerHTML = cats.map(function(c){
+      var cnt = c==='全部' ? docs.length : docs.filter(function(d){ return d.cat===c; }).length;
+      return '<span class="tab'+(curCat===c?' active':'')+'" data-c="'+c+'">'+c+'<span class="cnt">'+cnt+'</span></span>';
+    }).join('');
+    document.querySelectorAll('#kbTabs .tab').forEach(function(el){
+      el.onclick = function(){ curCat = el.dataset.c; renderTabs(); renderTable(); };
+    });
+  }
+
+  function catIcon(c){
+    return c==='通讯录'?'user':c==='上报流程'?'send':c==='兜底流程'?'hospital':c==='专项预案'?'shield':'knowledge';
+  }
+
+  function visible(){
+    return docs.filter(function(d){
+      if(curCat!=='全部' && d.cat!==curCat) return false;
+      if(kw && d.name.indexOf(kw)<0) return false;
+      return true;
+    });
+  }
+
+  function renderTable(){
+    var list = visible();
+    var tb = document.getElementById('kbTbody');
+    if(!list.length){
+      tb.innerHTML = '<tr><td colspan="7"><div class="empty">'+App.icon('knowledge')+'<div>该分类下暂无文档</div><div class="tiny dim mt2">可切换分类或清空搜索关键词</div></div></td></tr>';
+      return;
+    }
+    tb.innerHTML = list.map(function(d){
+      return '<tr><td class="mono">'+d.id+'</td>'
+        + '<td><span class="t-link" data-id="'+d.id+'">'+ic(catIcon(d.cat),14)+' '+App.esc(d.name)+'</span></td>'
+        + '<td><span class="tag blue">'+App.esc(d.cat)+'</span></td>'
+        + '<td class="small mono">'+d.updated+'</td>'
+        + '<td class="small dim">'+d.size+'</td>'
+        + '<td class="small dim">'+d.pages+'</td>'
+        + '<td><button class="btn sm" data-act="preview" data-id="'+d.id+'">'+App.icon('eye')+'预览</button> '
+        + '<button class="btn sm outline" data-act="download" data-id="'+d.id+'">'+App.icon('download')+'下载</button>'
+        + (canEdit ? ' <button class="btn sm danger" data-act="del" data-id="'+d.id+'">删除</button>' : '')
+        + '</td></tr>';
+    }).join('');
+    tb.querySelectorAll('[data-act="preview"], .t-link').forEach(function(el){
+      el.onclick = function(){ openPreview(el.dataset.id); };
+    });
+    tb.querySelectorAll('[data-act="download"]').forEach(function(el){
+      el.onclick = function(){
+        var d = docs.filter(function(x){ return x.id===el.dataset.id; })[0];
+        if(!d) return;
+        if(d.url){ API.addAudit('下载预案文档：'+d.name); window.open(d.url, '_blank'); App.toast('已开始下载「'+d.name+'」原件','ok'); }
+        else downloadDoc(d);
+      };
+    });
+    tb.querySelectorAll('[data-act="del"]').forEach(function(el){
+      el.onclick = function(ev){ ev.stopPropagation(); delDoc(el.dataset.id); };
+    });
+  }
+
+  /* ---------- 删除文档 ---------- */
+  function delDoc(id){
+    var d = docs.filter(function(x){ return x.id===id; })[0];
+    if(!d) return;
+    App.confirmSim('删除知识库文档 '+d.id+'《'+d.name+'》？上传的原文件将同时被清理，操作不可恢复（演练模拟）。', function(){
+      API.deleteKnowledge(id).then(function(){
+        docs = MOCK.KNOWLEDGE;
+        refreshCats(); renderTabs(); renderTable();
+        App.toast('文档 '+id+' 已删除','ok');
+      }).catch(function(err){ App.toast((err&&err.message)||'删除失败，请稍后重试','err'); });
+    });
+  }
+
+  /* ---------- 上传文档 ---------- */
+  function openUpload(){
+    var options = cats.filter(function(c){ return c!=='全部'; })
+      .map(function(c){ return '<option value="'+App.esc(c)+'">'+App.esc(c)+'</option>'; }).join('');
+    App.modal({ title:'上传知识库文档', wide:false,
+      body:
+        '<div class="sim-banner">'+App.icon('alert')+'<span>仅允许上传<b>演练用虚拟制度文本/预案文档</b>，禁止上传真实恶意程序或含真实患者隐私的材料；单文件 ≤ 20 MB。</span></div>'
+        + '<div class="form-row"><label class="f-label">文档名称<span style="color:var(--err)"> *</span></label><input class="input" id="kbUpName" placeholder="如：2026年勒索病毒专项处置预案（修订版）" maxlength="100"></div>'
+        + '<div class="form-row"><label class="f-label">分类</label><select class="select" id="kbUpCat"><option value="上传文档">上传文档</option>'+options+'</select></div>'
+        + '<div class="form-row"><label class="f-label">文档文件<span style="color:var(--err)"> *</span></label>'
+        + '<input type="file" class="input" id="kbUpFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.png,.jpg,.jpeg,.zip,.rar,.7z"></div>'
+        + '<div class="tiny dim mt2">支持 PDF/Word/Excel/PPT/文本/图片/压缩包；文件名与上传动作将记入审计日志。</div>',
+      foot:'<button class="btn" id="kbUpCancel">取消</button><button class="btn primary" id="kbUpOk">'+App.icon('upload')+'上传</button>',
+      onOpen:function(ov){
+        ov.querySelector('#kbUpCancel').onclick = function(){ ov.close(); };
+        ov.querySelector('#kbUpOk').onclick = function(){
+          var name = ov.querySelector('#kbUpName').value.trim();
+          var cat = ov.querySelector('#kbUpCat').value;
+          var fileEl = ov.querySelector('#kbUpFile');
+          var f = fileEl.files && fileEl.files[0];
+          if(!name){ App.toast('请填写文档名称','err'); return; }
+          if(!f){ App.toast('请选择要上传的文档文件','err'); return; }
+          var btn = this; btn.disabled = true; btn.textContent = '上传中…';
+          var fd = new FormData();
+          fd.append('name', name); fd.append('cat', cat); fd.append('file', f);
+          API.uploadKnowledge(fd).then(function(r){
+            ov.close(); refreshCats(); renderTabs(); renderTable();
+            App.toast('文档「'+r.doc.name+'」已上传（'+r.id+'）','ok');
+          }).catch(function(err){
+            btn.disabled = false; btn.innerHTML = App.icon('upload')+'上传';
+            App.toast((err&&err.message)||'上传失败，请检查文件类型与大小','err');
+          });
+        };
+      } });
+  }
+
+  function openPreview(id){
+    var d = docs.filter(function(x){ return x.id===id; })[0];
+    if(!d) return;
+    var uploaded = !!d.filePath;
+    var st = uploaded ? null : parseStructured(d);
+    var c = st || CONTENT[id] || GENERIC;
+    API.addAudit('预览预案文档：'+d.name);
+
+    var meta = '<div class="kv mb4">'
+      + '<span class="k">文档编号</span><span class="mono">'+d.id+'</span>'
+      + '<span class="k">分类</span><span><span class="tag blue">'+App.esc(d.cat)+'</span></span>'
+      + (uploaded ? '' : '<span class="k">版本号</span><span>'+App.esc(c.ver)+'</span>')
+      + '<span class="k">更新时间</span><span class="mono">'+d.updated+'</span>'
+      + (uploaded ? '' : '<span class="k">适用范围</span><span class="small">'+App.esc(c.scope)+'</span>')
+      + (st && st.base ? '<span class="k">依据文件</span><span class="small">'+App.esc(st.base)+'</span>' : '')
+      + '<span class="k">规格</span><span class="small dim">'+(d.pages||0)+' 页 · '+d.size+'</span>'
+      + (uploaded ? '<span class="k">来源</span><span class="small">自行上传（演练用虚拟文档）</span>' : '')
+      + '</div>';
+
+    var body = uploaded
+      ? meta
+        + '<div class="section-title">'+ic('file',15)+'上传原件</div>'
+        + '<div class="card" style="padding:14px"><div class="flex gap2" style="align-items:center">'
+        + '<span class="tag green">已归档</span><span class="mono small" style="word-break:break-all">'+App.esc(d.name)+'</span></div>'
+        + '<div class="tiny dim mt2">原文件已保存至服务器 uploads 目录，可下载查看；如需在线浏览结构化条款，可在下载后查阅。</div></div>'
+        + '<div class="divider"></div>'
+        + '<div class="flex gap2">'
+        + '<a class="btn primary" id="kbDl" href="'+d.url+'" target="_blank">'+App.icon('download')+'下载原件</a>'
+        + '<button class="btn" id="kbPrint">'+App.icon('file')+'引用至会商（模拟）</button></div>'
+        + '<div class="tiny dim mt3">自行上传文档仅用于演练查阅，正式预案以院内发文为准。</div>'
+      : meta
+        + '<div class="section-title">'+ic('file',15)+(st?'文档正文（依据 2025 版院发正式预案）':'文档正文（条目化模拟）')+'</div>'
+        + (st ? renderStructured(st)
+          : '<div class="timeline">'+c.steps.map(function(s,i){
+              return '<div class="tl-item ok"><span class="tl-dot"></span><div class="tl-title">第'+(i+1)+'条</div><div class="tl-desc">'+App.esc(s)+'</div></div>';
+            }).join('')+'</div>')
+        + '<div class="divider"></div>'
+        + '<div class="flex gap2">'
+        + '<button class="btn primary" id="kbDl">'+App.icon('download')+'下载文档（txt）</button>'
+        + '<button class="btn" id="kbPrint">'+App.icon('file')+'引用至会商（模拟）</button></div>'
+        + '<div class="tiny dim mt3">预览内容为演练虚拟文本，正式预案以院内发文为准。</div>';
+
+    App.drawer({ title:'在线预览 · '+App.esc(d.name), body:body,
+      onOpen:function(ov){
+        var dl = ov.querySelector('#kbDl');
+        if(dl) dl.onclick = function(ev){
+          if(uploaded){ ev.preventDefault(); API.addAudit('下载预案文档：'+d.name); window.open(d.url, '_blank'); return false; }
+          downloadDoc(d);
+        };
+        ov.querySelector('#kbPrint').onclick = function(){
+          API.sendChat('inner', '【演练模拟】引用预案《'+d.name+'》相关条款，请各岗位对照执行。');
+          App.toast('已引用至院内会商组（演练模拟）','ok');
+        };
+      } });
+  }
+
+  renderTabs(); renderTable();
+});
+App.boot('knowledge');
+</script>
+</body>
+</html>

@@ -1,0 +1,255 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>复盘评估 · 盘州市人民医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<link rel="stylesheet" href="styles.css">
+<style>
+.ev-mode{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ev-mode .badge{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--border2)}
+.ev-mode .badge.base{color:var(--accent2);background:var(--accent-dim)}
+.ev-mode .badge.real{color:var(--warn);background:rgba(210,153,34,.1);border-color:rgba(210,153,34,.4)}
+.ev-row{display:flex;align-items:flex-start;gap:14px;padding:12px 0;border-bottom:1px dashed var(--border)}
+.ev-row:last-child{border-bottom:none}
+.ev-row .ev-name{width:210px;flex:none;font-size:12.5px;line-height:1.65}
+.ev-row .ev-rule{flex:1;font-size:11.5px;color:var(--text3);line-height:1.7}
+.ev-row .ev-ro{width:180px;flex:none;text-align:right}
+.ev-total{font-size:34px;font-weight:700;font-family:var(--mono);color:var(--accent2)}
+.ev-legend{font-size:11.5px;color:var(--text3);line-height:1.9}
+.st-list{max-height:340px;overflow:auto}
+.st-item{padding:9px 0;border-bottom:1px dashed var(--border);font-size:12.5px}
+.st-item:last-child{border-bottom:none}
+.st-item .st-h{display:flex;justify-content:space-between;gap:8px;align-items:center}
+</style>
+</head>
+<body data-page="evaluation">
+<script src="system.js"></script><script src="app.js"></script><script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+  var proj = API.activeProject();
+  var canEval = ['commander','itlead','platformadmin'].indexOf(role.id) >= 0;
+  var canAdd = true;
+  var WB = null;
+
+  function mins(t){ var m=/^(\d{1,2}):(\d{2})/.exec(String(t||'')); return m ? (+m[1])*60 + (+m[2]) : null; }
+  function grade(v){ return v>=90?'优秀':v>=80?'良好':v>=70?'合格':'不合格'; }
+  function gradeCls(v){ return v>=90?'green':v>=80?'blue':v>=70?'yellow':'red'; }
+  function stateTag(s){ return s==='按时'?'<span class="tag green">按时</span>':s==='超时'?'<span class="tag yellow">超时</span>':s==='遗漏'?'<span class="tag red">遗漏</span>':'<span class="tag gray">'+App.esc(s)+'</span>'; }
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>复盘评估</h1><div class="sub">'+App.esc(proj.name)+' · 系统自动考评 · '+
+      (WB?'':'按演练模式差异化计分')+'</div></div>'
+    + '<div class="acts">'
+    + (canEval?'<button class="btn" id="evReEval">'+App.icon('refresh')+'重新自动考评</button>':'')
+    + '<button class="btn primary" id="evReport">'+App.icon('file')+'演练报告导出</button></div></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>考评由系统按演练数据自动计算：<b>基础版</b>为完整诱导演练，仅对操作时限打分（逐节点时限达成率）；<b>实战版</b>由参演人员自主添加处置步骤，系统对照基础版基线判定步骤遗漏（70%）与时限（30%）。所有数据均为演练记录。</span></div>'
+    + '<div class="grid" style="grid-template-columns:1.55fr 1fr;gap:16px">'
+    +   '<div class="card"><div class="card-title">'+App.icon('score')+'考评明细<span class="more" id="evTitle"></span></div><div id="evItems"><div class="loading-block">正在加载考评数据…</div></div></div>'
+    +   '<div class="col gap4">'
+    +     '<div class="card"><div class="card-title">'+App.icon('dashboard')+'评估汇总</div>'
+    +       '<div class="flex" style="align-items:baseline;gap:10px"><span class="ev-total" id="smTotal">—</span><span class="muted" id="smMax"></span><span class="right tag" id="smRate"></span></div>'
+    +       '<div class="progress mt3"><div class="bar" id="smBar" style="width:0%"></div></div>'
+    +       '<div class="flex mt3" style="justify-content:space-between;align-items:center"><span class="small dim">评估等级（自动）</span><span id="smGrade"></span></div>'
+    +       '<div class="tiny dim mt2" id="smFormula"></div>'
+    +       '<div class="section-title mt4">演练模式</div><div class="ev-mode" id="smMode"></div>'
+    +       '<div class="section-title mt4">关键统计</div><div id="smStats"></div></div>'
+    +     '<div class="card"><div class="card-title">'+App.icon('edit')+'改进建议（自动生成）</div>'
+    +       '<div class="small" id="evSug" style="line-height:1.9;white-space:pre-wrap">—</div></div>'
+    +   '</div>'
+    + '</div>'
+    + '<div class="card" id="evStepsCard" style="margin-top:14px"></div>';
+
+  document.getElementById('evReport').onclick = function(){ location.href = 'report.html'; };
+  var btnRe = document.getElementById('evReEval');
+
+  /* ---------- 渲染 ---------- */
+  function renderMode(){
+    var mode = WB.mode;
+    var isBase = mode === '基础版';
+    document.getElementById('smMode').innerHTML =
+      '<span class="badge '+(isBase?'base':'real')+'">'+App.esc(mode)+'</span>'
+      + '<span class="tiny dim">'+(isBase
+        ? '诱导演练：系统逐节点下发任务与引导提示，考评仅统计操作时限达成率'
+        : '自主处置：参演人员自行添加步骤，系统对照基线判定遗漏与时限')+'</span>'
+      + (canEval && proj.status!=='已结束'
+        ? '<button class="btn sm" id="btnMode">切换为'+(isBase?'实战版':'基础版')+'</button>' : '');
+    var bm = document.getElementById('btnMode');
+    if(bm) bm.onclick = function(){
+      var target = isBase ? '实战版' : '基础版';
+      App.confirmSim('将本项目切换为「'+target+'」？切换后考评口径随之变化。', function(){
+        API.setDrillMode(proj.id, target).then(function(){
+          App.toast('已切换为「'+target+'」，正在重新加载考评数据…','ok');
+          setTimeout(function(){ location.reload(); }, 700);
+        }).catch(function(err){ App.toast((err&&err.message)||'切换失败','err'); });
+      });
+    };
+  }
+
+  function renderItems(){
+    var s = WB.score;
+    document.getElementById('evTitle').textContent = WB.mode + ' · 考评单元 ' + s.total + ' 项 · 覆盖基线节点 ' + WB.nodes.filter(function(n){ return n.required && n.type!=='end'; }).length + ' 项';
+    var rows = s.nodes.map(function(n, i){
+      var plan = n.plan || '—';
+      var actual = n.actual || '—';
+      return '<div class="ev-row">'
+        + '<div class="ev-name"><div class="bold">'+(i+1)+'. '+App.esc(n.title)+'</div>'
+        +   '<div class="mt2 tiny dim">'+App.esc(roleName(n.role))+' · 计划 '+App.esc(plan)+'</div></div>'
+        + '<div class="ev-rule">实际：'+App.esc(actual)+'</div>'
+        + '<div class="ev-ro">'+stateTag(n.state)+(WB.mode==='实战版'&&!n.hit?'<div class="tiny" style="color:var(--err);margin-top:4px">未覆盖基线必经步骤</div>':'')+'</div>'
+        + '</div>';
+    }).join('');
+    if(!rows) rows = '<div class="empty">'+App.icon('file')+'<div>暂无考评单元</div></div>';
+    document.getElementById('evItems').innerHTML = rows;
+  }
+
+  function roleName(rid){
+    var r = (MOCK.ROLES||[]).filter(function(x){ return x.id===rid || x.short===rid || x.name===rid; })[0];
+    return r ? r.name : (rid||'—');
+  }
+
+  function renderSummary(){
+    var s = WB.score;
+    document.getElementById('smTotal').textContent = s.score;
+    document.getElementById('smMax').textContent = '/ 100 分';
+    var rate = document.getElementById('smRate');
+    rate.className = 'right tag ' + gradeCls(s.score);
+    rate.textContent = '得分率 '+s.score+'%';
+    var bar = document.getElementById('smBar');
+    bar.style.width = Math.min(100,s.score)+'%';
+    bar.className = 'bar ' + (s.score>=85?'ok':s.score>=70?'warn':'err');
+    document.getElementById('smGrade').innerHTML = '<span class="tag '+gradeCls(s.score)+'"><span class="dot"></span>'+grade(s.score)+' · 系统自动考评</span>';
+    document.getElementById('smFormula').textContent = s.formula;
+    var pairs = WB.mode==='基础版'
+      ? [['按时完成',s.ontime],['未完成/超时',s.total-s.ontime]]
+      : [['已覆盖必经步骤',s.hit],['遗漏步骤',s.missed],['额外步骤',s.extraSteps||0]];
+    document.getElementById('smStats').innerHTML = '<div class="flex gap3 wrap">'+pairs.map(function(x){
+      return '<span class="small"><b style="font-family:var(--mono)">'+x[1]+'</b> <span class="dim">'+x[0]+'</span></span>';
+    }).join('')+'</div>';
+  }
+
+  function renderSuggestions(){
+    var s = WB.score;
+    var lines = [];
+    var missed = s.nodes.filter(function(n){ return !n.hit; });
+    var late = s.nodes.filter(function(n){ return n.hit && !n.ontime; });
+    if(WB.mode==='基础版'){
+      if(late.length) lines.push('1. 时限执行：'+late.map(function(n){ return '「'+n.title+'」'; }).join('、')+' 未在计划时限内完成，建议明确各节点响应时限与责任人。');
+      if(missed.length) lines.push((lines.length+1)+'. 流程执行：'+missed.length+' 项任务未按时闭环，建议在下一轮演练中重点跟踪。');
+      if(!lines.length) lines.push('本次基础版演练各节点均在时限内完成，建议增加实战版无脚本抽测以验证真实处置能力。');
+    } else {
+      if(missed.length) lines.push('1. 步骤遗漏：'+missed.map(function(n){ return '「'+n.title+'」（'+"计划 "+n.plan+'）'; }).join('、')+' 未在演练中体现，建议按预案补齐并明确责任岗位。');
+      if(late.length) lines.push((lines.length+1)+'. 时限超期：'+late.map(function(n){ return '「'+n.title+'」'; }).join('、')+' 处置晚于基线时限，建议优化响应流程与值班力量配置。');
+      if(s.extraSteps) lines.push((lines.length+1)+'. 额外处置：演练中另有 '+s.extraSteps+' 项步骤未匹配基线节点，如属有效补充建议纳入剧本基线。');
+      if(!lines.length) lines.push('实战版演练覆盖全部基线必经步骤且时限达标，建议固化处置经验并纳入标准剧本。');
+    }
+    document.getElementById('evSug').textContent = lines.join('\n');
+  }
+
+  function renderSteps(){
+    var card = document.getElementById('evStepsCard');
+    if(WB.mode==='基础版'){
+      card.innerHTML = '<div class="card-title">'+App.icon('flow')+'基础版引导流程（系统下发）</div>'
+        + '<div class="tiny dim" style="margin-bottom:10px">基础版按剧本节点逐节点下发任务，并提供处置引导提示；参演人员按顺序完成即可，考评仅统计时限达成情况。</div>'
+        + '<div class="table-wrap"><table class="table"><thead><tr><th style="width:60px">序号</th><th>剧本节点</th><th style="width:130px">责任角色</th><th style="width:90px">计划时刻</th><th style="width:90px">时限(分)</th><th>引导提示</th></tr></thead><tbody>'
+        + WB.nodes.filter(function(n){ return n.type!=='end'; }).map(function(n,i){
+            return '<tr><td class="mono">'+(i+1)+'</td><td>'+App.esc(n.title)+'</td><td class="small">'+App.esc(roleName(n.target))+'</td>'
+              + '<td class="mono small">'+App.esc(n.time)+'</td><td class="mono small">'+(n.timeout||'—')+'</td>'
+              + '<td class="small muted">'+App.esc(n.guide||'—')+'</td></tr>';
+          }).join('')+'</tbody></table></div>';
+      return;
+    }
+    /* 实战版：步骤录入 + 步骤清单 */
+    card.innerHTML = '<div class="card-title">'+App.icon('edit')+'实战版处置步骤（参演人员自主录入）'
+      + '<span class="more">系统按动作类型 + 关键词自动匹配基线节点</span></div>'
+      + '<div class="filters" style="gap:10px;align-items:flex-end">'
+      +   '<div><label class="f-label">动作类型</label><select class="select" id="stAction">'
+      +     ['告警核实','隔离处置','处置恢复','业务兜底','上报审批','取证留痕','协同沟通','其他'].map(function(x){ return '<option>'+x+'</option>'; }).join('')
+      +   '</select></div>'
+      +   '<div style="flex:1;min-width:220px"><label class="f-label">步骤标题</label><input class="input" id="stTitle" placeholder="如：隔离感染主机并关闭共享写入"></div>'
+      +   '<div><label class="f-label">处置时刻</label><input class="input" id="stTime" type="time" style="width:130px"></div>'
+      +   '<button class="btn primary" id="stAdd">'+App.icon('plus')+'添加步骤</button>'
+      + '</div>'
+      + '<div class="form-row" style="margin-top:10px"><label class="f-label">处置说明（可选，可写具体主机/IP/操作）</label><input class="input" id="stDesc" placeholder="补充说明有助于系统更准确匹配基线节点"></div>'
+      + '<div class="section-title mt3">已录入步骤（'+(WB.steps||[]).length+'）</div>'
+      + '<div class="st-list" id="stList"></div>';
+
+    var now = new Date();
+    document.getElementById('stTime').value = (now.getHours()<10?'0':'')+now.getHours()+':'+(now.getMinutes()<10?'0':'')+now.getMinutes();
+
+    function renderList(){
+      var list = WB.steps || [];
+      if(!list.length){ document.getElementById('stList').innerHTML = '<div class="empty">'+App.icon('edit')+'<div>尚未录入处置步骤，请按实际处置过程添加</div></div>'; return; }
+      document.getElementById('stList').innerHTML = list.map(function(s2){
+        var node = WB.nodes.filter(function(n){ return n.id===s2.matched_node; })[0];
+        return '<div class="st-item"><div class="st-h"><span><b>'+App.esc(s2.step_time)+'</b> · '+App.esc(s2.title)+'</span>'
+          + '<span class="flex gap2">'+(s2.matched ? '<span class="tag green">已匹配 '+App.esc(node?node.id:'')+'</span>' : '<span class="tag gray">未匹配基线</span>')
+          + '<button class="btn sm danger" data-del="'+s2.id+'">删除</button></span></div>'
+          + '<div class="tiny dim mt2">'+App.esc(roleName(s2.role_id))+' · '+App.esc(s2.action||'其他')+(s2.descr?' · '+App.esc(s2.descr):'')+'</div></div>';
+      }).join('');
+      document.querySelectorAll('#stList [data-del]').forEach(function(b){
+        b.onclick = function(){
+          API.deleteDrillStep(b.dataset.del).then(function(){
+            App.toast('步骤已删除','ok');
+            load();
+          }).catch(function(err){ App.toast((err&&err.message)||'删除失败','err'); });
+        };
+      });
+    }
+    renderList();
+
+    document.getElementById('stAdd').onclick = function(){
+      var title = document.getElementById('stTitle').value.trim();
+      if(!title){ App.toast('请填写步骤标题','err'); return; }
+      var btn = this; btn.disabled = true;
+      API.addDrillStep({
+        projectId: proj.id, action: document.getElementById('stAction').value,
+        title: title, desc: document.getElementById('stDesc').value.trim(),
+        stepTime: document.getElementById('stTime').value
+      }).then(function(r){
+        btn.disabled = false;
+        App.toast(r.matchedNode ? '步骤已录入，匹配基线节点 '+r.matchedNode+(r.ontime?'（时限内）':'（超出基线时限）') : '步骤已录入（未匹配基线节点，可作为额外处置）', r.matchedNode?'ok':'warn');
+        load();
+      }).catch(function(err){
+        btn.disabled = false;
+        App.toast((err&&err.message)||'录入失败','err');
+      });
+    };
+  }
+
+  function load(){
+    var btn = document.getElementById('evReEval');
+    if(btn) btn.disabled = true;
+    API.getDrillWorkbench(proj.id).then(function(wb){
+      WB = wb;
+      document.querySelector('.page-head .sub').textContent = proj.name + ' · 系统自动考评 · ' + wb.mode;
+      renderMode(); renderItems(); renderSummary(); renderSuggestions(); renderSteps();
+      if(btn) btn.disabled = false;
+    }).catch(function(err){
+      document.getElementById('evItems').innerHTML = '<div class="empty">'+App.icon('alert')+'<div>考评数据加载失败：'+App.esc((err&&err.message)||'请稍后重试')+'</div></div>';
+      if(btn) btn.disabled = false;
+    });
+  }
+
+  if(btnRe){
+    btnRe.onclick = function(){
+      var b = this; b.disabled = true; b.innerHTML = App.icon('refresh')+'自动考评计算中…';
+      API.recalcDrillScore(proj.id).then(function(s){
+        App.toast('自动考评完成：'+s.score+' 分（'+grade(s.score)+'）· '+s.formula,'ok');
+        load();
+      }).catch(function(err){
+        App.toast((err&&err.message)||'考评失败','err');
+        b.disabled = false; b.innerHTML = App.icon('refresh')+'重新自动考评';
+      });
+    };
+  }
+
+  load();
+});
+App.boot('evaluation');
+</script>
+</body>
+</html>

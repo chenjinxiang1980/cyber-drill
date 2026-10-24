@@ -1,0 +1,19 @@
+{
+  "name": "cyber-drill-system",
+  "version": "1.0.0",
+  "description": "盘州市人民医院网络安全应急演练系统（局域网部署版）",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node src/seed.js",
+    "reset": "node src/seed.js --reset"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^2.0.2"
+  }
+}

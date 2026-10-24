@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台账与统计 · 盘州市人民医院网络安全应急演练系统</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+.lg-table tbody tr{cursor:pointer}
+.lg-stat .section-title{margin-top:4px}
+</style>
+</head>
+<body data-page="ledger">
+<script src="mock.js"></script><script src="app.js"></script><script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+
+  var rowsAll = MOCK.LEDGER.slice();
+  var results = ['全部'].concat(rowsAll.map(function(l){ return l.result; }).filter(function(v,i,a){ return a.indexOf(v)===i; }));
+  var fbHeads = {'P2026-012':10, 'P2026-011':12, 'P2026-009':8, 'P2026-008':10, 'P2026-007':8, 'P2025-015':9};
+  function headcount(l){
+    if(fbHeads[l.id]) return fbHeads[l.id];
+    var p = MOCK.PROJECTS.filter(function(x){ return x.id===l.id; })[0];
+    return p ? Math.max(p.members.length + p.observers.length, 6) : 8;
+  }
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>台账与统计</h1><div class="sub">历史演练台账检索 · 年度统计 · 短板分析（台账数据均为演练模拟记录）</div></div>'
+    + '<div class="acts"><button class="btn primary" id="lgExport">'+App.icon('download')+'导出台账Excel</button></div></div>'
+    + '<div class="filters card" style="padding:12px 16px">'
+    +   '<input class="input" type="date" id="fFrom" title="开始日期">'
+    +   '<span class="dim">至</span><input class="input" type="date" id="fTo" title="结束日期">'
+    +   '<select class="select" id="fEvent"><option value="">事件类型：全部</option>'+MOCK.DICT.eventTypes.map(function(x){ return '<option>'+x+'</option>'; }).join('')+'</select>'
+    +   '<select class="select" id="fResult"><option value="">结果：全部</option>'+results.filter(function(x){ return x!=='全部'; }).map(function(x){ return '<option>'+x+'</option>'; }).join('')+'</select>'
+    +   '<input class="input grow" id="fKw" placeholder="搜索编号 / 演练名称…">'
+    +   '<button class="btn" id="fReset">'+App.icon('refresh')+'重置</button>'
+    + '</div>'
+    + '<div class="table-wrap"><table class="table"><thead><tr><th>编号</th><th>演练名称</th><th>日期</th><th>事件类型</th><th>等级</th><th>参演人数</th><th>结果</th><th>评分</th><th>组织</th></tr></thead><tbody id="lgBody"></tbody></table></div>'
+    + '<div class="grid grid-2 lg-stat" style="margin-top:16px">'
+    +   '<div class="card"><div class="card-title">'+App.icon('dashboard')+'年度演练次数</div><div id="stYear"></div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('alert')+'事件类型频次</div><div id="stEvent" class="mt2"></div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('score')+'处置短板 TOP（本次评估扣分项）</div><div id="stWeak" class="mt2"></div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('clock')+'各角色平均响应时长（据时序记录）</div><div id="stResp" class="mt2"></div></div>'
+    + '</div>';
+
+  /* ---------- 检索表 ---------- */
+  var filtered = rowsAll.slice();
+  function applyFilter(){
+    var from = document.getElementById('fFrom').value;
+    var to = document.getElementById('fTo').value;
+    var ev = document.getElementById('fEvent').value;
+    var rs = document.getElementById('fResult').value;
+    var kw = document.getElementById('fKw').value.trim().toLowerCase();
+    filtered = rowsAll.filter(function(l){
+      if(from && l.date < from) return false;
+      if(to && l.date > to) return false;
+      if(ev && l.event !== ev) return false;
+      if(rs && l.result !== rs) return false;
+      if(kw && (l.id+' '+l.name).toLowerCase().indexOf(kw) < 0) return false;
+      return true;
+    });
+    renderTable();
+  }
+  function renderTable(){
+    var tb = document.getElementById('lgBody');
+    if(!filtered.length){
+      tb.innerHTML = '<tr><td colspan="9"><div class="empty">'+App.icon('search')+'<div>无匹配台账记录</div></div></td></tr>';
+      return;
+    }
+    tb.innerHTML = filtered.map(function(l,i){
+      return '<tr data-id="'+l.id+'"><td class="mono">'+l.id+'</td><td class="t-link">'+App.esc(l.name)+'</td><td class="mono">'+l.date+'</td><td>'+App.esc(l.event)+'</td><td>'+App.levelTag(l.level)+'</td><td class="mono">'+headcount(l)+'</td><td>'+App.statusTag(l.result==='进行中'?'演练中':l.result)+'</td><td class="mono bold">'+(l.score==='-'?'—':l.score)+'</td><td class="dim">'+App.esc(l.org)+'</td></tr>';
+    }).join('');
+    tb.querySelectorAll('tr[data-id]').forEach(function(tr){
+      tr.onclick = function(){ openDrawer(tr.dataset.id); };
+    });
+  }
+  ['fFrom','fTo','fEvent','fResult','fKw'].forEach(function(id){
+    document.getElementById(id).addEventListener(id==='fKw'?'input':'change', applyFilter);
+  });
+  document.getElementById('fReset').onclick = function(){
+    ['fFrom','fTo','fEvent','fResult','fKw'].forEach(function(id){ document.getElementById(id).value=''; });
+    applyFilter(); App.toast('筛选条件已重置','ok');
+  };
+
+  /* ---------- 统计图 ---------- */
+  (function(){
+    var byYear = {};
+    rowsAll.forEach(function(l){ var y = l.date.slice(0,4); byYear[y] = (byYear[y]||0)+1; });
+    var ydata = Object.keys(byYear).sort().map(function(y){ return { label:y+'年', value:byYear[y] }; });
+    App.barChart(document.getElementById('stYear'), ydata);
+
+    var byEvent = {};
+    rowsAll.forEach(function(l){ byEvent[l.event] = (byEvent[l.event]||0)+1; });
+    var maxEv = Math.max.apply(null, Object.keys(byEvent).map(function(k){ return byEvent[k]; }));
+    App.hbar(document.getElementById('stEvent'), Object.keys(byEvent).sort(function(a,b){ return byEvent[b]-byEvent[a]; }).map(function(k){
+      return { label:k, value:byEvent[k], max:maxEv, color:'var(--accent)' };
+    }));
+
+    var weak = MOCK.SCORE_ITEMS.map(function(it){
+      var s = MOCK.SCORES.filter(function(x){ return x.itemId===it.id; })[0];
+      var v = s ? s.score : 0;
+      return { label:it.name, value:v, max:it.weight, rate: v/it.weight };
+    }).filter(function(x){ return x.rate < 1; }).sort(function(a,b){ return a.rate-b.rate; }).slice(0,4);
+    App.hbar(document.getElementById('stWeak'), weak.map(function(x){
+      return { label:x.label, value:x.value, max:x.max, color: x.rate<0.8 ? 'var(--err)' : 'var(--warn)' };
+    }));
+
+    function mins(t){ var p = t.split(':'); return (+p[0])*60 + (+p[1]); }
+    var acc = {}, cnt = {}, prev = null;
+    MOCK.TIMELINE.slice().sort(function(a,b){ return mins(a.t)-mins(b.t); }).forEach(function(ev){
+      if(prev !== null && ev.role !== 'sys'){ acc[ev.role] = (acc[ev.role]||0) + (mins(ev.t)-prev); cnt[ev.role] = (cnt[ev.role]||0)+1; }
+      prev = mins(ev.t);
+    });
+    var rl = Object.keys(acc).map(function(r){
+      var ro = MOCK.ROLES.filter(function(x){ return x.id===r; })[0];
+      return { label: ro ? ro.short : r, value: Math.round(acc[r]/cnt[r]*10)/10 };
+    }).sort(function(a,b){ return b.value-a.value; });
+    var maxR = Math.max.apply(null, rl.map(function(x){ return x.value; })) || 1;
+    App.hbar(document.getElementById('stResp'), rl.map(function(x){
+      return { label:x.label+'（分钟）', value:x.value, max:maxR, color: x.value>=maxR*0.8 ? 'var(--warn)' : 'var(--info)' };
+    }));
+  })();
+
+  /* ---------- 导出台账（真实CSV下载，内容虚拟） ---------- */
+  document.getElementById('lgExport').onclick = function(){
+    function cell(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }
+    var header = ['编号','演练名称','日期','演练类型','事件类型','等级','参演人数','结果','评分','组织'];
+    var lines = [header].concat(filtered.map(function(l){
+      return [l.id, l.name, l.date, l.type, l.event, l.level, headcount(l), l.result, l.score, l.org];
+    })).map(function(r){ return r.map(cell).join(','); });
+    var blob = new Blob(['\uFEFF'+lines.join('\r\n')], { type:'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '演练模拟-盘州市人民医院网络安全演练台账-'+new Date().toISOString().slice(0,10)+'.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1500);
+    API.addAudit('导出台账CSV（'+filtered.length+'条，演练模拟数据）');
+    App.toast('台账CSV已开始下载（演练模拟数据）','ok');
+  };
+
+  /* ---------- 行详情抽屉 ---------- */
+  function openDrawer(id){
+    var l = rowsAll.filter(function(x){ return x.id===id; })[0];
+    if(!l) return;
+    var isCurrent = l.id === (API.activeProject()||{}).id;
+    var seqHtml;
+    if(isCurrent){
+      seqHtml = '<div class="timeline">'+MOCK.TIMELINE.map(function(ev){
+        return '<div class="tl-item '+(ev.level==='P0'?'err':ev.level==='P1'?'warn':'')+'"><span class="tl-dot"></span><div class="tl-time">'+ev.t+'</div><div class="tl-title">'+App.esc(ev.actor)+' · '+App.esc(ev.action)+'</div><div class="tl-desc">'+App.esc(ev.detail)+'</div></div>';
+      }).join('')+'</div>';
+    } else {
+      seqHtml = '<div class="seqflow">'+MOCK.SEQ_FLOW.map(function(n,i){
+        return (i?'<span class="seq-arrow">▸</span>':'')+'<div class="seq-node done" style="min-width:96px"><div class="s-name">'+n.name+'</div><div class="s-time">'+n.time+'</div></div>';
+      }).join('')+'</div><div class="tiny dim mt2">完整逐事件时序已随档案归档，可在取证与材料归档模块调阅。</div>';
+    }
+    var scoreHtml;
+    if(l.score === '-'){
+      scoreHtml = '<div class="muted small">演练进行中，评分待复盘评估完成后生成。</div>';
+    } else {
+      var pct = Math.round(parseFloat(l.score));
+      scoreHtml = '<div class="flex" style="align-items:baseline;gap:8px"><span class="mono bold" style="font-size:22px;color:'+(pct>=85?'var(--ok)':pct>=75?'var(--warn)':'var(--err)')+'">'+l.score+'</span><span class="dim">/ 100</span></div><div class="progress mt2"><div class="bar '+(pct>=85?'ok':pct>=75?'warn':'err')+'" style="width:'+pct+'%"></div></div>';
+    }
+    var reportHtml = l.result==='进行中'
+      ? App.statusTag('演练中')+' <span class="dim small">报告生成中</span>'
+      : App.statusTag('已结束')+' <span class="dim small">复盘报告已归档</span>';
+
+    App.drawer({ title:'台账详情 · '+l.id, body:
+      '<div class="kv">'
+      + '<span class="k">演练名称</span><span>'+App.esc(l.name)+'</span>'
+      + '<span class="k">日期</span><span class="mono">'+l.date+'</span>'
+      + '<span class="k">演练类型</span><span>'+App.esc(l.type)+'</span>'
+      + '<span class="k">事件类型</span><span>'+App.esc(l.event)+'</span>'
+      + '<span class="k">事件等级</span><span>'+App.levelTag(l.level)+'</span>'
+      + '<span class="k">参演人数</span><span class="mono">'+headcount(l)+' 人</span>'
+      + '<span class="k">演练结果</span><span>'+App.statusTag(l.result==='进行中'?'演练中':l.result)+'</span>'
+      + '<span class="k">组织方式</span><span>'+App.esc(l.org)+'</span></div>'
+      + '<div class="section-title mt4">处置时序</div>'+seqHtml
+      + '<div class="section-title mt4">评估得分</div>'+scoreHtml
+      + '<div class="section-title mt4">报告状态</div><div>'+reportHtml+'</div>'
+      + '<div class="mt4"><button class="btn sm" id="dwGo">'+App.icon('replay')+'前往时序回放</button></div>',
+      onOpen:function(ov){ ov.querySelector('#dwGo').onclick=function(){ location.href='replay.html'; }; } });
+  }
+
+  applyFilter();
+});
+App.boot('ledger');
+</script>
+</body>
+</html>

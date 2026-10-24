@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>协同会商中心 · 盘州市人民医院网络安全应急演练系统</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="collab">
+<script src="mock.js"></script>
+<script src="app.js"></script>
+<script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+  var isExternal = !!role.external;
+
+  var GROUPS = [
+    { key:'inner', label:'院内会商组', icon:'hospital' },
+    { key:'joint', label:'跨部门联合会商组', icon:'building' }
+  ];
+  var curGroup = isExternal ? 'joint' : 'inner';
+  var pendingAtt = null;
+
+  /* 页内局部图标helper：tab处无svg尺寸规则 */
+  function ic(n,s){ return '<svg viewBox="0 0 24 24" style="width:'+s+'px;height:'+s+'px;flex:none">'+(App.ICONS[n]||App.ICONS.file)+'</svg>'; }
+
+  function roleName(id){ var r = MOCK.ROLES.filter(function(x){ return x.id===id; })[0]; return r ? r.name : (id==='sys'?'系统':id); }
+  function roleColor(id){ var r = MOCK.ROLES.filter(function(x){ return x.id===id; })[0]; return r ? r.color : '#5c7396'; }
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>协同会商中心</h1><div class="sub">演练会商文字/附件沟通 · 会商记录自动归档至取证模块</div></div></div>'
+    + '<div class="sim-banner">'+App.icon('archive')+'<span>归档提示：本会商中心全部聊天记录（含附件）将<b>自动归档至取证与材料归档模块</b>，用于演练复盘与证据固定（演练模拟，消息仅在本原型内流转）。</span></div>'
+    + '<div class="tabs" id="chatTabs"></div>'
+    + '<div class="card" style="padding:0;overflow:hidden">'
+    +   '<div id="chatPanel" style="display:flex;flex-direction:column;height:520px"></div>'
+    + '</div>';
+
+  function renderTabs(){
+    document.getElementById('chatTabs').innerHTML = GROUPS.map(function(g){
+      var cnt = (MOCK.CHAT[g.key]||[]).length;
+      return '<span class="tab'+(curGroup===g.key?' active':'')+'" data-k="'+g.key+'">'+ic(g.icon,15)+g.label+'<span class="cnt">'+cnt+'</span>'+(isExternal&&g.key==='inner'?'<span class="tiny" style="color:var(--err)">受限</span>':'')+'</span>';
+    }).join('');
+    document.querySelectorAll('#chatTabs .tab').forEach(function(el){
+      el.onclick = function(){
+        var k = el.dataset.k;
+        if(isExternal && k==='inner'){
+          App.toast('外部单位仅可发言于跨部门联合会商组（授权组）','warn');
+          return;
+        }
+        curGroup = k; renderTabs(); renderPanel();
+      };
+    });
+  }
+
+  function renderPanel(){
+    var panel = document.getElementById('chatPanel');
+    if(isExternal && curGroup==='inner'){
+      panel.innerHTML = '<div class="empty" style="margin:auto">'+App.icon('lock')+'<div>院内敏感讨论页签对「'+App.esc(role.name)+'」受限</div>'
+        + '<div class="tiny dim mt2">依据分级权限策略，外部单位仅可进入跨部门联合会商组，查看医院主动报送相关内容（演练模拟权限隔离）</div></div>';
+      return;
+    }
+    panel.innerHTML =
+      '<div class="chat grow" id="chatBox" style="flex:1;overflow-y:auto"></div>'
+      + '<div style="border-top:1px solid var(--border);padding:12px 16px;background:var(--elev)">'
+      +   '<div id="attChip" style="margin-bottom:8px"></div>'
+      +   '<div class="flex gap2">'
+      +     '<button class="btn icon" id="btnAttach" title="附件（模拟上传）">'+App.icon('upload')+'</button>'
+      +     '<input class="input grow" id="chatInput" placeholder="'+(isExternal?'向会商组发言（演练模拟）…':'输入会商内容，回车发送（演练模拟）…')+'" maxlength="200">'
+      +     '<button class="btn primary" id="btnSend">'+App.icon('send')+'发送</button>'
+      +   '</div>'
+      +   '<div class="tiny dim mt2">'+App.esc(role.name)+' · '+App.esc(App.curUser())+' 正在「'+GROUPS.filter(function(g){return g.key===curGroup;})[0].label+'」发言'+(isExternal?' · 仅授权组可发言':'')+' · 发言自动归档至取证模块</div>'
+      + '</div>';
+    loadChat();
+    document.getElementById('btnSend').onclick = doSend;
+    document.getElementById('chatInput').addEventListener('keydown', function(ev){ if(ev.key==='Enter') doSend(); });
+    document.getElementById('btnAttach').onclick = openAttachModal;
+    renderAttChip();
+  }
+
+  function renderAttChip(){
+    var box = document.getElementById('attChip');
+    if(!box) return;
+    box.innerHTML = pendingAtt
+      ? '<span class="file-chip">'+App.icon('file')+App.esc(pendingAtt)+'<span class="fc-size">待发送附件（模拟）</span><span class="x" style="cursor:pointer;color:var(--text3)">×</span></span>'
+      : '';
+    if(pendingAtt){
+      box.querySelector('.x').onclick = function(){ pendingAtt=null; renderAttChip(); };
+    }
+  }
+
+  function loadChat(){
+    API.getChat(curGroup).then(renderChat);
+  }
+
+  function renderChat(msgs){
+    var box = document.getElementById('chatBox');
+    if(!box) return;
+    box.innerHTML = msgs.map(function(m){
+      var cls = m.role==='sys' ? 'sys' : (m.role===role.id ? 'self' : '');
+      if(m.role==='sys'){
+        return '<div class="msg sys"><div class="m-body">'+App.esc(m.text)+'<div class="tiny dim" style="margin-top:2px">'+m.time+' · 系统（演练模拟）</div></div></div>';
+      }
+      return '<div class="msg '+cls+'">'
+        + '<span class="av" style="background:'+roleColor(m.role)+'">'+App.esc((m.sender||'?').slice(0,1))+'</span>'
+        + '<div class="m-body"><div class="m-meta"><span>'+App.esc(m.sender)+'</span><span>'+App.esc(roleName(m.role))+'</span><span>'+m.time+'</span></div>'
+        + '<div class="m-text">'+App.esc(m.text)+'</div>'
+        + (m.att ? '<div class="m-att">'+App.icon('file')+App.esc(m.att)+'</div>' : '')
+        + '</div></div>';
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function doSend(){
+    var input = document.getElementById('chatInput');
+    var text = (input.value||'').trim();
+    if(!text){ App.toast('请输入会商内容','warn'); return; }
+    API.sendChat(curGroup, '【演练模拟】'+text, pendingAtt).then(function(){
+      if(pendingAtt){
+        API.addEvidence({ type:'聊天记录', name:'会商附件-'+pendingAtt+'(演练模拟)', size:'18 KB' });
+      }
+      pendingAtt = null;
+      input.value = '';
+      loadChat(); renderTabs();
+    });
+  }
+
+  function openAttachModal(){
+    App.modal({ title:'添加附件（模拟上传）', body:'<div class="sim-banner">'+App.icon('alert')+'<span>原型演示：仅登记文件名作为模拟附件，不读取真实文件内容，不含恶意样本。</span></div>'
+      + '<div class="form-row"><label class="f-label">文件名</label><input class="input" id="attName" value="处置进展简报.pdf" placeholder="如：告警截图.png"></div>'
+      + '<div class="upload-box">'+App.icon('upload')+'模拟选择文件 · 支持 pdf / png / txt / docx（演练模拟）</div>',
+      foot:'<button class="btn" id="atNo">取消</button><button class="btn primary" id="atYes">确认添加</button>',
+      onOpen:function(ov){
+        ov.querySelector('#atNo').onclick = ov.close;
+        ov.querySelector('#atYes').onclick = function(){
+          var n = (ov.querySelector('#attName').value||'').trim();
+          if(!n){ App.toast('请填写模拟文件名','warn'); return; }
+          pendingAtt = n;
+          ov.close();
+          renderAttChip();
+          App.toast('模拟附件已挂载：'+n,'ok');
+        };
+      } });
+  }
+
+  renderTabs(); renderPanel();
+});
+App.boot('collab');
+</script>
+</body>
+</html>

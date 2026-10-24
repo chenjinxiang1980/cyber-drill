@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>取证与材料归档 · 盘州市人民医院网络安全应急演练系统</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+.ev-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.ev-tab{border:1px solid var(--border);background:var(--elev);color:var(--text2);border-radius:16px;padding:5px 14px;font-size:12px;cursor:pointer}
+.ev-tab.on{border-color:var(--accent);background:var(--accent-dim);color:#fff}
+.sp-card .sp-name{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px}
+.sp-card .sp-name svg{width:15px;height:15px;color:var(--accent2)}
+.sp-card .sp-meta{font-size:11px;color:var(--text3);margin-top:6px;font-family:var(--mono)}
+.sp-card .sp-note{font-size:12px;color:var(--text2);margin-top:8px;min-height:38px}
+.ev-warn{color:var(--err);font-size:12px;display:flex;align-items:flex-start;gap:8px;background:var(--err-dim);border:1px solid rgba(248,81,73,.4);border-radius:6px;padding:8px 12px}
+.ev-warn svg{width:15px;height:15px;flex:none;margin-top:2px}
+</style>
+</head>
+<body data-page="evidence">
+<script src="mock.js"></script>
+<script src="app.js"></script>
+<script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+  var ext = !!role.external;
+  var REPORTED = ['表单文书','处置记录','样本摘要'];
+  var TYPE_CLS = { '操作日志':'gray','附件截图':'blue','聊天记录':'purple','表单文书':'green','处置记录':'yellow','样本摘要':'red','状态变更':'blue' };
+  var tab = '全部';
+
+  var proj = API.activeProject();
+  page.innerHTML =
+    '<div class="page-head"><div><h1>取证与材料归档</h1><div class="sub">'+(proj?proj.name:'当前演练项目')+' · 自动采集流 + 关键节点快照 + 手动取证'+(ext?' · 外部单位只读视图':'')+'</div></div>'
+    + '<div class="acts">'
+    + (ext?'':'<button class="btn" id="btnUp">'+App.icon('upload')+'手动取证上传</button>')
+    + (ext?'':'<button class="btn primary" id="btnPack">'+App.icon('archive')+'一键打包演练档案</button>')
+    + '</div></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>'+(ext?'外部单位视图：仅可见医院已上报的取证材料（演练模拟权限隔离），不可查看内网原始日志，不可上传或打包。':'所有取证材料均为演练模拟生成/上传的虚拟内容；系统不采集真实患者数据，不下载真实恶意样本。')+'</span></div>'
+    + '<div class="card"><div class="card-title">'+App.icon('evidence')+'取证材料流（自动采集 + 审计摘要）<span class="more" id="tamperNote" title="取证材料一经归档不可删除，保障演练复盘证据链完整性">'+App.icon('lock')+'防篡改：归档后不可删除</span></div>'
+    + '<div class="ev-tabs" id="evTabs"></div>'
+    + '<div class="table-wrap"><table class="table"><thead><tr><th>类型</th><th>材料名称</th><th>来源</th><th>时间</th><th>上传人</th><th>标记</th></tr></thead><tbody id="evBody"></tbody></table></div></div>'
+    + '<div class="section-title mt5" style="margin-top:24px">'+App.icon('camera')+'关键节点快照</div>'
+    + '<div class="grid grid-3" id="spGrid"></div>';
+
+  function buildList(){
+    var ev = MOCK.EVIDENCE.map(function(x){
+      return { type:x.type, name:x.name, source:x.auto?'系统自动采集':'人工上传', time:x.time, uploader:x.uploader, reported:REPORTED.indexOf(x.type)>=0 };
+    });
+    var au = MOCK.AUDIT_LOGS.slice(-6).map(function(a){
+      return { type:'操作日志', name:a.action, source:'操作审计', time:a.time, uploader:a.user, reported:false };
+    });
+    var all = au.concat(ev);
+    if(ext) all = all.filter(function(x){ return x.reported; });
+    if(tab!=='全部') all = all.filter(function(x){ return x.type===tab; });
+    return all;
+  }
+
+  function renderTabs(){
+    var types = ['全部'];
+    MOCK.EVIDENCE.forEach(function(x){ if(types.indexOf(x.type)<0) types.push(x.type); });
+    document.getElementById('evTabs').innerHTML = types.map(function(t){ return '<span class="ev-tab'+(t===tab?' on':'')+'" data-t="'+t+'">'+t+'</span>'; }).join('');
+    page.querySelectorAll('.ev-tab').forEach(function(b){ b.onclick = function(){ tab = b.dataset.t; renderTabs(); renderList(); }; });
+  }
+
+  function renderList(){
+    var list = buildList();
+    var body = document.getElementById('evBody');
+    if(!list.length){ body.innerHTML = '<tr><td colspan="6"><div class="empty">'+App.icon('evidence')+'<div>当前筛选下暂无材料（外部单位仅见已上报材料）</div></div></td></tr>'; return; }
+    body.innerHTML = list.map(function(x){
+      return '<tr><td><span class="tag '+(TYPE_CLS[x.type]||'gray')+'">'+x.type+'</span></td>'
+      + '<td class="ellip" style="max-width:320px" title="'+App.esc(x.name)+'">'+App.esc(x.name)+'</td>'
+      + '<td class="small dim">'+x.source+'</td>'
+      + '<td class="mono small">'+x.time+'</td>'
+      + '<td class="small">'+App.esc(x.uploader)+'</td>'
+      + '<td>'+(x.reported?'<span class="tag green">'+App.icon('check')+'已上报</span>':'<span class="tag gray">院内留存</span>')+'</td></tr>';
+    }).join('');
+  }
+
+  function renderSnapshots(){
+    document.getElementById('spGrid').innerHTML = MOCK.SNAPSHOTS.map(function(sp,i){
+      return '<div class="card sp-card"><div class="sp-name">'+App.icon('camera')+App.esc(sp.name)+'</div>'
+      + '<div class="sp-meta">'+sp.time+' · 定格人：'+App.esc(sp.by)+'</div>'
+      + '<div class="sp-note">'+App.esc(sp.note)+'</div>'
+      + '<div class="flex gap2 mt2"><button class="btn sm" data-sp="'+i+'">'+App.icon('eye')+'查看</button><span class="tiny dim right">过程自动定格（演练模拟）</span></div></div>';
+    }).join('');
+    page.querySelectorAll('[data-sp]').forEach(function(b){ b.onclick = function(){ viewSnapshot(MOCK.SNAPSHOTS[+b.dataset.sp]); }; });
+  }
+
+  function viewSnapshot(sp){
+    var rel = MOCK.TIMELINE.filter(function(t){ return t.t<=sp.time; }).slice(-4);
+    App.drawer({ title:'快照详情 · '+App.esc(sp.name), body:
+      '<div class="kv"><span class="k">快照名称</span><span>'+App.esc(sp.name)+'</span>'
+      + '<span class="k">定格时刻</span><span class="mono">'+sp.time+'</span>'
+      + '<span class="k">创建方</span><span>'+App.esc(sp.by)+'</span>'
+      + '<span class="k">备注</span><span>'+App.esc(sp.note)+'</span></div>'
+      + '<div class="divider"></div><div class="section-title">关联时序（快照前最近事件）</div>'
+      + '<div class="timeline">'+rel.map(function(t){ return '<div class="tl-item '+(t.level==='P0'?'err':t.level==='P1'?'warn':'ok')+'"><span class="tl-dot"></span><div class="tl-time">'+t.t+' · '+App.esc(t.actor)+'</div><div class="tl-title">'+App.esc(t.action)+'</div><div class="tl-desc">'+App.esc(t.detail)+'</div></div>'; }).join('')+'</div>'
+      + '<div class="tiny dim mt3">快照内容为演练平台对当时态势的虚拟定格记录，用于复盘评估与档案打包。</div>' });
+  }
+
+  /* ===== 手动取证上传 ===== */
+  var up = document.getElementById('btnUp');
+  if(up) up.onclick = function(){
+    App.modal({ title:'手动取证上传（演练模拟）', body:
+      '<div class="form-grid">'
+      + '<div class="form-row"><label class="f-label">文件类型</label><select class="select" id="upType"><option value="截图">截图</option><option value="日志片段">日志片段</option><option value="文档">文档</option></select></div>'
+      + '<div class="form-row"><label class="f-label">文件大小（MB）</label><input class="input" id="upSize" type="number" min="0" step="0.1" value="1.5"></div>'
+      + '<div class="form-row span2"><label class="f-label">材料名称<span class="req">*</span></label><input class="input" id="upName" placeholder="如：处置截图-终端隔离-03.png（虚拟命名）"></div>'
+      + '</div>'
+      + '<div class="form-row"><label class="f-label">说明备注</label><textarea class="textarea" id="upNote" placeholder="取证背景、采集方式（演练模拟环境）…"></textarea></div>'
+      + '<div class="ev-warn">'+App.icon('alert')+'<span>禁止上传真实恶意程序样本、真实患者数据及任何生产环境敏感信息；单件取证文件不得超过 20MB。</span></div>',
+      foot:'<button class="btn" id="upNo">取消</button><button class="btn primary" id="upYes">确认归档</button>',
+      onOpen:function(ov){ ov.querySelector('#upNo').onclick=ov.close; ov.querySelector('#upYes').onclick=function(){
+        var name = ov.querySelector('#upName').value.trim();
+        var size = parseFloat(ov.querySelector('#upSize').value);
+        if(!name){ App.toast('请填写材料名称','err'); return; }
+        if(isNaN(size)||size<=0){ App.toast('请填写有效的文件大小','err'); return; }
+        if(size>20){ App.toast('文件超出演练取证限制（单件≤20MB）','err'); return; }
+        var tmap = { '截图':'附件截图', '日志片段':'操作日志', '文档':'表单文书' };
+        API.addEvidence({ type:tmap[ov.querySelector('#upType').value], name:name, size:size+' MB' }).then(function(){
+          ov.close(); renderTabs(); renderList();
+          App.toast('取证材料已归档（演练模拟）：'+name,'ok');
+        });
+      }; } });
+  };
+
+  /* ===== 一键打包 ===== */
+  var pk = document.getElementById('btnPack');
+  if(pk) pk.onclick = function(){
+    App.confirmSim('将当前项目全部取证材料、审计日志与关键节点快照打包为演练档案（演练模拟，仅生成虚拟档案清单，不传输真实文件）。', function(){
+      var docs = MOCK.EVIDENCE.filter(function(x){ return x.type==='表单文书'||x.type==='处置记录'; }).length;
+      var logs = MOCK.EVIDENCE.filter(function(x){ return x.type==='操作日志'||x.type==='状态变更'||x.type==='聊天记录'; }).length + MOCK.AUDIT_LOGS.length;
+      var snaps = MOCK.SNAPSHOTS.length;
+      var ov = App.modal({ title:'正在打包演练档案', body:
+        '<div class="flex small" style="justify-content:space-between"><span id="pkTxt">正在汇总取证材料…</span><span class="mono" id="pkPct">0%</span></div>'
+        + '<div class="progress mt3"><div class="bar" id="pkBar" style="width:0%"></div></div>'
+        + '<div class="tiny dim mt3">演练模拟：档案包含 文书'+docs+'份 / 日志'+logs+'条 / 快照'+snaps+'份，打包完成后供复盘评估与上级报送使用。</div>' });
+      var p = 0;
+      var t = setInterval(function(){
+        var bar = document.getElementById('pkBar');
+        if(!bar){ clearInterval(t); return; }
+        p = Math.min(100, p + 7 + Math.round(Math.random()*13));
+        bar.style.width = p+'%';
+        document.getElementById('pkPct').textContent = p+'%';
+        document.getElementById('pkTxt').textContent = p<40?'正在汇总取证材料…':p<75?'正在压缩审计日志…':p<100?'正在写入节点快照…':'打包完成';
+        if(p>=100){
+          clearInterval(t);
+          setTimeout(function(){ ov.close(); App.toast('档案包已生成（模拟）：含文书'+docs+'份 / 日志'+logs+'条 / 快照'+snaps+'份','ok'); }, 500);
+        }
+      }, 260);
+    });
+  };
+
+  renderTabs(); renderList(); renderSnapshots();
+});
+App.boot('evidence');
+</script>
+</body>
+</html>

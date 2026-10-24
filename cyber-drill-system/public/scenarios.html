@@ -1,0 +1,172 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>场景剧本库 · 盘州市人民医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<link rel="stylesheet" href="styles.css">
+<style>
+.sc-card{display:flex;flex-direction:column}
+.sc-card .sc-name{font-size:14.5px;font-weight:700;margin-top:10px}
+.sc-card .sc-desc{font-size:12px;color:var(--text2);margin-top:8px;line-height:1.7;flex:1;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.sc-card .sc-foot{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text3);margin-top:10px}
+.sc-acts{border-top:1px dashed var(--border);padding-top:12px;margin-top:12px}
+.sc-grid{grid-template-columns:repeat(3,1fr)}
+@media (max-width:1400px){.sc-grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body data-page="scenarios">
+<script src="system.js"></script>
+<script src="app.js"></script>
+<script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+  var BUILTIN = ['S01','S02','S03','S04','S05','S06','S07','S08'];
+  var f = { q:'', type:'', level:'', diff:'' };
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>场景剧本库</h1><div class="sub">内置 8 个医院典型网络安全事件场景 · 支持自定义场景导入导出（全部为演练模拟数据）</div></div>'
+    + '<div class="acts">'
+    + '<button class="btn" id="btnImport">'+App.icon('upload')+'导入场景</button>'
+    + '<button class="btn primary" id="btnNew">'+App.icon('plus')+'新建自定义场景</button></div></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>场景库仅用于应急演练推演编排，所有告警样本、IP、数据均为虚拟测试内容，与医院真实生产环境无关。</span></div>'
+    + '<div class="filters">'
+    + '<span class="input" style="display:flex;align-items:center;gap:8px;width:260px;color:var(--text3)">'+App.icon('search')+'<input class="input" id="fQ" placeholder="按场景名称/类型搜索…" style="border:none;background:transparent;padding:0;flex:1"></span>'
+    + '<select class="select" id="fType"><option value="">全部事件类型</option>'+MOCK.DICT.eventTypes.map(function(t){ return '<option>'+t+'</option>'; }).join('')+'</select>'
+    + '<select class="select" id="fLevel"><option value="">全部等级</option>'+MOCK.DICT.levels.map(function(l){ return '<option>'+l+'</option>'; }).join('')+'</select>'
+    + '<select class="select" id="fDiff"><option value="">全部难度</option><option>基础版</option><option>实战版</option></select>'
+    + '<span class="dim small" id="fCount"></span></div>'
+    + '<div class="grid sc-grid" id="scGrid"></div>';
+
+  function scenarioById(id){ return MOCK.SCENARIOS.filter(function(s){ return s.id===id; })[0]; }
+  function today(){ return new Date().toISOString().slice(0,10); }
+
+  function render(){
+    var list = MOCK.SCENARIOS.filter(function(s){
+      if(f.q && (s.name+s.type).toLowerCase().indexOf(f.q.toLowerCase())<0) return false;
+      if(f.type && s.type!==f.type) return false;
+      if(f.level && s.level!==f.level) return false;
+      if(f.diff && s.difficulty.indexOf(f.diff)<0) return false;
+      return true;
+    });
+    document.getElementById('fCount').textContent = '共 '+list.length+' 个场景（内置 '+MOCK.SCENARIOS.filter(function(s){ return BUILTIN.indexOf(s.id)>=0; }).length+' · 自定义 '+(MOCK.SCENARIOS.length-MOCK.SCENARIOS.filter(function(s){ return BUILTIN.indexOf(s.id)>=0; }).length)+'）';
+    var g = document.getElementById('scGrid');
+    if(!list.length){ g.innerHTML = '<div class="empty" style="grid-column:1/-1">'+App.icon('search')+'<div>无匹配场景，请调整筛选条件</div></div>'; return; }
+    g.innerHTML = list.map(function(s){
+      var builtin = BUILTIN.indexOf(s.id)>=0;
+      return '<div class="card sc-card">'
+      + '<div class="flex gap2" style="justify-content:space-between"><div class="flex gap2"><span class="tag gray mono">'+s.id+'</span>'+App.levelTag(s.level)+'</div>'+App.statusTag(s.status)+'</div>'
+      + '<div class="sc-name">'+App.esc(s.name)+'</div>'
+      + '<div class="flex gap2 wrap mt2"><span class="tag blue">'+s.type+'</span><span class="tag '+(s.difficulty.indexOf('基础')>=0?'green':'purple')+'">'+s.difficulty+'</span><span class="mono dim small">'+s.version+'</span></div>'
+      + '<div class="sc-desc">'+App.esc(s.desc)+'</div>'
+      + '<div class="sc-foot"><span>'+App.icon('flow')+' '+s.nodes+' 个节点</span><span class="right">更新于 '+s.updated+'</span>'+(builtin?'<span class="tag gray">内置</span>':'<span class="tag purple">自定义</span>')+'</div>'
+      + '<div class="flex gap1 wrap sc-acts">'
+      + '<button class="btn sm" data-act="edit" data-id="'+s.id+'">'+App.icon('edit')+'编辑剧本</button>'
+      + '<button class="btn sm" data-act="copy" data-id="'+s.id+'">'+App.icon('copy')+'复制另存</button>'
+      + '<button class="btn sm" data-act="toggle" data-id="'+s.id+'">'+App.icon('power')+(s.status==='启用'?'停用':'启用')+'</button>'
+      + '<button class="btn sm" data-act="export" data-id="'+s.id+'">'+App.icon('download')+'导出JSON</button>'
+      + '<button class="btn sm danger right" data-act="del" data-id="'+s.id+'" '+(builtin?'disabled title="内置场景不可删除，仅支持停用"':'')+'>删除</button>'
+      + '</div></div>';
+    }).join('');
+    g.querySelectorAll('[data-act]').forEach(function(b){
+      b.onclick = function(){
+        var s = scenarioById(b.dataset.id);
+        if(!s) return;
+        if(b.dataset.act==='edit'){ location.href = 'script-editor.html?scenario='+s.id; }
+        else if(b.dataset.act==='copy'){ doCopy(s); }
+        else if(b.dataset.act==='toggle'){ doToggle(s); }
+        else if(b.dataset.act==='export'){ doExport(s); }
+        else if(b.dataset.act==='del'){ doDelete(s); }
+      };
+    });
+  }
+
+  function doCopy(s){
+    App.modal({ title:'复制另存为自定义场景', body:'<div class="form-row"><label class="f-label">新场景名称<span class="req">*</span></label><input class="input" id="cpName" value="'+App.esc(s.name)+'（副本）'+'"></div><div class="tiny dim">副本默认停用，避免与在用剧本混淆（演练模拟）。</div>',
+      foot:'<button class="btn" id="cpNo">取消</button><button class="btn primary" id="cpYes">另存副本</button>',
+      onOpen:function(ov){ ov.querySelector('#cpNo').onclick=ov.close; ov.querySelector('#cpYes').onclick=function(){
+        var n = ov.querySelector('#cpName').value.trim();
+        if(!n){ App.toast('请填写新场景名称','err'); return; }
+        API.addScenario({ name:n, type:s.type, level:s.level, difficulty:s.difficulty, status:'停用', version:'v1.0', updated:today(), nodes:s.nodes, desc:s.desc }).then(function(ns){
+          ov.close(); render(); App.toast('已复制为自定义场景 '+ns.id+'（演练模拟）','ok');
+        });
+      }; } });
+  }
+
+  function doToggle(s){
+    var to = s.status==='启用'?'停用':'启用';
+    App.confirmSim('将场景《'+App.esc(s.name)+'》'+to+'。'+(to==='停用'?'停用后新建演练项目不可再选用该剧本。':'启用后即可在演练项目中选用。'), function(){
+      API.saveScenario(s.id, { status:to }).then(function(){ render(); App.toast('演练模拟：场景已'+to,'ok'); });
+    });
+  }
+
+  function doExport(s){
+    var data = { exportedAt:today(), exportedBy:App.curUser(), scenario:s, nodes:(s.id==='S01'?MOCK.SCRIPT_NODES:null) };
+    var blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = s.name+'.json';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+    App.toast('已导出「'+s.name+'.json」（演练模拟文件）','ok');
+  }
+
+  function doDelete(s){
+    App.confirmSim('删除自定义场景《'+App.esc(s.name)+'》及其编排内容。删除仅影响演练平台场景库，不涉及任何真实系统。', function(){
+      var i = MOCK.SCENARIOS.indexOf(s);
+      if(i>=0) MOCK.SCENARIOS.splice(i,1);
+      render(); App.toast('演练模拟：场景「'+s.name+'」已删除','ok');
+    });
+  }
+
+  document.getElementById('fQ').oninput = function(){ f.q=this.value; render(); };
+  document.getElementById('fType').onchange = function(){ f.type=this.value; render(); };
+  document.getElementById('fLevel').onchange = function(){ f.level=this.value; render(); };
+  document.getElementById('fDiff').onchange = function(){ f.diff=this.value; render(); };
+
+  document.getElementById('btnNew').onclick = function(){
+    App.modal({ title:'新建自定义场景', wide:true,
+      body:'<div class="form-grid">'
+      + '<div class="form-row span2"><label class="f-label">场景名称<span class="req">*</span></label><input class="input" id="ncName" placeholder="如：医保专线中断应急演练"></div>'
+      + '<div class="form-row"><label class="f-label">事件类型</label><select class="select" id="ncType">'+MOCK.DICT.eventTypes.map(function(t){ return '<option>'+t+'</option>'; }).join('')+'</select></div>'
+      + '<div class="form-row"><label class="f-label">事件等级</label><select class="select" id="ncLevel">'+MOCK.DICT.levels.map(function(l){ return '<option>'+l+'</option>'; }).join('')+'</select></div>'
+      + '<div class="form-row"><label class="f-label">难度</label><select class="select" id="ncDiff"><option>基础版</option><option>实战版</option></select></div>'
+      + '<div class="form-row"><label class="f-label">初始状态</label><select class="select" id="ncStatus"><option>启用</option><option>停用</option></select></div>'
+      + '<div class="form-row span2"><label class="f-label">场景描述</label><textarea class="textarea" id="ncDesc" placeholder="推演目标、涉及系统、关键节点说明（全部为虚拟演练内容）…"></textarea></div>'
+      + '</div><div class="tiny dim">创建后可在「剧本可视化编排」中补充节点时序。</div>',
+      foot:'<button class="btn" id="ncNo">取消</button><button class="btn primary" id="ncYes">创建场景</button>',
+      onOpen:function(ov){ ov.querySelector('#ncNo').onclick=ov.close; ov.querySelector('#ncYes').onclick=function(){
+        var n = ov.querySelector('#ncName').value.trim();
+        if(!n){ App.toast('请填写场景名称','err'); return; }
+        API.addScenario({ name:n, type:ov.querySelector('#ncType').value, level:ov.querySelector('#ncLevel').value, difficulty:ov.querySelector('#ncDiff').value, status:ov.querySelector('#ncStatus').value, version:'v1.0', updated:today(), nodes:0, desc:ov.querySelector('#ncDesc').value.trim()||'（暂无描述）' }).then(function(ns){
+          ov.close(); render(); App.toast('演练模拟：自定义场景 '+ns.id+' 已创建','ok');
+        });
+      }; } });
+  };
+
+  document.getElementById('btnImport').onclick = function(){
+    App.modal({ title:'导入场景（JSON）', wide:true,
+      body:'<div class="form-row"><label class="f-label">粘贴场景 JSON<span class="req">*</span></label><textarea class="textarea" id="imJson" style="min-height:180px;font-family:var(--mono)" placeholder=\'{"name":"XX应急演练","type":"勒索病毒","level":"较大","difficulty":"基础版","desc":"…"}\'></textarea></div>'
+      + '<div class="tiny dim">结构要求：name / type 必填，level、difficulty、desc 选填；导入后将作为自定义场景追加至场景库。</div>',
+      foot:'<button class="btn" id="imNo">取消</button><button class="btn primary" id="imYes">校验并导入</button>',
+      onOpen:function(ov){ ov.querySelector('#imNo').onclick=ov.close; ov.querySelector('#imYes').onclick=function(){
+        var raw = ov.querySelector('#imJson').value.trim();
+        if(!raw){ App.toast('请粘贴 JSON 内容','err'); return; }
+        var obj;
+        try{ obj = JSON.parse(raw); }catch(err){ App.toast('导入失败：JSON 解析错误 · '+err.message,'err'); return; }
+        if(!obj || typeof obj!=='object' || Array.isArray(obj) || !obj.name || !obj.type){ App.toast('导入失败：缺少 name / type 字段，结构不符合场景规范','err'); return; }
+        API.addScenario({ name:String(obj.name), type:String(obj.type), level:(MOCK.DICT.levels.indexOf(obj.level)>=0?obj.level:'一般'), difficulty:(String(obj.difficulty||'').indexOf('实战')>=0?'实战版':'基础版'), status:'停用', version:'v1.0', updated:today(), nodes:(obj.nodes&&obj.nodes.length?obj.nodes.length:0), desc:String(obj.desc||'（导入场景，暂无描述）') }).then(function(ns){
+          ov.close(); render(); App.toast('演练模拟：场景导入成功（'+ns.id+'），默认停用待编排','ok');
+        });
+      }; } });
+  };
+
+  render();
+});
+App.boot('scenarios');
+</script>
+</body>
+</html>

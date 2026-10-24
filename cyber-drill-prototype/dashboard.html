@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>态势总看板 · 盘州市人民医院网络安全应急演练系统</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="dashboard">
+<script src="mock.js"></script>
+<script src="app.js"></script>
+<script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+  var proj = API.activeProject();
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>演练态势总看板</h1><div class="sub">'+proj.name+' · '+proj.type+' · 参演单位：'+proj.units.join('、')+'</div></div>'
+    + '<div class="acts"><button class="btn" id="btnSnap">'+App.icon('camera')+'关键节点快照</button><button class="btn primary" id="btnRefresh">'+App.icon('refresh')+'刷新态势</button></div></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>本看板所有告警、事件、系统状态均为<b>演练模拟数据</b>，与医院真实生产环境无关，系统不操作任何生产网络与设备。</span></div>'
+    + '<div class="grid grid-4" id="kpis"></div>'
+    + '<div class="grid mt4" style="grid-template-columns:1.5fr 1fr;margin-top:16px">'
+    +   '<div class="card"><div class="card-title">'+App.icon('flow')+'剧本时序进度<span class="more" onclick="location.href=\'script-editor.html\'">查看剧本 ▸</span></div><div class="timeline" id="scriptTl"></div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色任务完成状态</div><div id="roleMatrix"></div></div>'
+    + '</div>'
+    + '<div class="grid mt4" style="grid-template-columns:1fr 1.2fr 1fr;gap:16px;margin-top:16px">'
+    +   '<div class="card"><div class="card-title">'+App.icon('file')+'已上报文书清单</div><div id="docs"></div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('bell')+'消息通知流</div><div class="timeline" id="msgFlow" style="max-height:300px;overflow-y:auto"></div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('hospital')+'业务影响范围</div><div id="impact"></div></div>'
+    + '</div>';
+
+  /* KPI */
+  Promise.all([API.getTasks(), API.getMessages(), API.getEvidence()]).then(function(res){
+    var allTasks = MOCK.TASKS.filter(function(t){ return t.projectId===proj.id; });
+    var overdue = allTasks.filter(function(t){ return t.status==='超时'; }).length;
+    var docs = MOCK.EVIDENCE.filter(function(e){ return e.type==='表单文书'; }).length;
+    var k = [
+      { l:'当前事件等级', v:proj.level, cls:'err', f:'依据剧本S01研判', ic:'alert' },
+      { l:'待办任务', v:allTasks.filter(function(t){return t.status!=='已完成';}).length, cls:'warn', f:'超时 '+overdue+' 项', ic:'tasks' },
+      { l:'参演角色在线', v:proj.members.length, cls:'info', f:'观察员 '+proj.observers.length+' 人', ic:'user' },
+      { l:'演练已进行', v:API.drillElapsed(), cls:'ok', f:'启动于 '+proj.date.slice(11), ic:'clock' }
+    ];
+    document.getElementById('kpis').innerHTML = k.map(function(x){
+      return '<div class="kpi '+x.cls+'"><div class="k-label">'+App.icon(x.ic)+x.l+'</div><div class="k-value">'+x.v+'</div><div class="k-foot">'+x.f+'</div></div>';
+    }).join('');
+  });
+
+  /* 剧本时序进度 */
+  API.getScriptNodes().then(function(nodes){
+    var now = '11:30';
+    document.getElementById('scriptTl').innerHTML = nodes.map(function(n){
+      var st = n.time <= now ? (n.time===nodes[nodes.length-1].time?'warn':'ok') : 'gray';
+      var icon = n.type==='alert'?'bell':n.type==='branch'?'flow':n.type==='report'?'send':n.type==='end'?'power':'tasks';
+      return '<div class="tl-item '+st+'"><span class="tl-dot"></span><div class="flex gap2"><span class="tl-time">'+n.time+' · T节点</span></div><div class="tl-title">'+App.icon(icon)+' '+n.title+'</div><div class="tl-desc">接收：'+n.target+(n.form?' · 需提交：'+(MOCK.FORM_TEMPLATES.filter(function(f){return f.id===n.form;})[0]||{}).name:'')+(n.timeout?' · 超时'+n.timeout+'min提醒':'')+'</div></div>';
+    }).join('');
+  });
+
+  /* 角色任务矩阵 */
+  API.getTasks().then(function(){
+    var rows = proj.members.map(function(m){
+      var r = MOCK.ROLES.filter(function(x){ return x.id===m.role; })[0];
+      var ts = MOCK.TASKS.filter(function(t){ return t.projectId===proj.id && t.role===m.role; });
+      var done = ts.filter(function(t){ return t.status==='已完成'; }).length;
+      var od = ts.filter(function(t){ return t.status==='超时'; }).length;
+      var pct = ts.length? Math.round(done/ts.length*100):0;
+      return '<div style="margin-bottom:12px"><div class="flex small" style="justify-content:space-between"><span>'+r.name+'<span class="dim"> · '+m.user+'</span></span><span class="mono dim">'+done+'/'+ts.length+(od?' <b style="color:var(--err)">超时'+od+'</b>':'')+'</span></div><div class="progress mt2"><div class="bar '+(od?'err':pct===100?'ok':'')+'" style="width:'+pct+'%"></div></div></div>';
+    }).join('');
+    document.getElementById('roleMatrix').innerHTML = rows;
+  });
+
+  /* 已上报文书 */
+  API.getEvidence().then(function(){
+    var docs = MOCK.EVIDENCE.filter(function(e){ return e.type==='表单文书' || e.type==='处置记录'; });
+    document.getElementById('docs').innerHTML = docs.map(function(d){
+      return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('file')+'<span class="grow ellip">'+d.name+'</span><span class="fc-size">'+d.time+' · '+d.uploader+'</span></div>';
+    }).join('') + '<div class="tiny dim mt2">文书共 '+docs.length+' 份 · 全部归档于取证模块，支持一键打包</div>';
+  });
+
+  /* 消息流 */
+  API.getMessages().then(function(ms){
+    document.getElementById('msgFlow').innerHTML = ms.slice().reverse().map(function(m){
+      return '<div class="tl-item '+(m.level==='P0'?'err':m.level==='P1'?'warn':'gray')+'"><span class="tl-dot"></span><div class="tl-time">'+m.time+' · '+m.source+'</div><div class="tl-desc">'+App.levelTag(m.level)+' '+m.text+'</div></div>';
+    }).join('');
+  });
+
+  /* 业务影响 */
+  API.getImpact().then(function(imp){
+    document.getElementById('impact').innerHTML = imp.map(function(i){
+      var c = i.pct>=100?'ok':i.pct>=60?'warn':'err';
+      return '<div style="margin-bottom:10px"><div class="flex small" style="justify-content:space-between"><span>'+i.sys+'</span><span class="tag '+c+'">'+i.state+'</span></div><div class="progress mt2"><div class="bar '+c+'" style="width:'+i.pct+'%"></div></div></div>';
+    }).join('');
+  });
+
+  document.getElementById('btnSnap').onclick = function(){
+    App.modal({ title:'创建复盘快照', body:'<div class="form-row"><label class="f-label">快照名称</label><input class="input" value="当前态势快照"></div><div class="form-row"><label class="f-label">备注</label><textarea class="textarea" placeholder="记录当前关键状态…"></textarea></div>',
+      foot:'<button class="btn" id="c1">取消</button><button class="btn primary" id="c2">保存快照</button>',
+      onOpen:function(ov){ ov.querySelector('#c1').onclick=ov.close; ov.querySelector('#c2').onclick=function(){ API.addSnapshot('当前态势快照','看板手动创建'); App.toast('快照已保存，用于复盘定格','ok'); ov.close(); }; } });
+  };
+  document.getElementById('btnRefresh').onclick = function(){ App.toast('态势数据已刷新（模拟）','ok'); location.reload(); };
+});
+App.boot('dashboard');
+</script>
+</body>
+</html>

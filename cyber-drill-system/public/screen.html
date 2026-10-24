@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>演练监视大屏 · 盘州市人民医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<style>
+:root{
+  --cy:#22d3ee; --bl:#3b82f6; --pu:#a371f7; --ok:#22c55e; --wn:#fbbf24; --er:#f43f5e;
+  --tx:#d7efff; --tx2:#8db8d9; --dim:#517694; --line:rgba(34,211,238,.22);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:#030711; color:var(--tx); overflow:hidden;
+  font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+body::before{
+  content:''; position:fixed; inset:0; z-index:-2;
+  background:
+    radial-gradient(1200px 620px at 50% -12%, rgba(34,211,238,.18), transparent 62%),
+    radial-gradient(900px 520px at 8% 108%, rgba(59,130,246,.14), transparent 60%),
+    radial-gradient(900px 520px at 92% 108%, rgba(163,113,247,.12), transparent 60%),
+    #030711;
+}
+.bg-grid{
+  position:fixed; left:-25%; right:-25%; top:-20%; bottom:-20%; z-index:-1; pointer-events:none;
+  background-image:linear-gradient(rgba(34,211,238,.06) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(34,211,238,.06) 1px,transparent 1px);
+  background-size:46px 46px;
+  transform:perspective(620px) rotateX(22deg) scale(1.35);
+  animation:gridMove 16s linear infinite;
+}
+@keyframes gridMove{from{background-position:0 0}to{background-position:0 460px}}
+.scan{position:fixed;left:0;right:0;height:2px;z-index:6;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(34,211,238,.75),transparent);
+  box-shadow:0 0 20px rgba(34,211,238,.6); animation:scanMove 7s linear infinite}
+@keyframes scanMove{0%{top:-1%}100%{top:101%}}
+
+.screen{height:100vh;display:flex;flex-direction:column;padding:10px 16px 14px;gap:10px;animation:fadein .6s ease both}
+@keyframes fadein{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ---------- 顶栏 ---------- */
+.s-head{display:flex;align-items:center;justify-content:space-between;gap:18px;
+  padding:6px 10px 12px;border-bottom:1px solid rgba(34,211,238,.28);position:relative}
+.s-head::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;
+  background:linear-gradient(90deg,transparent,rgba(34,211,238,.85),rgba(59,130,246,.5),transparent)}
+.h-left{display:flex;align-items:center;gap:10px;min-width:250px}
+.h-logo{width:38px;height:38px;border:1px solid rgba(255,255,255,.55);border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:#fff;padding:2px;overflow:hidden;flex:none;
+  box-shadow:0 0 14px rgba(34,211,238,.35),0 0 12px rgba(34,211,238,.2);
+  animation:logoPulse 3s ease-in-out infinite}
+.h-logo img{width:100%;height:100%;object-fit:contain;border-radius:50%;display:block}
+@keyframes logoPulse{0%,100%{box-shadow:0 0 10px rgba(34,211,238,.18) inset,0 0 8px rgba(34,211,238,.16)}50%{box-shadow:0 0 18px rgba(34,211,238,.45) inset,0 0 20px rgba(34,211,238,.4)}}
+.h-org{font-size:15px;font-weight:700;letter-spacing:1px;color:#eaf9ff}
+.h-sub{font-size:11px;color:var(--dim);letter-spacing:2px;margin-top:2px}
+.h-mid{text-align:center;flex:1}
+.h-title{font-size:clamp(20px,2.1vw,32px);font-weight:800;letter-spacing:.35em;text-indent:.35em;
+  background:linear-gradient(180deg,#ffffff,#7fe3ff 60%,#2aa9d6);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  text-shadow:0 0 24px rgba(34,211,238,.25)}
+.h-title-en{font-size:9px;letter-spacing:4px;color:rgba(120,195,230,.55);margin-top:3px}
+.h-right{display:flex;align-items:center;gap:10px;min-width:300px;justify-content:flex-end}
+.h-sel{background:rgba(9,28,50,.9);color:var(--tx);border:1px solid var(--line);border-radius:4px;
+  font-size:12px;padding:5px 8px;max-width:190px;outline:none}
+.live{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:2px;color:#67f0b0;
+  border:1px solid rgba(34,197,94,.45);border-radius:3px;padding:3px 8px;background:rgba(34,197,94,.08)}
+.live-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 10px #22c55e;animation:blink 1.4s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.h-clock{text-align:right;font-family:Consolas,monospace}
+.h-clock #clkTime{display:block;font-size:19px;letter-spacing:1px;color:#9fe9ff}
+.h-clock #clkDate{display:block;font-size:10px;color:var(--dim);letter-spacing:1px}
+.h-btn{background:rgba(34,211,238,.08);border:1px solid var(--line);color:#8fe1ff;font-size:12px;
+  padding:5px 10px;border-radius:3px;cursor:pointer;letter-spacing:1px}
+.h-btn:hover{background:rgba(34,211,238,.2);border-color:var(--cy);box-shadow:0 0 12px rgba(34,211,238,.3)}
+
+/* ---------- 主体 ---------- */
+.s-main{flex:1;display:grid;grid-template-columns:320px minmax(0,1fr) 340px;gap:12px;min-height:0}
+.panel{position:relative;display:flex;flex-direction:column;min-height:0;
+  background:linear-gradient(180deg,rgba(13,34,60,.86),rgba(6,17,32,.92));
+  border:1px solid var(--line);border-radius:5px;
+  box-shadow:inset 0 0 34px rgba(34,211,238,.05),0 6px 18px rgba(0,0,0,.45)}
+.panel::before,.panel::after{content:'';position:absolute;width:11px;height:11px;border:2px solid var(--cy);opacity:.7}
+.panel::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
+.panel::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
+.p-head{display:flex;align-items:center;gap:8px;padding:10px 12px;font-size:12.5px;letter-spacing:1.5px;
+  color:#86dbff;border-bottom:1px dashed rgba(34,211,238,.18);flex:none}
+.p-dot{width:6px;height:6px;background:var(--cy);transform:rotate(45deg);box-shadow:0 0 8px var(--cy)}
+.p-badge{margin-left:auto;font-family:Consolas,monospace;font-size:11px;color:#6fd3f2;
+  border:1px solid rgba(34,211,238,.3);border-radius:3px;padding:1px 6px;background:rgba(34,211,238,.06)}
+.p-foot{flex:none;padding:6px 12px;font-size:10px;color:var(--dim);letter-spacing:1px;border-top:1px dashed rgba(34,211,238,.12)}
+.col-center{display:flex;flex-direction:column;gap:12px;min-height:0}
+.col-right{display:flex;flex-direction:column;gap:12px;min-height:0}
+.col-right .panel{flex:1;min-height:0}
+
+/* KPI */
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;flex:none}
+.kpi{position:relative;padding:12px 14px;border:1px solid var(--line);border-radius:5px;overflow:hidden;
+  background:linear-gradient(150deg,rgba(20,58,94,.75),rgba(7,20,38,.9))}
+.kpi::after{content:'';position:absolute;right:-28px;top:-28px;width:70px;height:70px;border:1px solid rgba(34,211,238,.22);
+  border-radius:50%;animation:spin 9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.k-l{font-size:11px;color:var(--tx2);letter-spacing:1px}
+.k-v{font-size:clamp(22px,2vw,32px);font-weight:800;font-family:Consolas,monospace;margin-top:4px;line-height:1;
+  color:#8ff0ff;text-shadow:0 0 18px rgba(34,211,238,.45)}
+.k-v.ok{color:#5ef2a6;text-shadow:0 0 18px rgba(34,197,94,.45)}
+.k-v.wn{color:#ffd76a;text-shadow:0 0 18px rgba(251,191,36,.45)}
+.k-v.er{color:#ff7b8f;text-shadow:0 0 18px rgba(244,63,94,.45)}
+.k-f{font-size:10.5px;color:var(--dim);margin-top:6px;letter-spacing:.5px}
+
+/* 节点列表 */
+.node-list{flex:1;overflow-y:auto;padding:10px 12px 8px}
+.node-list::-webkit-scrollbar,.log-list::-webkit-scrollbar,.msg-list::-webkit-scrollbar{width:4px}
+.node-list::-webkit-scrollbar-thumb,.log-list::-webkit-scrollbar-thumb,.msg-list::-webkit-scrollbar-thumb{background:rgba(34,211,238,.3);border-radius:2px}
+.nd{position:relative;margin-left:7px;padding:7px 6px 9px 22px;border-left:1px solid rgba(34,211,238,.18)}
+.nd:last-child{border-left-color:transparent}
+.nd::before{content:'';position:absolute;left:-5px;top:12px;width:9px;height:9px;border-radius:50%;
+  background:#0a1e34;border:1px solid #3d6d92}
+.nd.done::before{background:var(--ok);border-color:var(--ok);box-shadow:0 0 10px rgba(34,197,94,.8)}
+.nd.doing::before{background:var(--wn);border-color:var(--wn);box-shadow:0 0 10px rgba(251,191,36,.9);animation:blink 1.2s infinite}
+.nd-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.nd-name{font-size:12.5px;font-weight:600;color:#dff4ff}
+.nd-state{font-size:10px;padding:1px 6px;border-radius:2px;flex:none}
+.nd-state.done{color:#5ef2a6;border:1px solid rgba(34,197,94,.45);background:rgba(34,197,94,.1)}
+.nd-state.doing{color:#ffd76a;border:1px solid rgba(251,191,36,.45);background:rgba(251,191,36,.1)}
+.nd-state.next{color:#7ea9c9;border:1px solid rgba(126,169,201,.32);background:rgba(126,169,201,.06)}
+.nd-meta{font-size:10.5px;color:var(--dim);margin-top:3px;letter-spacing:.5px}
+
+/* 链路 */
+.chain-panel{flex:1;min-height:0}
+.chain-wrap{flex:1;min-height:0;padding:4px 6px;display:flex;align-items:center}
+#chainSvg{width:100%;height:100%;min-height:150px;display:block}
+.flow-dash{animation:dashMove 1.6s linear infinite}
+@keyframes dashMove{to{stroke-dashoffset:-32}}
+.node text{font-family:"Microsoft YaHei",sans-serif}
+.node .core{filter:drop-shadow(0 0 6px currentColor)}
+
+/* 任务分布 */
+.task-panel{flex:none;padding-bottom:4px}
+.task-dist{padding:12px 14px 14px}
+.td-bar{display:flex;height:14px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.04);
+  border:1px solid rgba(34,211,238,.16)}
+.td-bar span{height:100%;transition:width .8s ease}
+.td-legend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.td-item{border-left:2px solid;padding-left:8px}
+.td-item .n{font-size:19px;font-weight:700;font-family:Consolas,monospace}
+.td-item .l{font-size:10.5px;color:var(--dim);margin-top:2px}
+
+/* 角色 */
+.role-list{flex:1;overflow-y:auto;padding:10px 14px}
+.rl{margin-bottom:12px}
+.rl-top{display:flex;align-items:center;justify-content:space-between;font-size:12px}
+.rl-top .nm{display:flex;align-items:center;gap:6px}
+.rl-top i{width:7px;height:7px;border-radius:50%;display:inline-block;box-shadow:0 0 8px currentColor}
+.rl-top .cnt{font-family:Consolas,monospace;font-size:11px;color:var(--tx2)}
+.rl-bar{height:5px;margin-top:5px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden}
+.rl-bar span{display:block;height:100%;border-radius:3px;transition:width .8s ease}
+
+/* 业务影响 */
+.impact-list{flex:1;overflow-y:auto;padding:10px 14px}
+.if{margin-bottom:12px}
+.if-top{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:5px}
+.if-top .st{font-size:10px;padding:1px 6px;border-radius:2px}
+.if-bar{height:5px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden}
+.if-bar span{display:block;height:100%;border-radius:3px;transition:width .8s ease}
+.if.ok .st{color:#5ef2a6;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.08)}
+.if.wn .st{color:#ffd76a;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.08)}
+.if.er .st{color:#ff8496;border:1px solid rgba(244,63,94,.4);background:rgba(244,63,94,.08)}
+
+/* 底部 */
+.s-foot{flex:none;height:clamp(128px,17vh,180px);display:grid;grid-template-columns:1.35fr 1fr;gap:12px;min-height:0}
+.foot-panel{min-height:0}
+.log-list,.msg-list{flex:1;overflow-y:auto;padding:6px 12px 8px;font-size:11.5px}
+.lg{display:grid;grid-template-columns:48px 76px 96px 1fr;gap:8px;padding:5px 4px;border-bottom:1px dashed rgba(34,211,238,.1);
+  animation:fadein .5s ease both}
+.lg .t{font-family:Consolas,monospace;color:#6fd3f2}
+.lg .a{color:#b7ddf3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg .x{color:#8ff0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg .d{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg.p0{background:linear-gradient(90deg,rgba(244,63,94,.1),transparent)}
+.lg.p0 .x{color:#ff8496}
+.msg{display:flex;gap:8px;padding:5px 2px;border-bottom:1px dashed rgba(34,211,238,.1);font-size:11.5px;color:var(--tx2)}
+.msg .lt{flex:none;font-size:9.5px;padding:1px 5px;border-radius:2px;height:16px;line-height:14px}
+.msg .mt{font-family:Consolas,monospace;color:#6fd3f2;flex:none}
+.msg .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 遮罩 / 加载 / 无权限 */
+.mask{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  background:rgba(3,7,17,.92);font-size:14px;color:var(--tx2);letter-spacing:1px}
+.mask .ttl{font-size:20px;color:#ff8496;font-weight:700}
+.mask a{color:var(--cy);text-decoration:none;border:1px solid var(--line);padding:6px 16px;border-radius:3px}
+.spinner{width:32px;height:32px;border:2px solid rgba(34,211,238,.2);border-top-color:var(--cy);border-radius:50%;animation:spin 1s linear infinite}
+
+@media (max-width:1400px){
+  .s-main{grid-template-columns:280px minmax(0,1fr) 300px}
+  .lg{grid-template-columns:42px 64px 84px 1fr}
+}
+</style>
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="scan"></div>
+
+<div class="screen" id="screen" style="display:none">
+  <header class="s-head">
+    <div class="h-left">
+      <span class="h-logo"><img src="img/logo.png" alt="盘州市人民医院院徽"></span>
+      <div><div class="h-org">盘州市人民医院</div><div class="h-sub">网络与信息安全应急演练</div></div>
+    </div>
+    <div class="h-mid">
+      <div class="h-title">演练监视大屏</div>
+      <div class="h-title-en">CYBER SECURITY DRILL MONITOR</div>
+    </div>
+    <div class="h-right">
+      <select class="h-sel" id="projSel"></select>
+      <span class="live"><span class="live-dot"></span>LIVE</span>
+      <div class="h-clock"><span id="clkTime">--:--:--</span><span id="clkDate">----</span></div>
+      <button class="h-btn" id="btnFull">全屏</button>
+      <button class="h-btn" id="btnBack">返回</button>
+    </div>
+  </header>
+
+  <main class="s-main">
+    <section class="panel col-left">
+      <div class="p-head"><span class="p-dot"></span>演练节点处置进度<span class="p-badge" id="nodeBadge">0/0</span></div>
+      <div class="node-list" id="nodeList"></div>
+      <div class="p-foot">按处置时序推进 · 数据每 8 秒自动刷新</div>
+    </section>
+
+    <section class="col-center">
+      <div class="kpi-row" id="kpis"></div>
+      <div class="panel chain-panel">
+        <div class="p-head"><span class="p-dot"></span>处置链路实时态势<span class="p-badge" id="chainBadge">T+00:00</span></div>
+        <div class="chain-wrap"><svg id="chainSvg" viewBox="0 0 900 180" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+      <div class="panel task-panel">
+        <div class="p-head"><span class="p-dot"></span>任务处置分布</div>
+        <div class="task-dist" id="taskDist"></div>
+      </div>
+    </section>
+
+    <section class="col-right">
+      <div class="panel">
+        <div class="p-head"><span class="p-dot"></span>参演角色处置状态</div>
+        <div class="role-list" id="roleList"></div>
+      </div>
+      <div class="panel">
+        <div class="p-head"><span class="p-dot"></span>业务系统影响</div>
+        <div class="impact-list" id="impactList"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="s-foot">
+    <div class="panel foot-panel">
+      <div class="p-head"><span class="p-dot"></span>实时操作流</div>
+      <div class="log-list" id="logList"></div>
+    </div>
+    <div class="panel foot-panel">
+      <div class="p-head"><span class="p-dot"></span>告警与消息</div>
+      <div class="msg-list" id="msgList"></div>
+    </div>
+  </footer>
+</div>
+
+<div class="mask" id="mask">
+  <div class="spinner"></div>
+  <div>正在接入演练数据…</div>
+</div>
+
+<script src="system.js"></script>
+<script>
+(function(){
+  'use strict';
+  function $(id){ return document.getElementById(id); }
+  function esc(s){
+    return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function p2(n){ return (n<10?'0':'')+n; }
+
+  var projId = '';
+  try { projId = new URLSearchParams(location.search).get('projectId') || ''; } catch(e) {}
+  projId = projId || sessionStorage.getItem('pzy_proj') || '';
+
+  var DATA = null, timer = null;
+
+  /* ---------- 时钟 ---------- */
+  function clock(){
+    var d = new Date();
+    $('clkTime').textContent = p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());
+    var wk = ['日','一','二','三','四','五','六'][d.getDay()];
+    $('clkDate').textContent = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' 星期'+wk;
+  }
+  clock(); setInterval(clock, 1000);
+
+  /* ---------- 数据 ---------- */
+  function fetchData(){
+    return DRILL.get('/content/monitor' + (projId ? ('?projectId='+encodeURIComponent(projId)) : ''));
+  }
+  function load(){
+    fetchData().then(function(d){
+      DATA = d;
+      if(d.project){ projId = d.project.id; sessionStorage.setItem('pzy_proj', projId); }
+      $('screen').style.display = 'flex';
+      $('mask').style.display = 'none';
+      renderAll();
+      if(!timer) timer = setInterval(refresh, 8000);
+    }).catch(function(e){
+      showMask((e && e.status===403) ? '当前角色无权查看演练监视大屏' : ((e && e.message) || '数据加载失败，请确认服务已启动'),
+        (e && e.status===403) ? '仅院应急指挥部、平台管理员、信息科负责人可查看。' : '请检查服务运行状态后重试。');
+    });
+  }
+  function refresh(){
+    fetchData().then(function(d){
+      DATA = d;
+      renderAll();
+    }).catch(function(){});
+  }
+  function showMask(title, desc){
+    $('mask').innerHTML = '<div class="ttl">'+esc(title)+'</div><div>'+esc(desc||'')+'</div><a href="dashboard.html">返回首页</a>';
+    $('mask').style.display = 'flex';
+  }
+
+  function renderAll(){
+    renderHead(); renderKpis(); renderNodes(); renderChain();
+    renderTasks(); renderRoles(); renderImpact(); renderLogs(); renderMsgs();
+  }
+
+  /* ---------- 顶栏 / 项目切换 ---------- */
+  function renderHead(){
+    var sel = $('projSel'), list = (DATA && DATA.projects) || [];
+    var html = list.map(function(p){
+      return '<option value="'+esc(p.id)+'"'+(p.id===projId?' selected':'')+'>'+esc(p.name)+'</option>';
+    }).join('');
+    if(sel.getAttribute('data-sig') !== html){
+      sel.innerHTML = html;
+      sel.setAttribute('data-sig', html);
+      sel.onchange = function(){
+        projId = sel.value;
+        sessionStorage.setItem('pzy_proj', projId);
+        try { history.replaceState(null, '', 'screen.html?projectId='+encodeURIComponent(projId)); } catch(e) {}
+        refresh();
+      };
+    }
+  }
+
+  /* ---------- KPI ---------- */
+  function elapsedText(){
+    var p = DATA && DATA.project;
+    if(!p) return { v:'--:--', f:'未选择演练项目' };
+    if(p.status !== '演练中') return { v:'已完成', f:'项目状态：'+p.status };
+    var start = new Date(String(p.date).replace(/-/g,'/'));
+    var mins = Math.max(0, Math.round((Date.now()-start.getTime())/60000));
+    return { v:'T+'+p2(Math.floor(mins/60))+':'+p2(mins%60), f:'启动于 '+String(p.date).slice(11) };
+  }
+  function renderKpis(){
+    var p = DATA.project || {};
+    var s = DATA.stats || { total:0, done:0, doing:0, pending:0, overdue:0 };
+    var rate = s.total ? Math.round(s.done/s.total*100) : 0;
+    var el = elapsedText();
+    var items = [
+      { l:'当前事件等级', v:(p.level||'—'), cls:'er', f:'事件编号 '+(p.id||'—')+' · '+(p.mode||'') },
+      { l:'演练已进行', v:el.v, cls:'ok', f:el.f },
+      { l:'任务完成率', v:rate+'%', cls:rate>=100?'ok':rate>=60?'wn':'er', f:'已完成 '+s.done+' / 共 '+s.total+' 项' },
+      { l:'超时 / 待办', v:(s.overdue||0)+' / '+(s.pending||0), cls:(s.overdue?'er':(s.pending?'wn':'ok')), f:'处理中 '+s.doing+' 项' }
+    ];
+    $('kpis').innerHTML = items.map(function(x){
+      return '<div class="kpi"><div class="k-l">'+x.l+'</div><div class="k-v '+x.cls+'">'+esc(x.v)+'</div><div class="k-f">'+esc(x.f)+'</div></div>';
+    }).join('');
+    $('chainBadge').textContent = el.v;
+  }
+
+  /* ---------- 左侧节点 ---------- */
+  function renderNodes(){
+    var nodes = (DATA.seqFlow||[]).slice();
+    if(!nodes.length){
+      $('nodeBadge').textContent = '0/0';
+      $('nodeList').innerHTML = '<div style="padding:24px 6px;color:var(--dim);font-size:12px;text-align:center">该项目暂无演练节点记录</div>';
+      return;
+    }
+    var done = nodes.filter(function(n){ return n.state==='done'; }).length;
+    $('nodeBadge').textContent = done+'/'+nodes.length;
+    $('nodeList').innerHTML = nodes.map(function(n){
+      var st = n.state==='done' ? 'done' : n.state==='doing' ? 'doing' : 'next';
+      var label = st==='done' ? '已完成' : st==='doing' ? '处置中' : '待启动';
+      return '<div class="nd '+st+'"><div class="nd-top"><span class="nd-name">'+esc(n.name)+'</span>'
+        + '<span class="nd-state '+st+'">'+label+'</span></div>'
+        + '<div class="nd-meta">'+esc(n.time||'--:--')+' · '+esc(n.role||'—')+'</div></div>';
+    }).join('');
+  }
+
+  /* ---------- 处置链路 ---------- */
+  function renderChain(){
+    var svg = $('chainSvg');
+    var nodes = (DATA.seqFlow||[]).slice(0, 11);
+    if(!nodes.length){
+      svg.innerHTML = '<text x="450" y="96" text-anchor="middle" fill="#4d7396" font-size="14">暂无处置链路记录</text>';
+      return;
+    }
+    var W = 900, pad = 62;
+    var step = nodes.length > 1 ? (W - pad*2) / (nodes.length - 1) : 0;
+    var pts = nodes.map(function(n, i){
+      return { x: pad + i*step, y: 94 + (i%2 ? 17 : -17) };
+    });
+    var d = 'M'+pts[0].x+','+pts[0].y;
+    for(var i=1; i<pts.length; i++){
+      var a = pts[i-1], b = pts[i], mx = ((a.x+b.x)/2).toFixed(1);
+      d += ' C'+mx+','+a.y+' '+mx+','+b.y+' '+b.x+','+b.y;
+    }
+    var out = [];
+    out.push('<defs><linearGradient id="cg" x1="0" y1="0" x2="1" y2="0">'
+      + '<stop offset="0" stop-color="#22d3ee"/><stop offset=".55" stop-color="#3b82f6"/><stop offset="1" stop-color="#a371f7"/>'
+      + '</linearGradient></defs>');
+    out.push('<path id="chainPath" d="'+d+'" fill="none" stroke="rgba(34,211,238,.13)" stroke-width="8"/>');
+    out.push('<path d="'+d+'" fill="none" stroke="url(#cg)" stroke-width="2.4" stroke-dasharray="7 9" class="flow-dash"/>');
+    [0, 2.4, 4.8].forEach(function(delay){
+      out.push('<circle r="3.2" fill="#8ff9ff" opacity=".9">'
+        + '<animateMotion dur="7.2s" begin="'+delay+'s" repeatCount="indefinite" rotate="auto">'
+        + '<mpath href="#chainPath"/></animateMotion></circle>');
+    });
+    nodes.forEach(function(n, i){
+      var p = pts[i];
+      var st = n.state==='done' ? 'done' : n.state==='doing' ? 'doing' : 'next';
+      var color = st==='done' ? '#22c55e' : st==='doing' ? '#fbbf24' : '#3d6d92';
+      var core = st==='next' ? '#0f2c48' : color;
+      out.push('<g class="node '+st+'">');
+      if(st==='doing'){
+        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="13" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity=".7">'
+          + '<animate attributeName="r" values="12;21;12" dur="2s" repeatCount="indefinite"/>'
+          + '<animate attributeName="opacity" values=".75;0;.75" dur="2s" repeatCount="indefinite"/></circle>');
+      }
+      out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="13" fill="#06182b" stroke="'+color+'" stroke-width="2"'
+        + (st==='done' ? ' opacity=".95"' : '')+'/>');
+      out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="4.2" fill="'+core+'" style="color:'+color+'"/>');
+      out.push('<text x="'+p.x+'" y="'+(p.y-28)+'" text-anchor="middle" fill="#d7f2ff" font-size="12.5" font-weight="600">'+esc(n.name)+'</text>');
+      out.push('<text x="'+p.x+'" y="'+(p.y+31)+'" text-anchor="middle" fill="#5f8fb8" font-size="10.5">'+esc(n.time||'')+' · '+esc(n.role||'')+'</text>');
+      out.push('</g>');
+    });
+    svg.innerHTML = out.join('');
+  }
+
+  /* ---------- 任务分布 ---------- */
+  function renderTasks(){
+    var s = DATA.stats || { total:0, done:0, doing:0, pending:0, overdue:0 };
+    var total = Math.max(1, s.total);
+    var segs = [
+      { n:'已完成', v:s.done,    c:'#22c55e' },
+      { n:'处理中', v:s.doing,   c:'#fbbf24' },
+      { n:'待处理', v:s.pending, c:'#3b82f6' },
+      { n:'超时',   v:s.overdue, c:'#f43f5e' }
+    ];
+    $('taskDist').innerHTML =
+      '<div class="td-bar">' + segs.map(function(x){
+        return '<span style="width:'+(x.v/total*100)+'%;background:'+x.c+';box-shadow:0 0 10px '+x.c+'55"></span>';
+      }).join('') + '</div>'
+      + '<div class="td-legend">' + segs.map(function(x){
+        return '<div class="td-item" style="border-color:'+x.c+'">'
+          + '<div class="n" style="color:'+x.c+'">'+x.v+'</div><div class="l">'+x.n+'</div></div>';
+      }).join('') + '</div>';
+  }
+
+  /* ---------- 角色处置 ---------- */
+  function renderRoles(){
+    var tasks = DATA.tasks || [], roles = DATA.roles || [];
+    var map = {};
+    roles.forEach(function(r){ map[r.id] = r; });
+    var agg = {};
+    tasks.forEach(function(t){
+      var a = agg[t.role] = agg[t.role] || { total:0, done:0, od:0 };
+      a.total++;
+      if(t.status==='已完成') a.done++;
+      if(t.status==='超时') a.od++;
+    });
+    var keys = Object.keys(agg);
+    if(!keys.length){
+      $('roleList').innerHTML = '<div style="padding:24px 0;color:var(--dim);font-size:12px;text-align:center">暂无任务分派记录</div>';
+      return;
+    }
+    keys.sort(function(a,b){ return agg[b].total - agg[a].total; });
+    $('roleList').innerHTML = keys.map(function(k){
+      var r = map[k] || { short:k, name:k, color:'#3b82f6' };
+      var a = agg[k];
+      var pct = a.total ? Math.round(a.done/a.total*100) : 0;
+      return '<div class="rl"><div class="rl-top"><span class="nm"><i style="background:'+r.color+';color:'+r.color+'"></i>'+esc(r.short||r.name)+'</span>'
+        + '<span class="cnt">'+a.done+'/'+a.total+(a.od ? ' <b style="color:#ff8496">超时'+a.od+'</b>' : '')+'</span></div>'
+        + '<div class="rl-bar"><span style="width:'+pct+'%;background:'+r.color+';box-shadow:0 0 8px '+r.color+'88"></span></div></div>';
+    }).join('');
+  }
+
+  /* ---------- 业务影响 ---------- */
+  function renderImpact(){
+    var imp = DATA.impact || [];
+    if(!imp.length){
+      $('impactList').innerHTML = '<div style="padding:24px 0;color:var(--dim);font-size:12px;text-align:center">暂无业务系统状态</div>';
+      return;
+    }
+    $('impactList').innerHTML = imp.map(function(i){
+      var c = i.pct>=100 ? 'ok' : i.pct>=60 ? 'wn' : 'er';
+      var color = c==='ok' ? '#22c55e' : c==='wn' ? '#fbbf24' : '#f43f5e';
+      return '<div class="if '+c+'"><div class="if-top"><span>'+esc(i.sys)+'</span>'
+        + '<span class="st">'+esc(i.state)+' · '+i.pct+'%</span></div>'
+        + '<div class="if-bar"><span style="width:'+i.pct+'%;background:'+color+';box-shadow:0 0 8px '+color+'88"></span></div></div>';
+    }).join('');
+  }
+
+  /* ---------- 实时操作流 ---------- */
+  function renderLogs(){
+    var rows = (DATA.timeline||[]).slice().reverse().slice(0, 40);
+    if(!rows.length){
+      $('logList').innerHTML = '<div style="padding:18px 0;color:var(--dim);font-size:12px;text-align:center">暂无操作记录</div>';
+      return;
+    }
+    $('logList').innerHTML = rows.map(function(t){
+      var p0 = t.level==='P0';
+      return '<div class="lg'+(p0?' p0':'')+'"><span class="t">'+esc(t.t)+'</span>'
+        + '<span class="a">'+esc(t.actor||'')+'</span>'
+        + '<span class="x">'+esc(t.action||'')+'</span>'
+        + '<span class="d">'+esc(t.detail||'')+'</span></div>';
+    }).join('');
+  }
+
+  /* ---------- 告警消息 ---------- */
+  function renderMsgs(){
+    var rows = (DATA.messages||[]).slice().reverse().slice(0, 16);
+    if(!rows.length){
+      $('msgList').innerHTML = '<div style="padding:18px 0;color:var(--dim);font-size:12px;text-align:center">暂无告警消息</div>';
+      return;
+    }
+    $('msgList').innerHTML = rows.map(function(m){
+      var q = m.level==='P0' ? { c:'#f43f5e', b:'rgba(244,63,94,.12)' }
+        : m.level==='P1' ? { c:'#fbbf24', b:'rgba(251,191,36,.12)' }
+        : { c:'#3b82f6', b:'rgba(59,130,246,.12)' };
+      return '<div class="msg"><span class="lt" style="color:'+q.c+';background:'+q.b+';border:1px solid '+q.c+'55">'+esc(m.level||'P2')+'</span>'
+        + '<span class="mt">'+esc(m.time||'')+'</span>'
+        + '<span class="tx">'+esc((m.source?('['+m.source+'] '):'')+(m.text||''))+'</span></div>';
+    }).join('');
+  }
+
+  /* ---------- 顶部操作 ---------- */
+  $('btnFull').onclick = function(){
+    if(document.fullscreenElement){ document.exitFullscreen(); }
+    else if(document.documentElement.requestFullscreen){ document.documentElement.requestFullscreen(); }
+  };
+  /* 大屏为免登录公开页，返回统一回到登录页 */
+  $('btnBack').onclick = function(){ location.href = 'index.html'; };
+
+  load();
+})();
+</script>
+</body>
+</html>

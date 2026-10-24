@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>shot</title>
+<style>html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#0b1220}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style>
+</head>
+<body>
+<script>
+/* 截图辅助页（临时）：注入登录态后以全屏 iframe 渲染目标页面，仅用于文档配图生成 */
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('t')) sessionStorage.setItem('pzy_token', q.get('t'));
+  if (q.get('r')) sessionStorage.setItem('pzy_role', q.get('r'));
+  if (q.get('u')) sessionStorage.setItem('pzy_user', q.get('u'));
+  if (q.get('o')) sessionStorage.setItem('pzy_org', q.get('o'));
+  if (q.get('pid')) sessionStorage.setItem('pzy_proj', q.get('pid'));
+  var f = document.createElement('iframe');
+  f.src = q.get('p') || 'dashboard.html';
+  document.body.appendChild(f);
+})();
+</script>
+</body>
+</html>
