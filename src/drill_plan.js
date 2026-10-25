@@ -18,7 +18,7 @@ const ROLE_BY_TARGET = {
 const FORM_BY_ACTION = {
   '告警核实': 'F1',
   '隔离处置': 'F2',
-  '上报审批': 'F2',
+  '上报审批': 'F8',
   '业务兜底': 'F3',
   '取证留痕': 'F5',
   '处置恢复': 'F7'
@@ -185,7 +185,7 @@ function ensureBasicTasks(db, project) {
   let count = 0;
   nodes.forEach(function (n, i) {
     const roleId = ROLE_BY_TARGET[n.target] || 'duty';
-    /* 上报审批：指挥部决策环节自动填充《应急启动审批单》，其余走事件上报表 */
+    /* 上报审批：指挥部决策环节使用《应急启动审批单》，信息科负责人环节使用《网络和数据安全事件反馈单》 */
     let formId = FORM_BY_ACTION[n.action] || '';
     if (n.action === '上报审批' && n.target === '院应急指挥部') formId = 'F4';
     const forms = formId ? [formId] : [];
@@ -295,7 +295,36 @@ function backfillReceivers(db) {
   return count;
 }
 
+/* 旧库升级：信息科负责人「上报审批」节点绑定《网络和数据安全事件反馈单》（F8）
+ * 仅回填空表单节点，并把基础版该类任务的旧上报表替换为反馈单 */
+function backfillFeedbackForm(db) {
+  let nodes = 0, tasks = 0;
+  try {
+    /* 仅回填正确流程节点；混淆项（DS 前缀）不挂表单，避免误导参演人员 */
+    db.prepare("SELECT id, form FROM script_nodes WHERE action='上报审批' AND target='信息科负责人' AND id NOT LIKE 'DS%'").all()
+      .forEach(function (n) {
+        if (!n.form) { db.prepare("UPDATE script_nodes SET form='F8' WHERE id=?").run(n.id); nodes++; }
+      });
+    db.prepare(
+      "SELECT t.id, t.forms FROM tasks t JOIN script_nodes n ON n.id=t.node_id " +
+      "JOIN projects p ON p.id=t.project_id " +
+      "WHERE n.action='上报审批' AND n.target='信息科负责人' AND p.status NOT IN ('已归档')"
+    ).all().forEach(function (t) {
+      let arr = [];
+      try { arr = JSON.parse(t.forms || '[]'); } catch (e) { arr = []; }
+      if (!Array.isArray(arr)) arr = [];
+      arr = arr.filter(function (x) { return x !== 'F2'; });
+      if (arr.indexOf('F8') < 0) arr.push('F8');
+      db.prepare('UPDATE tasks SET forms=? WHERE id=?').run(JSON.stringify(arr), t.id);
+      tasks++;
+    });
+  } catch (e) {
+    console.warn('[drill_plan] 反馈单绑定跳过：', e.message);
+  }
+  return { nodes: nodes, tasks: tasks };
+}
+
 module.exports = {
   ROLE_BY_TARGET, FORM_BY_ACTION, buildDecision, canHandle, ensureBasicTasks, backfillBasicTasks,
-  defaultScores, ensureDistractors, backfillFlowScores, backfillReceivers
+  defaultScores, ensureDistractors, backfillFlowScores, backfillReceivers, backfillFeedbackForm
 };

@@ -52,7 +52,7 @@ function clearAll() {
   const tables = ['notif_reads','notifs','messages','chat_messages','task_attachments','form_submissions',
     'tasks','script_nodes','sim_data','scores','score_items','evidence','snapshots','timeline','seq_flow',
     'ledger','opinion','knowledge','audit_logs','impact','dict','scenarios','projects','form_templates',
-    'users','roles','sessions','settings'];
+    'users','user_roles','roles','sessions','settings'];
   db.exec('PRAGMA foreign_keys = OFF');
   tables.forEach(function (t) { try { db.exec('DELETE FROM ' + t); } catch (e) {} });
   db.exec('PRAGMA foreign_keys = ON');
@@ -86,10 +86,12 @@ function run() {
 
     /* 用户（统一初始密码） */
     const ui = db.prepare('INSERT INTO users (username,name,role_id,org,pwd_salt,pwd_hash,status,must_change,created_at) VALUES (?,?,?,?,?,?,?,?,?)');
+    const ur = db.prepare('INSERT INTO user_roles (user_id,role_id) VALUES (?,?)');
     M.USERS.forEach(function (u) {
       const uname = USERNAME[u.name] || ('user' + Math.floor(Math.random() * 9000 + 1000));
       const p = hashPassword(INITIAL_PASSWORD);
-      ui.run(uname, u.name, u.role, u.org || '', p.salt, p.hash, '启用', 1, ts);
+      const r = ui.run(uname, u.name, u.role, u.org || '', p.salt, p.hash, '启用', 1, ts);
+      ur.run(Number(r.lastInsertRowid), u.role);
     });
 
     /* 场景 */
@@ -120,9 +122,9 @@ function run() {
     /* 剧本节点：改用 8 类场景的标准处置基线（含基础版引导与实战版判定规则） */
     require('./scenario_baseline').apply(db, { bump: false, date: ts.slice(0, 10) });
 
-    /* 表单模板 */
-    const fi = db.prepare('INSERT INTO form_templates (id,name,fields) VALUES (?,?,?)');
-    M.FORM_TEMPLATES.forEach(function (f) { fi.run(f.id, f.name, JSON.stringify(f.fields || [])); });
+    /* 表单模板（使用内置定义，新库中迁移已写入时覆盖为同一份数据） */
+    const fi = db.prepare('INSERT OR REPLACE INTO form_templates (id,name,fields) VALUES (?,?,?)');
+    require('./forms').DEFAULT_TEMPLATES.forEach(function (f) { fi.run(f.id, f.name, JSON.stringify(f.fields || [])); });
 
     /* 消息 */
     const mi = db.prepare('INSERT INTO messages (id,time,level,source,text,targets,seq) VALUES (?,?,?,?,?,?,?)');
@@ -202,6 +204,7 @@ function run() {
     /* 系统设置 */
     db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run('active_project', activeProjectId(M));
     db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run('initialized_at', ts);
+    require('./brand').ensureBrand(db);
   });
 
   console.log('[seed] 初始化完成');

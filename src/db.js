@@ -42,6 +42,18 @@ function migrate() {
   } catch (e) {
     console.warn('[migrate] 聊天时间格式升级跳过：', e.message);
   }
+  addColumn('roles', 'status', 'TEXT DEFAULT \'启用\'');
+  addColumn('sessions', 'role_id', 'TEXT');
+  /* 旧库升级：按原单角色回填用户多角色表 */
+  try {
+    db.prepare(
+      'INSERT INTO user_roles (user_id,role_id) ' +
+      'SELECT id,role_id FROM users WHERE role_id IS NOT NULL AND NOT EXISTS ' +
+      '(SELECT 1 FROM user_roles ur WHERE ur.user_id=users.id AND ur.role_id=users.role_id)'
+    ).run();
+  } catch (e) {
+    console.warn('[migrate] 用户角色回填跳过：', e.message);
+  }
   addColumn('script_nodes', 'guide', 'TEXT');
   addColumn('script_nodes', 'keywords', 'TEXT');
   addColumn('script_nodes', 'action', 'TEXT');
@@ -133,6 +145,25 @@ function migrate() {
     require('./drill_plan').backfillBasicTasks(db);
   } catch (e) {
     console.warn('[migrate] 基础版任务回填跳过：', e.message);
+  }
+  /* 系统品牌设置：补齐默认值（系统名称 / 单位名称 / Logo / 版本 / 项目地址） */
+  try {
+    require('./brand').ensureBrand(db);
+  } catch (e) {
+    console.warn('[migrate] 系统设置补齐跳过：', e.message);
+  }
+  /* 表单模板：升级内置上报文书字段说明并补齐《网络和数据安全事件反馈单》 */
+  try {
+    require('./forms').ensureForms(db);
+    require('./forms').ensureFormControls(db);
+  } catch (e) {
+    console.warn('[migrate] 表单模板升级跳过：', e.message);
+  }
+  /* 剧本节点：信息科负责人「上报审批」绑定反馈单，并同步基础版任务表单 */
+  try {
+    require('./drill_plan').backfillFeedbackForm(db);
+  } catch (e) {
+    console.warn('[migrate] 反馈单绑定跳过：', e.message);
   }
 }
 

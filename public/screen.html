@@ -207,7 +207,7 @@ body::before{
   <header class="s-head">
     <div class="h-left">
       <span class="h-logo"><img src="img/logo.png" alt="盘州市人民医院院徽"></span>
-      <div><div class="h-org">盘州市人民医院</div><div class="h-sub">网络与信息安全应急演练</div></div>
+      <div><div class="h-org" data-brand="unit">盘州市人民医院</div><div class="h-sub" data-brand="system">网络与信息安全应急演练</div></div>
     </div>
     <div class="h-mid">
       <div class="h-title">演练监视大屏</div>
@@ -285,6 +285,9 @@ body::before{
   projId = projId || sessionStorage.getItem('pzy_proj') || '';
 
   var DATA = null, timer = null;
+
+  /* 品牌设置：免登录同步单位名称、系统名称与 Logo */
+  DRILL.loadBrand().then(function(b){ if(b) DRILL.applyBrand(b); });
 
   /* ---------- 时钟 ---------- */
   function clock(){

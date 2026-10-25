@@ -22,12 +22,18 @@ function verifyPassword(pwd, salt, hash) {
   }
 }
 
-function createSession(userId) {
+function createSession(userId, roleId) {
   const token = crypto.randomBytes(24).toString('hex');
   const exp = new Date(Date.now() + SESSION_TTL_MIN * 60000);
-  db.prepare('INSERT INTO sessions (token,user_id,created_at,expires_at) VALUES (?,?,?,?)')
-    .run(token, userId, nowSec(), nowSec(exp.getTime()));
+  db.prepare('INSERT INTO sessions (token,user_id,role_id,created_at,expires_at) VALUES (?,?,?,?,?)')
+    .run(token, userId, roleId || null, nowSec(), nowSec(exp.getTime()));
   return token;
+}
+
+/* 用户全部角色 id */
+function rolesOf(userId) {
+  return db.prepare('SELECT role_id FROM user_roles WHERE user_id=?').all(userId)
+    .map(function (r) { return r.role_id; });
 }
 
 function destroySession(token) {
@@ -43,13 +49,18 @@ function cleanExpired() {
 function userByToken(token) {
   if (!token) return null;
   const row = db.prepare(
-    'SELECT u.id,u.username,u.name,u.role_id,u.org,u.status,u.must_change,s.expires_at ' +
+    'SELECT u.id,u.username,u.name,u.role_id,u.org,u.status,u.must_change,s.role_id AS session_role,s.expires_at ' +
     'FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?'
   ).get(token);
   if (!row) return null;
   if (row.expires_at < nowSec()) { destroySession(token); return null; }
-  const role = db.prepare('SELECT * FROM roles WHERE id=?').get(row.role_id);
+  /* 会话角色优先；旧会话无角色时回落到账号主角色 */
+  const roleId = row.session_role || row.role_id;
+  const held = db.prepare('SELECT 1 AS ok FROM user_roles WHERE user_id=? AND role_id=?').get(row.id, roleId);
+  if (!held) { destroySession(token); return null; } /* 角色已被移除，强制重新登录 */
+  const role = db.prepare('SELECT * FROM roles WHERE id=?').get(roleId);
   if (!role) return null;
+  if ((role.status || '启用') !== '启用') { destroySession(token); return null; } /* 角色已停用 */
   return {
     id: row.id,
     username: row.username,
@@ -57,6 +68,7 @@ function userByToken(token) {
     org: row.org,
     status: row.status,
     mustChange: !!row.must_change,
+    roles: rolesOf(row.id),
     role: {
       id: role.id, name: role.name, short: role.short, icon: role.icon,
       color: role.color, desc: role.descr,
@@ -106,6 +118,6 @@ function audit(req, action, userOverride) {
 
 module.exports = {
   INITIAL_PASSWORD, hashPassword, verifyPassword,
-  createSession, destroySession, cleanExpired, userByToken, tokenOf,
+  createSession, destroySession, cleanExpired, userByToken, tokenOf, rolesOf,
   requireAuth, requirePage, audit
 };

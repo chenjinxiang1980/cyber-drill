@@ -106,8 +106,8 @@ window.API = (function () {
   }
 
   /* ---------- 会话 ---------- */
-  function login(username, password) {
-    return DRILL.post('/auth/login', { username: username, password: password }).then(function (r) {
+  function login(username, password, role) {
+    return DRILL.post('/auth/login', { username: username, password: password, role: role || '' }).then(function (r) {
       DRILL.setToken(r.token);
       sessionStorage.setItem('pzy_role', JSON.stringify(r.role));
       sessionStorage.setItem('pzy_user', r.user.name);
@@ -376,8 +376,9 @@ window.API = (function () {
   function addUser(u) {
     return DRILL.post('/admin/users', u).then(function (r) {
       (MOCK.USERS = MOCK.USERS || []).push({
-        id: r.id, username: u.username, name: u.name, role: u.role, roleName: '',
-        org: u.org || '盘州市人民医院', status: '启用'
+        id: r.id, username: u.username, name: u.name,
+        role: (u.roles && u.roles[0]) || u.role, roleName: '',
+        roles: (u.roles || [u.role]).slice(), org: u.org || '盘州市人民医院', status: '启用'
       });
       return r;
     });
@@ -385,15 +386,33 @@ window.API = (function () {
   function updateUser(id, patch) {
     return DRILL.patch('/admin/users/' + encodeURIComponent(id), patch).then(function (r) {
       var u = (MOCK.USERS || []).filter(function (x) { return x.id === id; })[0];
-      if (u) Object.keys(patch || {}).forEach(function (k) { u[k] = patch[k]; });
+      if (u) {
+        Object.keys(patch || {}).forEach(function (k) { u[k] = patch[k]; });
+        if (patch.roles) { u.roles = patch.roles.slice(); u.role = patch.roles[0]; }
+      }
       return r;
     });
   }
+  function adminRoles() { return DRILL.get('/admin/roles'); }
+  function addRole(r) { return DRILL.post('/admin/roles', r); }
+  function setRoleStatus(id, status) { return DRILL.api('/admin/roles/' + encodeURIComponent(id) + '/status', { method: 'PATCH', body: { status: status } }); }
+  function deleteRole(id) { return DRILL.api('/admin/roles/' + encodeURIComponent(id), { method: 'DELETE' }); }
+  function reorderRoles(ids) { return DRILL.api('/admin/roles/order', { method: 'PATCH', body: { ids: ids } }); }
+  function updateRole(id, patch) { return DRILL.api('/admin/roles/' + encodeURIComponent(id), { method: 'PUT', body: patch }); }
   function resetUserPassword(id, pwd) { return DRILL.post('/admin/users/' + encodeURIComponent(id) + '/reset-password', { password: pwd }); }
   function adminForms() { return DRILL.get('/admin/forms'); }
   function addFormTemplate(t) {
     return DRILL.post('/admin/forms', t).then(function (r) {
       (MOCK.FORM_TEMPLATES = MOCK.FORM_TEMPLATES || []).push({ id: r.id, name: r.name, fields: r.fields });
+      return r;
+    });
+  }
+  function updateFormTemplate(id, payload) {
+    return DRILL.api('/admin/forms/' + encodeURIComponent(id), { method: 'PUT', body: payload }).then(function (r) {
+      var list = MOCK.FORM_TEMPLATES || [];
+      (list || []).forEach(function (x, i) {
+        if (x.id === r.template.id) list[i] = r.template;
+      });
       return r;
     });
   }
@@ -404,6 +423,11 @@ window.API = (function () {
   function markReportExported(projectId, format) {
     return DRILL.post('/admin/report/' + encodeURIComponent(projectId) + '/export', { format: format });
   }
+
+  /* ---------- 系统设置（平台管理员） ---------- */
+  function getBrand() { return DRILL.loadBrand(); }
+  function saveBrand(payload) { return DRILL.api('/system/brand', { method: 'PUT', body: payload }); }
+  function uploadBrandLogo(formData) { return DRILL.upload('/system/logo', formData); }
 
   /* ---------- 演练模式与自动考评（基础版 / 实战版） ---------- */
   function getDrillWorkbench(projectId) { return DRILL.get('/drill/workbench/' + encodeURIComponent(projectId)); }
@@ -437,8 +461,11 @@ window.API = (function () {
     getImpact: getImpact, updateImpact: updateImpact, getDict: getDict, actSim: actSim,
     getUsers: getUsers, getRoles: getRoles,
     adminUsers: adminUsers, addUser: addUser, updateUser: updateUser, resetUserPassword: resetUserPassword,
-    adminForms: adminForms, addFormTemplate: addFormTemplate,
+    adminRoles: adminRoles, addRole: addRole, updateRole: updateRole,
+    setRoleStatus: setRoleStatus, deleteRole: deleteRole, reorderRoles: reorderRoles,
+    adminForms: adminForms, addFormTemplate: addFormTemplate, updateFormTemplate: updateFormTemplate,
     backupData: backupData, listBackups: listBackups, sysinfo: sysinfo,
+    getBrand: getBrand, saveBrand: saveBrand, uploadBrandLogo: uploadBrandLogo,
     getDrillReport: getDrillReport, markReportExported: markReportExported,
     getDrillWorkbench: getDrillWorkbench,
     getDrillFlows: getDrillFlows, getDrillFaults: getDrillFaults,

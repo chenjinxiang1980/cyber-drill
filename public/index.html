@@ -14,7 +14,7 @@
 <div class="login-bg">
   <div class="login-card">
     <div class="login-left">
-      <div class="flex gap3"><span class="logo login-logo" id="brandIcon"><img src="img/logo.png" alt="盘州市人民医院院徽"></span><div><div style="font-size:15px;font-weight:700">盘州市人民医院</div><div class="dim small">网络安全应急演练推演平台</div></div></div>
+      <div class="flex gap3"><span class="logo login-logo" id="brandIcon"><img src="img/logo.png" alt="盘州市人民医院院徽"></span><div><div data-brand="unit" style="font-size:15px;font-weight:700">盘州市人民医院</div><div class="dim small" data-brand="system">网络安全应急演练推演平台</div></div></div>
       <div class="l-title" style="margin-top:34px">常态化应急演练<br>标准化协同推演</div>
       <div class="l-sub">覆盖告警发现 → 核实研判 → 启动预案 → 处置 → 业务兜底 → 上报 → 报案取证 → 恢复 → 复盘完整闭环</div>
       <div class="l-features" id="featList"></div>
@@ -25,9 +25,13 @@
     </div>
     <div class="login-right">
       <h2>选择参演角色登录</h2>
-      <div class="lr-sub">系统内置 11 类业务角色，登录后按角色权限展示差异化工作台</div>
+      <div class="lr-sub" id="roleCount">系统内置角色，登录后按角色权限展示差异化工作台</div>
       <div class="role-grid" id="roleGrid"></div>
-      <div class="form-row"><label class="f-label">账号 <span class="req">*</span></label><input class="input" id="inUser" placeholder="选择角色后自动填充，也可手动输入账号"></div>
+      <div class="form-row"><label class="f-label">账号 <span class="req">*</span></label>
+        <select class="select" id="selAccount" style="display:none"></select>
+        <input class="input" id="inUser" placeholder="选择角色后列出本角色账号，也可手动输入">
+        <div class="tiny mt2"><a id="accToggle" style="color:var(--accent2);cursor:pointer">手动输入账号</a></div>
+      </div>
       <div class="form-row"><label class="f-label">密码 <span class="req">*</span></label><input class="input" id="inPass" type="password" placeholder="初始密码 Pzy@2026，登录后请尽快修改"></div>
       <div class="form-row"><label class="f-label">验证码 <span class="req">*</span></label>
         <div class="captcha-row"><input class="input" id="inCap" maxlength="4" placeholder="不区分大小写"><span class="captcha-box" id="capBox" title="点击刷新"></span></div>
@@ -43,6 +47,7 @@
 <script src="api.js"></script>
 <script>
 (function(){
+  DRILL.loadBrand().then(function(b){ if(b) DRILL.applyBrand(b); });
   document.getElementById('screenEntryIcon').innerHTML = App.icon('screen');
   var feats = [['net','8类内置医疗高频安全事件场景库'],['flow','可视化剧本编排 · 难度分级 · 版本管理'],['dashboard','态势总看板 · 多角色协同推演'],['replay','时序回放 · 系统自动考评 · 演练报告导出']];
   document.getElementById('featList').innerHTML = feats.map(function(f){ return '<div class="f-item">'+App.icon(f[0])+'<span>'+f[1]+'</span></div>'; }).join('');
@@ -53,7 +58,49 @@
     knowledge:'knowledge.html', opinion:'opinion.html', replay:'replay.html', evaluation:'evaluation.html',
     report:'report.html', ledger:'ledger.html', admin:'admin.html' };
 
-  var selRole = null, cap = '', ROLES = [], ACCOUNTS = [];
+  var selRole = null, cap = '', ROLES = [], ACCOUNTS = [], accMode = 'manual';
+  var selAccount = document.getElementById('selAccount');
+  var inUser = document.getElementById('inUser');
+  var accToggle = document.getElementById('accToggle');
+
+  function accountsOfRole(rid){
+    return ACCOUNTS.filter(function(a){ return (a.roles||[]).some(function(x){ return x.id===rid; }); });
+  }
+  /* 角色 → 账号下拉；无可用账号时退回手动输入 */
+  function fillAccounts(){
+    if(!selRole) return;
+    var list = accountsOfRole(selRole);
+    selAccount.innerHTML = list.map(function(a){ return '<option value="'+App.esc(a.username)+'">'+App.esc(a.username+'（'+a.name+'）')+'</option>'; }).join('');
+    if(list.length){
+      accMode = 'select';
+      selAccount.style.display = '';
+      inUser.style.display = 'none';
+      accToggle.textContent = '手动输入账号';
+      accToggle.style.display = '';
+    }else{
+      accMode = 'manual';
+      selAccount.style.display = 'none';
+      inUser.style.display = '';
+      inUser.value = '';
+      accToggle.style.display = 'none';
+      err('该角色暂无可用账号，请手动输入或联系平台管理员');
+    }
+  }
+  accToggle.onclick = function(){
+    if(accMode === 'select'){
+      accMode = 'manual';
+      selAccount.style.display = 'none';
+      inUser.style.display = '';
+      inUser.value = '';
+      inUser.focus();
+      accToggle.textContent = '改为下拉选择';
+    }else{
+      accMode = 'select';
+      accToggle.textContent = '手动输入账号';
+      if(selRole) fillAccounts(); else { inUser.style.display=''; selAccount.style.display='none'; }
+    }
+  };
+
   function genCap(){ var s='ABCDEFGHJKMNPQRSTUVWXY345678'; cap=''; for(var i=0;i<4;i++) cap+=s[Math.floor(Math.random()*s.length)]; document.getElementById('capBox').textContent=cap; }
   genCap();
   document.getElementById('capBox').onclick = genCap;
@@ -63,6 +110,7 @@
   grid.innerHTML = '<div class="tiny dim" style="grid-column:1/-1;padding:14px 4px">正在加载角色…</div>';
 
   function renderRoles(){
+    grid.classList.toggle('dense', ROLES.length > 9);
     grid.innerHTML = ROLES.map(function(r){
       return '<div class="role-cell" data-id="'+r.id+'" title="'+App.esc(r.desc||'')+'"><span class="r-ic">'+App.icon(ROLE_ICON[r.id]||'user')+'</span>'+App.esc(r.name)+'</div>';
     }).join('');
@@ -73,6 +121,7 @@
     fetch('/api/auth/accounts').then(function(r){ return r.ok ? r.json() : []; })
   ]).then(function(res){
     ROLES = res[0]; ACCOUNTS = res[1];
+    document.getElementById('roleCount').textContent = '系统内置 ' + ROLES.length + ' 类业务角色，登录后按角色权限展示差异化工作台';
     renderRoles();
   }).catch(function(e){
     grid.innerHTML = '';
@@ -83,15 +132,14 @@
     var c = e.target.closest('.role-cell'); if(!c) return;
     grid.querySelectorAll('.role-cell').forEach(function(x){ x.classList.remove('sel'); });
     c.classList.add('sel'); selRole = c.dataset.id;
-    var a = ACCOUNTS.filter(function(x){ return x.role===selRole; })[0];
-    if(a) document.getElementById('inUser').value = a.username;
+    fillAccounts();
   });
 
   var fails = 0, locked = false;
   document.getElementById('btnLogin').onclick = function(){
     err('');
     if(locked){ err('账号已锁定，请稍后再试'); return; }
-    var user = document.getElementById('inUser').value.trim();
+    var user = accMode === 'select' ? (selAccount.value || '') : document.getElementById('inUser').value.trim();
     var pass = document.getElementById('inPass').value;
     /* 未点选角色卡时按账号自动识别角色（角色以服务端校验结果为准） */
     if(!selRole && user){
@@ -100,14 +148,14 @@
     }
     if(!selRole){ err('请先选择参演角色（或输入已分配的账号）'); return; }
     var capIn = document.getElementById('inCap').value.trim().toUpperCase();
-    if(!user){ err('请输入账号'); return; }
+    if(!user){ err('请选择或输入账号'); return; }
     if(pass.length < 1){ err('请输入密码'); return; }
     if(capIn !== cap){ fails++; genCap(); document.getElementById('inCap').value='';
       err('验证码错误（第'+fails+'次）'+(fails>=5?' 账号已锁定 10 分钟':'')); if(fails>=5){ locked=true; document.getElementById('btnLogin').disabled=true; setTimeout(function(){ locked=false; fails=0; document.getElementById('btnLogin').disabled=false; }, 10*60*1000); } return; }
 
     var btn = document.getElementById('btnLogin');
     btn.disabled = true; btn.textContent = '登录中…';
-    API.login(user, pass).then(function(r){
+    API.login(user, pass, selRole).then(function(r){
       if(selRole !== r.role.id){
         App.toast('所选角色与账号角色不一致，已按账号角色登录', 'warn');
       }

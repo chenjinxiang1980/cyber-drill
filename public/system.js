@@ -58,8 +58,19 @@ window.DRILL = (function () {
   function fill(d) {
     MOCK.ROLES = d.roles || [];
     MOCK.USERS = (d.users || []).map(function (u) {
-      return { id: u.id, username: u.username, name: u.name, role: u.role, roleName: u.roleName, org: u.org, status: u.status };
+      return {
+        id: u.id, username: u.username, name: u.name, role: u.role, roleName: u.roleName,
+        roles: u.roles || [u.role], roleList: u.roleList || [{ id: u.role, name: u.roleName }],
+        org: u.org, status: u.status
+      };
     });
+    /* 角色权限以服务端最新配置为准：刷新当前会话菜单快照（权限矩阵修改后刷新页面即生效） */
+    if (d.currentUser && d.currentUser.roleId) {
+      const cur = (d.roles || []).filter(function (r) { return r.id === d.currentUser.roleId; })[0];
+      if (cur) {
+        try { sessionStorage.setItem('pzy_role', JSON.stringify(cur)); } catch (e) {}
+      }
+    }
     MOCK.PROJECTS = d.projects || [];
     MOCK.SCENARIOS = d.scenarios || [];
     MOCK.SCRIPT_NODES = d.scriptNodes || [];
@@ -106,9 +117,46 @@ window.DRILL = (function () {
     }
   });
 
+  /* ---------- 系统品牌设置（登录页/大屏页免登录同步） ---------- */
+  var BRAND_KEY = 'pzy_brand';
+  function brand() {
+    try { return JSON.parse(localStorage.getItem(BRAND_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function loadBrand() {
+    return fetch('/api/system/brand', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (b) {
+        if (b) { try { localStorage.setItem(BRAND_KEY, JSON.stringify(b)); } catch (e) {} }
+        return b || brand();
+      })
+      .catch(function () { return brand(); });
+  }
+  /* 统一把品牌信息刷到当前页面：标题、Logo、单位/系统名称、版本、项目地址 */
+  function applyBrand(b) {
+    b = b || brand();
+    if (!b) return;
+    if (b.systemName) {
+      var parts = String(document.title || '').split(' · ');
+      document.title = parts.length > 1 ? (parts[0] + ' · ' + b.systemName) : b.systemName;
+    }
+    if (b.logo) {
+      document.querySelectorAll('.brand-logo img, .login-logo img, .h-logo img').forEach(function (img) { img.src = b.logo; });
+    }
+    document.querySelectorAll('[data-brand="unit"]').forEach(function (el) { el.textContent = b.unitName || ''; });
+    document.querySelectorAll('[data-brand="system"]').forEach(function (el) { el.textContent = b.systemName || ''; });
+    var t1 = document.querySelector('.sidebar .brand .t1');
+    if (t1) t1.textContent = b.systemName || '';
+    var t2 = document.querySelector('.sidebar .brand .t2');
+    if (t2) t2.textContent = (b.unitName || '') + ' · DRILL';
+    document.querySelectorAll('[data-brand="version"]').forEach(function (el) { el.textContent = b.version || ''; });
+    document.querySelectorAll('[data-brand="github"]').forEach(function (el) { if (b.github) el.href = b.github; });
+    document.querySelectorAll('[data-brand="gitee"]').forEach(function (el) { if (b.gitee) el.href = b.gitee; });
+  }
+
   return {
     api: api, token: token, setToken: setToken,
     bootstrap: bootstrap, fill: fill,
+    brand: brand, loadBrand: loadBrand, applyBrand: applyBrand,
     get: function (p) { return api(p); },
     post: function (p, b) { return api(p, { method: 'POST', body: b === undefined ? {} : b }); },
     patch: function (p, b) { return api(p, { method: 'PATCH', body: b || {} }); },

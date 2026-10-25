@@ -49,7 +49,9 @@ var ICONS = {
   archive:'<rect x="3" y="4" width="18" height="5" rx="1" '+P+'/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" '+P+'/>',
   refresh:'<path d="M21 12a9 9 0 1 1-2.6-6.3" '+P+'/><path d="M21 3v6h-6" '+P+'/>',
   filter:'<path d="M3 5h18l-7 8v5l-4 2v-7z" '+P+'/>',
-  building:'<rect x="5" y="3" width="14" height="18" rx="1" '+P+'/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3" '+P+'/>'
+  building:'<rect x="5" y="3" width="14" height="18" rx="1" '+P+'/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3" '+P+'/>',
+  github:'<path d="M12 2C6.48 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.5.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.93 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 2.5-.34c.85 0 1.7.12 2.5.34 1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.83-2.34 4.68-4.57 4.92.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 22 12c0-5.52-4.48-10-10-10z" fill="currentColor" stroke="none"/>',
+  gitee:'<circle cx="12" cy="12" r="9.2" fill="currentColor" stroke="none"/><path d="M16.2 9.1h-5.6a2.5 2.5 0 0 0 0 5h2.7v2.3H9.2" fill="none" stroke="#0b1220" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>'
 };
 function icon(name, cls){ return '<svg viewBox="0 0 24 24" class="'+(cls||'')+'">'+(ICONS[name]||ICONS.file)+'</svg>'; }
 
@@ -96,7 +98,14 @@ function guard(pageKey){
 function mountShell(pageKey){
   var r = curRole()||{name:'未登录'};
   var nav = r.nav||[];
-  var html = '<aside class="sidebar"><div class="brand"><span class="logo brand-logo"><img src="img/logo.png" alt="盘州市人民医院院徽"></span><span class="bt"><div class="t1">网络安全应急演练</div><div class="t2">PANZHOU HOSPITAL · DRILL</div></span></div><nav class="nav">';
+  var B = DRILL.brand()||{};
+  var brandLogo = B.logo || 'img/logo.png';
+  var brandSystem = B.systemName || '网络安全应急演练';
+  var brandUnit = B.unitName || '盘州市人民医院';
+  var brandVer = B.version || 'v0.1.6';
+  var brandGh = B.github || 'https://github.com/chenjinxiang1980/cyber-drill';
+  var brandGe = B.gitee || 'https://gitee.com/habeas/cyber-drill';
+  var html = '<aside class="sidebar"><div class="brand"><span class="logo brand-logo"><img src="'+brandLogo+'" alt="'+App.esc(brandUnit)+'院徽"></span><span class="bt"><div class="t1">'+App.esc(brandSystem)+'</div><div class="t2">'+App.esc(brandUnit)+' · DRILL</div></span></div><nav class="nav">';
   NAV_GROUPS.forEach(function(g){
     var items = g.items.filter(function(it){ return nav.indexOf(it.key)>=0; });
     if(!items.length) return;
@@ -108,7 +117,11 @@ function mountShell(pageKey){
     });
     html += '</div>';
   });
-  html += '</nav><div class="side-foot"><div class="u-role">'+r.name+'</div><div class="u-name">'+curUser()+'</div><div class="u-out" onclick="App.logout()">'+icon('logout')+'<span>退出登录</span></div></div></aside>';
+  html += '</nav><div class="side-foot"><div class="u-role">'+r.name+'</div><div class="u-name">'+curUser()+'</div><div class="u-out" onclick="App.logout()">'+icon('logout')+'<span>退出登录</span></div>'
+    + '<div class="u-meta"><span class="ver" data-brand="version">'+App.esc(brandVer)+'</span>'
+    + '<a class="lnk" data-brand="github" href="'+App.esc(brandGh)+'" target="_blank" rel="noopener" title="GitHub 项目地址">'+icon('github')+'</a>'
+    + '<a class="lnk" data-brand="gitee" href="'+App.esc(brandGe)+'" target="_blank" rel="noopener" title="Gitee 项目地址">'+icon('gitee')+'</a>'
+    + '</div></div></aside>';
 
   html += '<div class="main-wrap"><header class="topbar">'
     + '<span class="proj-sel" onclick="App.switchProject()">'+icon('projects')+'<b id="topProj"></b><span class="dim">切换 ▾</span></span>'
@@ -130,6 +143,14 @@ function mountShell(pageKey){
 function refreshShell(){
   var r = curRole()||{};
   var proj = API.activeProject();
+
+  // 角色名称（管理员修改角色组名称后同步，含账号角色标签与侧栏）
+  if(r.name){
+    var chip = document.querySelector('.role-chip');
+    if(chip) chip.innerHTML = '<span class="av">'+App.esc(r.name.slice(0,1))+'</span>'+App.esc(r.name);
+    var urole = document.querySelector('.side-foot .u-role');
+    if(urole) urole.textContent = r.name;
+  }
 
   var tp = document.getElementById('topProj');
   if(tp) tp.textContent = proj ? proj.name : '未选择演练项目';
@@ -252,6 +273,9 @@ function boot(pageKey){
   if(page && !page.innerHTML.trim()){
     page.innerHTML = '<div class="loading-block"><div class="spinner"></div><span>正在加载演练数据…</span></div>';
   }
+
+  /* 品牌设置：与业务数据并行加载，加载完成后同步标题、品牌区与登录信息区 */
+  DRILL.loadBrand().then(function(b){ if(b) DRILL.applyBrand(b); });
 
   /* 先加载真实数据，再通知各页面渲染（页面内同步读取 MOCK） */
   DRILL.bootstrap().then(function(){

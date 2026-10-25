@@ -10,7 +10,13 @@
 .mx-y{color:var(--ok);display:inline-flex} .mx-y svg{width:15px;height:15px}
 .mx-n{color:var(--text3);opacity:.45;display:inline-flex} .mx-n svg{width:14px;height:14px}
 table.mx-table th, table.mx-table td{padding:8px 10px;text-align:center}
-table.mx-table td:first-child, table.mx-table th:first-child{text-align:left;white-space:nowrap}
+table.mx-table th{white-space:normal;font-size:11px;line-height:1.3;min-width:62px;vertical-align:bottom}
+table.mx-table td:first-child, table.mx-table th:first-child{text-align:left;white-space:nowrap;min-width:196px}
+.mx-off td, .mx-off td b{opacity:.6}
+.mx-off .mx-cell{opacity:.4}
+.mx-cell{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;padding:2px;transition:.15s}
+.mx-cell:hover{background:var(--elev2)}
+.mx-cell.mx-lock{cursor:not-allowed;opacity:.7}
 tr.ext td{background:rgba(210,153,34,.07)}
 .adm-pane{display:none} .adm-pane.on{display:block}
 .chan-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px dashed var(--border)}
@@ -26,17 +32,18 @@ document.addEventListener('app:ready', function(e){
 
   /* 真实账号列表（来自服务端数据库） */
   var users = MOCK.USERS.map(function(u){
-    return { id:u.id, account:u.username, name:u.name, role:u.role, org:u.org, status:u.status||'启用' };
+    return { id:u.id, account:u.username, name:u.name, role:u.role, roles:(u.roles||[u.role]).slice(), org:u.org, status:u.status||'启用' };
   });
   var templates = MOCK.FORM_TEMPLATES.slice();
   var auditBase = MOCK.AUDIT_LOGS.slice();
+  var BRAND_ADMIN = role.id === 'platformadmin'; /* 系统设置仅平台管理员可维护 */
   var channels = [
     { name:'站内消息', desc:'任务/告警实时推送至工作台铃铛', on:true },
     { name:'短信（模拟）', desc:'P0事件与超时督办短信提醒，演练中不真实发送', on:true },
     { name:'邮件（模拟）', desc:'日报与归档通知，演练中不真实发送', on:false }
   ];
 
-  var MODS = [['dashboard','演练看板'],['workbench','角色工作台'],['collab','演练导调'],['scenarios','场景剧本库'],['projects','演练项目'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['ledger','台账统计'],['opinion','公告舆情'],['knowledge','预案知识库'],['admin','系统管理']];
+  var MODS = [['dashboard','演练看板'],['workbench','角色工作台'],['collab','演练导调'],['scenarios','场景剧本库'],['script-editor','剧本编辑'],['projects','演练项目'],['screen','监视大屏'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['report','演练报告'],['ledger','台账统计'],['opinion','公告舆情'],['knowledge','预案知识库'],['admin','系统管理']];
   function roleName(id){ var r = MOCK.ROLES.filter(function(x){ return x.id===id; })[0]; return r ? r.name : id; }
   function objOf(a){ var m = a.match(/《(.+?)》/); if(m) return m[1]; var i = a.indexOf('：'); return i>=0 ? a.slice(i+1) : '—'; }
 
@@ -49,19 +56,22 @@ document.addEventListener('app:ready', function(e){
     +   '<div class="tab" data-t="forms">'+App.icon('file')+'表单模板</div>'
     +   '<div class="tab" data-t="audit">'+App.icon('eye')+'审计日志</div>'
     +   '<div class="tab" data-t="ops">'+App.icon('db')+'通知与备份</div>'
+    +   (BRAND_ADMIN ? '<div class="tab" data-t="brand">'+App.icon('admin')+'系统设置</div>' : '')
     + '</div>'
     + '<div class="adm-pane on" id="pane-users">'
     +   '<div class="card"><div class="card-title">'+App.icon('user')+'用户账号<span class="more" id="uAddBtn">'+App.icon('plus')+'新增用户</span></div>'
     +   '<div class="table-wrap"><table class="table"><thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>部门/单位</th><th>状态</th><th>操作</th></tr></thead><tbody id="uBody"></tbody></table></div></div>'
     + '</div>'
     + '<div class="adm-pane" id="pane-matrix">'
-    +   '<div class="card"><div class="card-title">'+App.icon('lock')+'角色 × 模块 可见性矩阵（依据各角色导航授权渲染）</div>'
-    +   '<div class="table-wrap"><table class="table mx-table"><thead><tr><th>角色</th>'+MODS.map(function(m){ return '<th>'+m[1]+'</th>'; }).join('')+'</tr></thead><tbody id="mxBody"></tbody></table></div>'
-    +   '<div class="tiny mt3"><span class="tag yellow">高亮行</span> = 外部单位角色（卫健局/网信办/网安大队），仅可见医院主动上报的报送材料，不可见内网原始数据与技术日志。</div></div>'
-    + '</div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('lock')+'角色 × 模块 可见性矩阵（依据各角色导航授权渲染）<span class="more tiny dim">点击单元格可切换可见性</span></div>'
+    +   '<div class="table-wrap"><table class="table mx-table"><thead><tr><th>角色 / 说明</th>'+MODS.map(function(m){ return '<th>'+m[1]+'</th>'; }).join('')+'</tr></thead><tbody id="mxBody"></tbody></table></div>'
+    +   '<div class="tiny mt3"><span class="tag yellow">高亮行</span> = 外部单位角色（卫健局/网信办/网安大队），仅可见医院主动上报的报送材料，不可见内网原始数据与技术日志。平台管理员「系统管理」权限不可移除；停用角色不再出现在登录页；仍有账号绑定的角色不可删除；上移/下移调整登录页角色卡片顺序。</div>'
+    +   '<div class="flex gap3 mt4" style="align-items:center;flex-wrap:wrap"><button class="btn" id="mxAddBtn">'+App.icon('plus')+'新增角色</button><button class="btn primary" id="mxSaveBtn">'+App.icon('check')+'保存权限变更</button><span class="tiny dim">新增角色后可为其分配账号；保存后已登录账号刷新页面即生效</span></div>'
+    + '</div></div>'
     + '<div class="adm-pane" id="pane-forms">'
     +   '<div class="card"><div class="card-title">'+App.icon('file')+'上报文书表单模板<span class="more" id="fAddBtn">'+App.icon('plus')+'新建模板</span></div>'
-    +   '<div class="table-wrap"><table class="table"><thead><tr><th>编号</th><th>模板名称</th><th>字段数</th><th>操作</th></tr></thead><tbody id="fBody"></tbody></table></div></div>'
+    +   '<div class="table-wrap"><table class="table"><thead><tr><th>编号</th><th>模板名称</th><th>字段数</th><th>已配置说明</th><th>操作</th></tr></thead><tbody id="fBody"></tbody></table></div></div>'
+    +   '<div class="tiny dim mt3">内置模板可由平台管理员修改；字段说明将在参演人员分步填表时逐项展示，用于引导填写。</div>'
     + '</div>'
     + '<div class="adm-pane" id="pane-audit">'
     +   '<div class="sim-banner" style="border-color:rgba(248,81,73,.5);color:var(--err);background:var(--err-dim)">'+App.icon('lock')+'<span><b>日志仅可查看，不可删除修改（防篡改）。</b>本模块不提供任何删除/编辑入口，导出留痕同样写入审计。</span></div>'
@@ -81,7 +91,27 @@ document.addEventListener('app:ready', function(e){
     +       '<div class="tiny dim mt2" id="bkPct"></div>'
     +       '<button class="btn primary mt3" id="bkBtn">'+App.icon('archive')+'立即备份</button></div>'
     +   '</div>'
-    + '</div>';
+    + '</div>'
+    + (BRAND_ADMIN ?
+      '<div class="adm-pane" id="pane-brand">'
+      + '<div class="card"><div class="card-title">'+App.icon('admin')+'系统设置<span class="more tiny dim">保存后同步到登录页、大屏与全部业务页面</span></div>'
+      +   '<div class="form-grid">'
+      +     '<div class="form-row"><label class="f-label">系统名称 <span class="req">*</span></label><input class="input" id="bsName" maxlength="40" placeholder="如 网络安全应急演练系统"></div>'
+      +     '<div class="form-row"><label class="f-label">单位名称 <span class="req">*</span></label><input class="input" id="bsUnit" maxlength="40" placeholder="如 盘州市人民医院"></div>'
+      +     '<div class="form-row"><label class="f-label">版本信息</label><input class="input" id="bsVer" maxlength="20" placeholder="如 v0.1.6"></div>'
+      +     '<div class="form-row"><label class="f-label">GitHub 项目地址</label><input class="input" id="bsGh" type="url" placeholder="https://github.com/..."></div>'
+      +     '<div class="form-row"><label class="f-label">Gitee 项目地址</label><input class="input" id="bsGe" type="url" placeholder="https://gitee.com/..."></div>'
+      +   '</div>'
+      +   '<div class="section-title mt4">单位 Logo</div>'
+      +   '<div class="flex gap4" style="align-items:center;flex-wrap:wrap">'
+      +     '<span class="logo" style="width:64px;height:64px;border-radius:50%;background:#fff;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;padding:3px;overflow:hidden;flex:none"><img id="bsLogo" src="img/logo.png" alt="单位 Logo" style="width:100%;height:100%;object-fit:contain;border-radius:50%"></span>'
+      +     '<div class="grow" style="min-width:240px"><input class="input" type="file" id="bsLogoFile" accept="image/png,image/jpeg,image/webp,image/gif"><div class="tiny dim mt2">支持 PNG / JPG / WebP / GIF，单个文件 ≤ 2MB，保存路径 uploads/system/</div></div>'
+      +     '<button class="btn" id="bsUploadBtn">'+App.icon('upload')+'上传 Logo</button>'
+      +   '</div>'
+      +   '<div class="flex gap3 mt4"><button class="btn primary" id="bsSaveBtn">'+App.icon('check')+'保存设置</button><button class="btn" id="bsResetBtn">'+App.icon('refresh')+'恢复默认值</button></div>'
+      +   '<div class="tiny dim mt3">系统名称、单位名称、Logo、版本信息保存后即时同步到登录页、演练监视大屏及登录后各页面的侧边栏与页面标题；GitHub / Gitee 图标在侧边栏底部登录信息区展示。</div>'
+      + '</div></div>' : '')
+    + '';
 
   /* ---------- 页签 ---------- */
   document.querySelectorAll('#admTabs .tab').forEach(function(tab){
@@ -92,11 +122,18 @@ document.addEventListener('app:ready', function(e){
   });
 
   /* ---------- a) 用户账号 ---------- */
+  function roleTags(u){
+    var rs = (u.roles && u.roles.length) ? u.roles : [u.role];
+    return rs.map(function(id){ return '<span class="tag">'+App.esc(roleName(id))+'</span>'; }).join(' ');
+  }
   function renderUsers(){
     document.getElementById('uBody').innerHTML = users.map(function(u,i){
-      return '<tr><td class="mono">'+App.esc(u.account)+'</td><td>'+App.esc(u.name)+'</td><td>'+App.esc(roleName(u.role))+'</td><td class="dim">'+App.esc(u.org)+'</td><td>'+App.statusTag(u.status)+'</td>'
-        + '<td><button class="btn sm" data-rp="'+i+'">重置密码</button> <button class="btn sm '+(u.status==='启用'?'danger':'ok')+'" data-tg="'+i+'">'+(u.status==='启用'?'停用':'启用')+'</button></td></tr>';
+      return '<tr><td class="mono">'+App.esc(u.account)+'</td><td>'+App.esc(u.name)+'</td><td>'+roleTags(u)+'</td><td class="dim">'+App.esc(u.org)+'</td><td>'+App.statusTag(u.status)+'</td>'
+        + '<td><button class="btn sm" data-ed="'+i+'">编辑</button> <button class="btn sm" data-rp="'+i+'">重置密码</button> <button class="btn sm '+(u.status==='启用'?'danger':'ok')+'" data-tg="'+i+'">'+(u.status==='启用'?'停用':'启用')+'</button></td></tr>';
     }).join('');
+    document.querySelectorAll('#uBody [data-ed]').forEach(function(b){
+      b.onclick = function(){ openUserModal(users[+b.dataset.ed], +b.dataset.ed); };
+    });
     document.querySelectorAll('#uBody [data-rp]').forEach(function(b){
       b.onclick = function(){
         var u = users[+b.dataset.rp];
@@ -121,72 +158,349 @@ document.addEventListener('app:ready', function(e){
       };
     });
   }
-  document.getElementById('uAddBtn').onclick = function(){
-    App.modal({ title:'新增用户账号', body:
+  /* 新增 / 编辑账号共用弹窗（角色支持多选） */
+  function openUserModal(u, idx){
+    var editing = !!u;
+    var cur = editing ? ((u.roles && u.roles.length) ? u.roles : [u.role]) : [];
+    var roleBoxes = MOCK.ROLES.map(function(r){
+      var off = (r.status||'启用') === '停用';
+      return '<label class="tiny" style="display:inline-flex;align-items:center;gap:4px;margin-right:14px;margin-bottom:6px'+(off?';opacity:.55':'')+'"><input type="checkbox" class="euRole" value="'+r.id+'"'+(cur.indexOf(r.id)>=0?' checked':'')+'>'+App.esc(r.name)+(off?'（已停用）':'')+'</label>';
+    }).join('');
+    App.modal({ title: editing ? '编辑用户账号' : '新增用户账号', body:
       '<div class="form-grid">'
-      + '<div class="form-row"><label class="f-label">账号 <span class="req">*</span></label><input class="input" id="naAcc" placeholder="如 duty.13"></div>'
-      + '<div class="form-row"><label class="f-label">姓名 <span class="req">*</span></label><input class="input" id="naName" placeholder="虚拟姓名"></div>'
-      + '<div class="form-row"><label class="f-label">角色</label><select class="select" id="naRole">'+MOCK.ROLES.map(function(r){ return '<option value="'+r.id+'">'+App.esc(r.name)+'</option>'; }).join('')+'</select></div>'
-      + '<div class="form-row"><label class="f-label">部门/单位</label><input class="input" id="naOrg" placeholder="如 信息科" value="信息科"></div></div>'
-      + '<div class="tiny dim">新账号仅用于演练登录，不接入真实组织架构与统一身份认证。</div>',
-      foot:'<button class="btn" id="naNo">取消</button><button class="btn primary" id="naYes">创建账号</button>',
+      + '<div class="form-row"><label class="f-label">账号 <span class="req">*</span></label><input class="input" id="euAcc" maxlength="32" placeholder="3-32 位字母、数字或 _ . -" value="'+(editing?App.esc(u.account):'')+'"></div>'
+      + '<div class="form-row"><label class="f-label">姓名 <span class="req">*</span></label><input class="input" id="euName" placeholder="虚拟姓名" value="'+(editing?App.esc(u.name):'')+'"></div>'
+      + '<div class="form-row"><label class="f-label">部门/单位</label><input class="input" id="euOrg" placeholder="如 信息科" value="'+(editing?App.esc(u.org):'信息科')+'"></div>'
+      + (editing ? '<div class="form-row"><label class="f-label">状态</label><select class="select" id="euStatus"><option value="启用"'+(u.status!=='停用'?' selected':'')+'>启用</option><option value="停用"'+(u.status==='停用'?' selected':'')+'>停用</option></select></div>' : '')
+      + '<div class="form-row" style="grid-column:1/-1"><label class="f-label">角色（可多选）<span class="req">*</span></label><div>'+roleBoxes+'</div><div class="tiny dim">一个账号可绑定多个角色；登录时选择其一，会话权限按所选角色生效。</div></div>'
+      + '</div>',
+      foot:'<button class="btn" id="euNo">取消</button><button class="btn primary" id="euYes">'+(editing?'保存修改':'创建账号')+'</button>',
       onOpen:function(ov){
-        ov.querySelector('#naNo').onclick = ov.close;
-        ov.querySelector('#naYes').onclick = function(){
-          var acc = ov.querySelector('#naAcc').value.trim(), nm = ov.querySelector('#naName').value.trim();
-          if(!acc || !nm){ App.toast('账号与姓名必填','err'); return; }
-          API.addUser({ username:acc, name:nm, role:ov.querySelector('#naRole').value, org:ov.querySelector('#naOrg').value.trim()||'盘州市人民医院' }).then(function(r){
-            users.push({ id:r.id, account:acc, name:nm, role:ov.querySelector('#naRole').value, org:ov.querySelector('#naOrg').value.trim()||'盘州市人民医院', status:'启用' });
-            ov.close(); renderUsers();
-            App.toast('账号「'+acc+'」已创建，初始密码 Pzy@2026','ok');
-          });
+        ov.querySelector('#euNo').onclick = ov.close;
+        ov.querySelector('#euYes').onclick = function(){
+          var acc = ov.querySelector('#euAcc').value.trim();
+          var nm = ov.querySelector('#euName').value.trim();
+          var org = ov.querySelector('#euOrg').value.trim() || '盘州市人民医院';
+          var roles = Array.prototype.slice.call(ov.querySelectorAll('.euRole:checked')).map(function(x){ return x.value; });
+          if(!/^[A-Za-z0-9_.-]{3,32}$/.test(acc)){ App.toast('账号需为 3-32 位字母、数字或 _ . -','err'); return; }
+          if(!nm){ App.toast('姓名必填','err'); return; }
+          if(!roles.length){ App.toast('请至少选择一个角色','err'); return; }
+          if(editing){
+            var patch = { username:acc, name:nm, org:org, roles:roles };
+            if(ov.querySelector('#euStatus')) patch.status = ov.querySelector('#euStatus').value;
+            API.updateUser(u.id, patch).then(function(){
+              u.account = acc; u.name = nm; u.org = org; u.roles = roles; u.role = roles[0];
+              if(patch.status) u.status = patch.status;
+              ov.close(); renderUsers();
+              App.toast('账号「'+acc+'」已保存','ok');
+            }).catch(function(e){ App.toast((e&&e.message)||'保存失败','err'); });
+          }else{
+            API.addUser({ username:acc, name:nm, roles:roles, org:org }).then(function(r){
+              users.push({ id:r.id, account:acc, name:nm, role:roles[0], roles:roles, org:org, status:'启用' });
+              ov.close(); renderUsers();
+              App.toast('账号「'+acc+'」已创建，初始密码 Pzy@2026','ok');
+            }).catch(function(e){ App.toast((e&&e.message)||'创建失败','err'); });
+          }
+        };
+      } });
+  }
+  document.getElementById('uAddBtn').onclick = function(){ openUserModal(null, -1); };
+
+  /* ---------- b) 权限矩阵（可编辑：模块可见性 + 角色名称/说明 + 顺序 + 停用/删除） ---------- */
+  var rolesState = MOCK.ROLES.map(function(r){
+    return { id:r.id, name:r.name, desc:r.desc||'', nav:(r.nav||[]).slice(), external:!!r.external, status:r.status||'启用' };
+  });
+  var dirtyRoles = {};
+
+  function reorderSave(){
+    API.reorderRoles(rolesState.map(function(x){ return x.id; })).then(function(){
+      App.toast('角色显示顺序已保存，登录页同步生效','ok');
+    }).catch(function(e){
+      App.toast((e&&e.message)||'排序保存失败','err');
+      API.adminRoles().then(function(list){
+        if(!list || !list.length) return;
+        rolesState = list.map(function(r){ return { id:r.id, name:r.name, desc:r.desc||'', nav:(r.nav||[]).slice(), external:!!r.external, status:r.status||'启用' }; });
+        renderMatrix();
+      }).catch(function(){});
+    });
+  }
+
+  function renderMatrix(){
+    document.getElementById('mxBody').innerHTML = rolesState.map(function(r,ri){
+      var cells = MODS.map(function(m){
+        var has = r.nav.indexOf(m[0]) >= 0;
+        var locked = r.id === 'platformadmin' && m[0] === 'admin';
+        return '<td><span class="mx-cell '+(has?'mx-y':'mx-n')+(locked?' mx-lock':'')+'" data-r="'+ri+'" data-m="'+m[0]+'"'
+          + ' title="'+(locked?'平台管理员的「系统管理」权限不可移除':'点击'+(has?'移除':'授予')+'「'+m[1]+'」')+'">'+App.icon(has?'check':'x')+'</span></td>';
+      }).join('');
+      var on = (r.status||'启用') === '启用';
+      return '<tr class="'+(r.external?'ext ':'')+(on?'':'mx-off')+'"><td><b>'+App.esc(r.name)+'</b> '+App.statusTag(r.status||'启用')
+        + '<div class="tiny dim">'+App.esc((r.desc||'').slice(0,26))+'</div>'
+        + '<div class="mt2" style="display:flex;gap:4px;flex-wrap:wrap">'
+        + '<button class="btn sm" data-up="'+ri+'"'+(ri===0?' disabled':'')+'>上移</button>'
+        + '<button class="btn sm" data-down="'+ri+'"'+(ri===rolesState.length-1?' disabled':'')+'>下移</button>'
+        + '<button class="btn sm" data-desc="'+ri+'">编辑</button>'
+        + '<button class="btn sm '+(on?'danger':'ok')+'" data-st="'+ri+'">'+(on?'停用':'启用')+'</button>'
+        + '<button class="btn sm danger" data-del="'+ri+'">删除</button>'
+        + '</div></td>'+cells+'</tr>';
+    }).join('');
+
+    document.querySelectorAll('#mxBody .mx-cell').forEach(function(c){
+      c.onclick = function(){
+        var r = rolesState[+c.dataset.r], m = c.dataset.m;
+        if(r.id === 'platformadmin' && m === 'admin'){ App.toast('平台管理员的「系统管理」权限不可移除','warn'); return; }
+        var i = r.nav.indexOf(m);
+        if(i >= 0) r.nav.splice(i,1); else r.nav.push(m);
+        dirtyRoles[r.id] = true;
+        renderMatrix();
+      };
+    });
+    document.querySelectorAll('#mxBody [data-up]').forEach(function(b){
+      b.onclick = function(){ var i=+b.dataset.up; if(i<=0) return; var t=rolesState[i-1]; rolesState[i-1]=rolesState[i]; rolesState[i]=t; renderMatrix(); reorderSave(); };
+    });
+    document.querySelectorAll('#mxBody [data-down]').forEach(function(b){
+      b.onclick = function(){ var i=+b.dataset.down; if(i>=rolesState.length-1) return; var t=rolesState[i+1]; rolesState[i+1]=rolesState[i]; rolesState[i]=t; renderMatrix(); reorderSave(); };
+    });
+    document.querySelectorAll('#mxBody [data-st]').forEach(function(b){
+      b.onclick = function(){
+        var r = rolesState[+b.dataset.st];
+        var to = (r.status||'启用') === '启用' ? '停用' : '启用';
+        App.modal({ title:(to==='停用'?'停用角色':'启用角色')+' · '+r.name, body:
+          '<p style="font-size:13.5px">'+(to==='停用'
+            ? '停用后该角色将不再出现在登录页与账号角色选择中，已用该角色登录的会话会立即失效。账号绑定关系保留，可随时重新启用。'
+            : '启用后该角色将重新出现在登录页与账号角色选择中。')+'</p>',
+          foot:'<button class="btn" id="stNo">取消</button><button class="btn primary" id="stYes">确认'+(to==='停用'?'停用':'启用')+'</button>',
+          onOpen:function(ov){
+            ov.querySelector('#stNo').onclick = ov.close;
+            ov.querySelector('#stYes').onclick = function(){
+              API.setRoleStatus(r.id, to).then(function(){
+                r.status = to;
+                var m = MOCK.ROLES.filter(function(x){ return x.id===r.id; })[0];
+                if(m) m.status = to;
+                ov.close(); renderMatrix();
+                App.toast('角色「'+r.name+'」已'+to,'ok');
+              }).catch(function(e){ App.toast((e&&e.message)||'操作失败','err'); });
+            };
+          } });
+      };
+    });
+    document.querySelectorAll('#mxBody [data-del]').forEach(function(b){
+      b.onclick = function(){
+        var r = rolesState[+b.dataset.del];
+        App.modal({ title:'删除角色 · '+r.name, body:
+          '<div class="sim-banner">'+App.icon('alert')+'<span>删除后不可恢复；若仍有账号绑定该角色，需先在「用户账号」中解除绑定。</span></div>'
+          + '<p style="font-size:13.5px">确认删除角色「'+App.esc(r.name)+'」？</p>',
+          foot:'<button class="btn" id="rdelNo">取消</button><button class="btn danger" id="rdelYes">确认删除</button>',
+          onOpen:function(ov){
+            ov.querySelector('#rdelNo').onclick = ov.close;
+            ov.querySelector('#rdelYes').onclick = function(){
+              API.deleteRole(r.id).then(function(){
+                rolesState = rolesState.filter(function(x){ return x.id!==r.id; });
+                MOCK.ROLES = MOCK.ROLES.filter(function(x){ return x.id!==r.id; });
+                delete dirtyRoles[r.id];
+                ov.close(); renderMatrix();
+                App.toast('角色「'+r.name+'」已删除','ok');
+              }).catch(function(e){ App.toast((e&&e.message)||'删除失败','err'); });
+            };
+          } });
+      };
+    });
+    document.querySelectorAll('#mxBody [data-desc]').forEach(function(b){
+      b.onclick = function(){
+        var r = rolesState[+b.dataset.desc];
+        App.modal({ title:'编辑角色 · '+r.name, body:
+          '<div class="form-row"><label class="f-label">角色组名称 <span class="req">*</span></label><input class="input" id="rdName" maxlength="20" value="'+App.esc(r.name)+'">'
+          + '<div class="tiny dim mt2">最多 20 字，保存后同步到登录页角色卡片、账号角色标签与各页面。</div></div>'
+          + '<div class="form-row"><label class="f-label">角色说明</label><textarea class="input" id="rdDesc" rows="4" maxlength="200" placeholder="简要说明该角色在演练中的职责与权限边界">'+App.esc(r.desc||'')+'</textarea>'
+          + '<div class="tiny dim mt2">最多 200 字，保存权限变更后同步到登录页角色卡提示与矩阵说明。</div></div>',
+          foot:'<button class="btn" id="rdNo">取消</button><button class="btn primary" id="rdYes">确定</button>',
+          onOpen:function(ov){
+            ov.querySelector('#rdNo').onclick = ov.close;
+            ov.querySelector('#rdYes').onclick = function(){
+              var nm = ov.querySelector('#rdName').value.trim();
+              if(!nm){ App.toast('角色组名称不能为空','err'); return; }
+              r.name = nm;
+              r.desc = ov.querySelector('#rdDesc').value.trim().slice(0,200);
+              dirtyRoles[r.id] = true;
+              ov.close(); renderMatrix();
+              App.toast('角色信息已更新，点击「保存权限变更」后生效','ok');
+            };
+          } });
+      };
+    });
+  }
+
+  document.getElementById('mxAddBtn').onclick = function(){
+    var boxes = MODS.map(function(m){
+      var def = (m[0]==='dashboard' || m[0]==='workbench');
+      return '<label class="tiny" style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;margin-bottom:6px"><input type="checkbox" class="nrMod" value="'+m[0]+'"'+(def?' checked':'')+'>'+m[1]+'</label>';
+    }).join('');
+    App.modal({ title:'新增角色', body:
+      '<div class="form-row"><label class="f-label">角色组名称 <span class="req">*</span></label><input class="input" id="nrName" maxlength="20" placeholder="如 信息化支撑组"></div>'
+      + '<div class="form-row"><label class="f-label">角色说明</label><textarea class="input" id="nrDesc" rows="3" maxlength="200" placeholder="简要说明该角色在演练中的职责与权限边界"></textarea></div>'
+      + '<div class="form-row"><label class="f-label">模块可见权限</label><div>'+boxes+'</div><div class="tiny dim">可先勾选基础模块，创建后仍可在矩阵中调整。</div></div>',
+      foot:'<button class="btn" id="nrNo">取消</button><button class="btn primary" id="nrYes">创建角色</button>',
+      onOpen:function(ov){
+        ov.querySelector('#nrNo').onclick = ov.close;
+        ov.querySelector('#nrYes').onclick = function(){
+          var nm = ov.querySelector('#nrName').value.trim();
+          var nav = Array.prototype.slice.call(ov.querySelectorAll('.nrMod:checked')).map(function(x){ return x.value; });
+          if(!nm){ App.toast('角色组名称不能为空','err'); return; }
+          API.addRole({ name:nm, desc:ov.querySelector('#nrDesc').value.trim(), nav:nav }).then(function(r){
+            var role = { id:r.role.id, name:r.role.name, desc:r.role.desc, nav:r.role.nav.slice(), external:false, status:'启用' };
+            rolesState.push(role);
+            MOCK.ROLES.push({ id:role.id, name:role.name, short:r.role.short, icon:r.role.icon, color:r.role.color, desc:role.desc, nav:role.nav.slice(), external:false, status:'启用' });
+            ov.close(); renderMatrix();
+            App.toast('角色「'+nm+'」已创建，可在用户账号中分配','ok');
+          }).catch(function(e){ App.toast((e&&e.message)||'创建失败','err'); });
         };
       } });
   };
 
-  /* ---------- b) 权限矩阵 ---------- */
-  document.getElementById('mxBody').innerHTML = MOCK.ROLES.map(function(r){
-    var cells = MODS.map(function(m){
-      var has = (r.nav||[]).indexOf(m[0]) >= 0;
-      return '<td>'+(has ? '<span class="mx-y">'+App.icon('check')+'</span>' : '<span class="mx-n">'+App.icon('x')+'</span>')+'</td>';
-    }).join('');
-    return '<tr'+(r.external?' class="ext"':'')+'><td><b>'+App.esc(r.name)+'</b><div class="tiny dim">'+App.esc(r.desc.slice(0,18))+'…</div></td>'+cells+'</tr>';
-  }).join('');
+  document.getElementById('mxSaveBtn').onclick = function(){
+    var ids = Object.keys(dirtyRoles);
+    if(!ids.length){ App.toast('暂无权限变更','warn'); return; }
+    var tasks = ids.map(function(id){
+      var r = rolesState.filter(function(x){ return x.id===id; })[0];
+      return API.updateRole(id, { name:r.name, nav:r.nav, desc:r.desc });
+    });
+    Promise.all(tasks).then(function(){
+      dirtyRoles = {};
+      DRILL.bootstrap().then(function(){ App.refreshShell(); });
+      App.toast('角色权限已保存，刷新页面即对已登录账号生效','ok');
+    }).catch(function(e){ App.toast((e&&e.message)||'保存失败','err'); });
+  };
 
-  /* ---------- c) 表单模板 ---------- */
+  renderMatrix();
+  API.adminRoles().then(function(list){
+    if(!list || !list.length) return;
+    rolesState = list.map(function(r){ return { id:r.id, name:r.name, desc:r.desc||'', nav:(r.nav||[]).slice(), external:!!r.external, status:r.status||'启用' }; });
+    renderMatrix();
+  }).catch(function(){});
+
+  /* ---------- c) 表单模板（字段可编辑：名称 / 说明 / 必填 / 控件类型 / 顺序） ---------- */
+  function fldOf(x){
+    if(typeof x === 'string') return { label:x, hint:'', required:true, type:'auto', options:[] };
+    return {
+      label:(x&&x.label)||'', hint:(x&&x.hint)||'', required:!(x&&x.required===false),
+      type:(x&&x.type)||'auto',
+      options:Array.isArray(x&&x.options)?x.options.slice():(typeof (x&&x.options)==='string'?x.options.split(/[、,，|｜]/).map(function(s){return s.trim();}).filter(Boolean):[])
+    };
+  }
+  var TYPE_OPTS = [['auto','自动识别'],['text','单行文本'],['textarea','多行文本'],['select','下拉选择'],['datetime','日期时间']];
+  function typeName(t){
+    for(var i=0;i<TYPE_OPTS.length;i++) if(TYPE_OPTS[i][0]===t) return TYPE_OPTS[i][1];
+    return '自动识别';
+  }
+
   function renderForms(){
     document.getElementById('fBody').innerHTML = templates.map(function(f,i){
-      return '<tr><td class="mono">'+App.esc(f.id)+'</td><td>'+App.esc(f.name)+'</td><td class="mono">'+f.fields.length+'</td><td><button class="btn sm" data-vw="'+i+'">'+App.icon('eye')+'查看</button></td></tr>';
+      var nf = (f.fields||[]).map(fldOf);
+      var withHint = nf.filter(function(x){ return !!x.hint; }).length;
+      return '<tr><td class="mono">'+App.esc(f.id)+'</td><td>'+App.esc(f.name)+'</td><td class="mono">'+nf.length+'</td>'
+        + '<td class="mono">'+(withHint?'<span class="tag green">'+withHint+'</span>':'<span class="dim">0</span>')+'</td>'
+        + '<td><button class="btn sm" data-vw="'+i+'" title="查看结构">'+App.icon('eye')+'</button> <button class="btn sm primary" data-ed="'+i+'">'+App.icon('edit')+'编辑</button></td></tr>';
     }).join('');
+
     document.querySelectorAll('#fBody [data-vw]').forEach(function(b){
       b.onclick = function(){
-        var f = templates[+b.dataset.vw];
+        var f = templates[+b.dataset.vw], nf = (f.fields||[]).map(fldOf);
         App.drawer({ title:'模板结构 · '+f.name, body:
-          '<div class="kv"><span class="k">模板编号</span><span class="mono">'+App.esc(f.id)+'</span><span class="k">模板名称</span><span>'+App.esc(f.name)+'</span><span class="k">字段数</span><span class="mono">'+f.fields.length+'</span></div>'
+          '<div class="kv"><span class="k">模板编号</span><span class="mono">'+App.esc(f.id)+'</span><span class="k">模板名称</span><span>'+App.esc(f.name)+'</span><span class="k">字段数</span><span class="mono">'+nf.length+'</span></div>'
           + '<div class="section-title mt4">字段结构</div>'
-          + '<table class="table"><thead><tr><th style="width:60px">序号</th><th>字段名</th><th>控件（模拟）</th></tr></thead><tbody>'
-          + f.fields.map(function(x,i){ return '<tr><td class="mono">'+(i+1)+'</td><td>'+App.esc(x)+'</td><td class="dim">'+(/附件|截图|清单/.test(x)?'附件上传':/时间|日期/.test(x)?'日期时间':/描述|意见|摘要|经过|方案|建议/.test(x)?'多行文本':'单行输入')+'</td></tr>'; }).join('')
+          + '<table class="table"><thead><tr><th style="width:52px">序号</th><th style="width:140px">字段名</th><th>字段说明</th><th style="width:76px">必填</th><th style="width:88px">控件</th><th style="width:160px">下拉选项</th></tr></thead><tbody>'
+          + nf.map(function(x,i){ return '<tr><td class="mono">'+(i+1)+'</td><td>'+App.esc(x.label)+'</td><td class="dim">'+(x.hint?App.esc(x.hint):'—')+'</td><td>'+(x.required?'<span class="tag green">必填</span>':'<span class="tag">选填</span>')+'</td><td class="dim">'+typeName(x.type)+'</td><td class="tiny dim">'+(x.type==='select'?(x.options||[]).join('、'):'—')+'</td></tr>'; }).join('')
           + '</tbody></table>'
-          + '<div class="tiny dim mt3">模板供任务表单填报引用，字段校验规则在剧本编排中配置。</div>' });
+          + '<div class="tiny dim mt3">字段说明用于参演人员分步填表时的引导提示；下拉选择用于事件等级等标准化取值；日期时间控件支持选择或手动填写。可在「编辑」中逐项维护。</div>' });
       };
     });
+
+    document.querySelectorAll('#fBody [data-ed]').forEach(function(b){
+      b.onclick = function(){ openFormEdit(+b.dataset.ed); };
+    });
   }
+
+  function openFormEdit(idx){
+    var f = templates[idx];
+    var editFields = (f.fields||[]).map(fldOf);
+    App.modal({ title:'编辑表单模板 · '+f.id, wide:true, body:
+      '<div class="form-row"><label class="f-label">模板名称 <span class="req">*</span></label><input class="input" id="efName" maxlength="40" value="'+App.esc(f.name)+'"></div>'
+      + '<div class="flex gap3 mt3" style="align-items:center;justify-content:space-between"><div class="f-label" style="margin:0">字段明细 <span class="tiny dim">（字段说明将展示在参演人员填表引导中）</span></div><button class="btn sm" id="efAdd">'+App.icon('plus')+'添加字段</button></div>'
+      + '<div id="efRows" class="mt2"></div>',
+      foot:'<button class="btn" id="efNo">取消</button><button class="btn primary" id="efYes">'+App.icon('check')+'保存模板</button>',
+      onOpen:function(ov){
+        var rowsEl = ov.querySelector('#efRows');
+        function paint(){
+          rowsEl.innerHTML = '<table class="table ef-table"><thead><tr><th style="width:38px">#</th><th style="width:140px">字段名</th><th>字段说明</th><th style="width:64px">必填</th><th style="width:100px">控件</th><th style="width:180px">下拉选项</th><th style="width:90px">操作</th></tr></thead><tbody>'
+            + editFields.map(function(x,i){
+                return '<tr><td class="mono">'+(i+1)+'</td>'
+                  + '<td><input class="input sm" data-lab="'+i+'" maxlength="40" value="'+App.esc(x.label)+'" placeholder="字段名"></td>'
+                  + '<td><input class="input sm" data-hint="'+i+'" maxlength="200" value="'+App.esc(x.hint)+'" placeholder="填写说明与注意事项"></td>'
+                  + '<td><input type="checkbox" data-req="'+i+'"'+(x.required?' checked':'')+'></td>'
+                  + '<td><select class="input sm" data-type="'+i+'">'+TYPE_OPTS.map(function(o){ return '<option value="'+o[0]+'"'+(x.type===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select></td>'
+                  + '<td><input class="input sm" data-opt="'+i+'" maxlength="300" value="'+App.esc((x.options||[]).join('、'))+'" placeholder="仅下拉：选项用顿号分隔"></td>'
+                  + '<td style="white-space:nowrap"><button class="btn sm" data-up="'+i+'"'+(i===0?' disabled':'')+' title="上移">↑</button><button class="btn sm" data-dn="'+i+'"'+(i===editFields.length-1?' disabled':'')+' title="下移">↓</button><button class="btn sm danger" data-rm="'+i+'" title="删除">'+App.icon('trash')+'</button></td></tr>';
+              }).join('')
+            + '</tbody></table>';
+          rowsEl.querySelectorAll('[data-lab]').forEach(function(el){ el.oninput = function(){ editFields[+el.dataset.lab].label = el.value; }; });
+          rowsEl.querySelectorAll('[data-hint]').forEach(function(el){ el.oninput = function(){ editFields[+el.dataset.hint].hint = el.value; }; });
+          rowsEl.querySelectorAll('[data-req]').forEach(function(el){ el.onchange = function(){ editFields[+el.dataset.req].required = el.checked; }; });
+          rowsEl.querySelectorAll('[data-type]').forEach(function(el){ el.onchange = function(){ editFields[+el.dataset.type].type = el.value; }; });
+          rowsEl.querySelectorAll('[data-opt]').forEach(function(el){ el.oninput = function(){
+            editFields[+el.dataset.opt].options = el.value.split(/[、,，|｜]/).map(function(s){ return s.trim(); }).filter(Boolean);
+          }; });
+          rowsEl.querySelectorAll('[data-up]').forEach(function(el){ el.onclick = function(){ var i=+el.dataset.up; if(i<=0) return; var t=editFields[i-1]; editFields[i-1]=editFields[i]; editFields[i]=t; paint(); }; });
+          rowsEl.querySelectorAll('[data-dn]').forEach(function(el){ el.onclick = function(){ var i=+el.dataset.dn; if(i>=editFields.length-1) return; var t=editFields[i+1]; editFields[i+1]=editFields[i]; editFields[i]=t; paint(); }; });
+          rowsEl.querySelectorAll('[data-rm]').forEach(function(el){ el.onclick = function(){ var i=+el.dataset.rm; if(editFields.length<=1){ App.toast('至少保留一个字段','warn'); return; } editFields.splice(i,1); paint(); }; });
+        }
+        paint();
+        ov.querySelector('#efAdd').onclick = function(){ editFields.push({ label:'', hint:'', required:true, type:'auto', options:[] }); paint(); };
+        ov.querySelector('#efNo').onclick = ov.close;
+        ov.querySelector('#efYes').onclick = function(){
+          var nm = ov.querySelector('#efName').value.trim();
+          if(!nm){ App.toast('模板名称不能为空','err'); return; }
+          var fs = [], seen = {};
+          for(var i=0;i<editFields.length;i++){
+            var lb = String(editFields[i].label||'').trim();
+            if(!lb){ App.toast('第 '+(i+1)+' 个字段名称不能为空','err'); return; }
+            if(seen[lb]){ App.toast('字段名称重复：'+lb,'err'); return; }
+            seen[lb] = 1;
+            var tp = editFields[i].type;
+            var opts = (editFields[i].options||[]).map(function(s){ return String(s||'').trim(); }).filter(Boolean);
+            if(tp === 'select' && !opts.length){ App.toast('第 '+(i+1)+' 个字段为下拉选择，请填写选项','err'); return; }
+            fs.push({ label:lb, hint:String(editFields[i].hint||'').trim(), required:editFields[i].required !== false, type:tp, options:tp==='select'?opts:[] });
+          }
+          if(!fs.length){ App.toast('至少保留一个字段','err'); return; }
+          API.updateFormTemplate(f.id, { name:nm, fields:fs }).then(function(r){
+            templates[idx] = { id:r.template.id, name:r.template.name, fields:r.template.fields };
+            ov.close(); renderForms();
+            App.toast('模板《'+nm+'》已保存','ok');
+          }).catch(function(e){ App.toast((e&&e.message)||'保存失败','err'); });
+        };
+      } });
+  }
+
   document.getElementById('fAddBtn').onclick = function(){
-    App.modal({ title:'新建表单模板', body:
-      '<div class="form-row"><label class="f-label">模板名称 <span class="req">*</span></label><input class="input" id="ftName" placeholder="如 恢复后业务抽查记录表"></div>'
-      + '<div class="form-row"><label class="f-label">字段（每行一个） <span class="req">*</span></label><textarea class="textarea" id="ftFields" placeholder="填报单位&#10;抽查系统&#10;验证结果&#10;填报人&#10;填报时间"></textarea></div>',
+    App.modal({ title:'新建表单模板', wide:true, body:
+      '<div class="form-row"><label class="f-label">模板名称 <span class="req">*</span></label><input class="input" id="ftName" maxlength="40" placeholder="如 恢复后业务抽查记录表"></div>'
+      + '<div class="form-row"><label class="f-label">字段（每行一个，格式：字段名｜字段说明） <span class="req">*</span></label><textarea class="textarea" id="ftFields" rows="7" placeholder="填报单位｜填写本院全称&#10;抽查系统｜本次抽查覆盖的业务系统&#10;验证结果｜逐项记录验证结论&#10;填报人｜完成填报的人员姓名&#10;填报时间｜填报完成时间"></textarea></div>',
       foot:'<button class="btn" id="ftNo">取消</button><button class="btn primary" id="ftYes">创建模板</button>',
       onOpen:function(ov){
         ov.querySelector('#ftNo').onclick = ov.close;
         ov.querySelector('#ftYes').onclick = function(){
           var nm = ov.querySelector('#ftName').value.trim();
-          var fs = ov.querySelector('#ftFields').value.split('\n').map(function(x){ return x.trim(); }).filter(Boolean);
+          var fs = ov.querySelector('#ftFields').value.split('\n').map(function(line){
+            var parts = line.split(/[|｜]/);
+            var label = (parts[0]||'').trim();
+            var hint = (parts.slice(1).join('｜')||'').trim();
+            return label ? { label:label, hint:hint, required:true, type:'auto' } : null;
+          }).filter(Boolean);
           if(!nm || !fs.length){ App.toast('名称与字段必填','err'); return; }
           API.addFormTemplate({ name:nm, fields:fs }).then(function(r){
             templates.push({ id:r.id, name:r.name, fields:r.fields });
             ov.close(); renderForms();
             App.toast('模板「'+nm+'」已创建','ok');
-          });
+          }).catch(function(e){ App.toast((e&&e.message)||'创建失败','err'); });
         };
       } });
   };
@@ -247,7 +561,72 @@ document.addEventListener('app:ready', function(e){
     }).catch(function(){ var el=document.getElementById('bkLast'); if(el) el.textContent='暂无备份'; });
   }
 
+  /* ---------- f) 系统设置（仅平台管理员） ---------- */
+  var BRAND_DEFAULTS = {
+    systemName:'网络安全应急演练系统', unitName:'盘州市人民医院', logo:'img/logo.png',
+    version:'v0.1.6', github:'https://github.com/chenjinxiang1980/cyber-drill', gitee:'https://gitee.com/habeas/cyber-drill'
+  };
+  var brandLogoUrl = 'img/logo.png';
+
+  function fillBrandForm(b){
+    b = b || {};
+    document.getElementById('bsName').value = b.systemName || '';
+    document.getElementById('bsUnit').value = b.unitName || '';
+    document.getElementById('bsVer').value = b.version || '';
+    document.getElementById('bsGh').value = b.github || '';
+    document.getElementById('bsGe').value = b.gitee || '';
+    brandLogoUrl = b.logo || 'img/logo.png';
+    document.getElementById('bsLogo').src = brandLogoUrl;
+  }
+
+  function initBrand(){
+    var cached = DRILL.brand();
+    if(cached) fillBrandForm(cached);
+    DRILL.loadBrand().then(function(b){ if(b) fillBrandForm(b); });
+
+    document.getElementById('bsUploadBtn').onclick = function(){
+      var input = document.getElementById('bsLogoFile');
+      var f = input.files && input.files[0];
+      if(!f){ App.toast('请先选择 Logo 图片','warn'); return; }
+      if(f.size > 2*1024*1024){ App.toast('Logo 文件不能超过 2MB','err'); return; }
+      var fd = new FormData(); fd.append('file', f);
+      API.uploadBrandLogo(fd).then(function(r){
+        brandLogoUrl = r.url;
+        document.getElementById('bsLogo').src = r.url;
+        App.toast('Logo 已上传，点击「保存设置」后同步到全站','ok');
+      }).catch(function(e){ App.toast((e&&e.message)||'Logo 上传失败','err'); });
+    };
+
+    document.getElementById('bsSaveBtn').onclick = function(){
+      var payload = {
+        systemName: document.getElementById('bsName').value.trim(),
+        unitName: document.getElementById('bsUnit').value.trim(),
+        version: document.getElementById('bsVer').value.trim(),
+        logo: brandLogoUrl,
+        github: document.getElementById('bsGh').value.trim(),
+        gitee: document.getElementById('bsGe').value.trim()
+      };
+      if(!payload.systemName || !payload.unitName){ App.toast('系统名称与单位名称必填','err'); return; }
+      if(payload.github && !/^https?:\/\//i.test(payload.github)){ App.toast('GitHub 地址必须以 http(s):// 开头','err'); return; }
+      if(payload.gitee && !/^https?:\/\//i.test(payload.gitee)){ App.toast('Gitee 地址必须以 http(s):// 开头','err'); return; }
+      API.saveBrand(payload).then(function(r){
+        var b = r.brand || payload;
+        fillBrandForm(b);
+        DRILL.applyBrand(b);
+        DRILL.loadBrand().then(function(nb){ if(nb) DRILL.applyBrand(nb); });
+        App.refreshShell();
+        App.toast('系统设置已保存，并同步到全站页面','ok');
+      }).catch(function(e){ App.toast((e&&e.message)||'保存失败','err'); });
+    };
+
+    document.getElementById('bsResetBtn').onclick = function(){
+      fillBrandForm(BRAND_DEFAULTS);
+      App.toast('已恢复默认值（点击「保存设置」后生效）','warn');
+    };
+  }
+
   renderUsers(); renderForms(); renderAudit(); renderChannels(); loadLastBackup();
+  if(BRAND_ADMIN) initBrand();
 });
 App.boot('admin');
 </script>

@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS roles (
   descr TEXT,
   nav   TEXT,
   external INTEGER DEFAULT 0,
+  status TEXT DEFAULT '启用',
   seq   INTEGER DEFAULT 0
 );
 
@@ -33,8 +34,16 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
   token      TEXT PRIMARY KEY,
   user_id    INTEGER NOT NULL,
+  role_id    TEXT,
   created_at TEXT,
   expires_at TEXT
+);
+
+-- 用户角色（一个账号可绑定多个角色，登录时选择其一）
+CREATE TABLE IF NOT EXISTS user_roles (
+  user_id INTEGER NOT NULL,
+  role_id TEXT NOT NULL,
+  PRIMARY KEY (user_id, role_id)
 );
 
 -- 演练项目

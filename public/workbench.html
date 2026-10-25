@@ -88,65 +88,193 @@ document.addEventListener('app:ready', function(e){
     return n || null;
   }
 
-  /* ---------- 表单字段模拟值自动填充 ---------- */
+  /* ---------- 表单字段解析与分步填写向导 ---------- */
+  function fieldOf(fl){
+    if(typeof fl === 'string') return { label:String(fl||'').trim(), hint:'', required:true, type:'auto', options:[] };
+    return {
+      label:String((fl&&(fl.label||fl.name))||'').trim(),
+      hint:String((fl&&fl.hint)||''),
+      required:!(fl&&fl.required===false),
+      type:(fl&&fl.type)||'auto',
+      options:Array.isArray(fl&&fl.options)?fl.options.slice():(typeof (fl&&fl.options)==='string'?fl.options.split(/[、,，|｜]/).map(function(s){return String(s).trim();}).filter(Boolean):[])
+    };
+  }
+  function wizFields(raw){
+    return (raw||[]).map(fieldOf).filter(function(x){ return !!x.label; });
+  }
+  /* 控件类型：模板显式指定优先，否则按字段名识别 */
+  function wizType(f){
+    if(f.type==='select' && f.options && f.options.length) return 'select';
+    if(f.type==='textarea' || f.type==='text' || f.type==='datetime') return f.type;
+    if(/时间$|日期$/.test(f.label)) return 'datetime';
+    if(/说明|描述|意见|摘要|进展|清单|方案|依据|经过|情况|范围|措施|过程|计划|整改|现象|判断|趋势|建议|次数/.test(f.label)) return 'textarea';
+    return 'text';
+  }
+  /* 下拉值归一：模拟/预填数据必须落在选项范围内（忽略空格差异，允许包含匹配） */
+  function fitOption(opts, v){
+    v = String(v||'').trim();
+    var norm = function(x){ return String(x||'').replace(/\s+/g,''); };
+    if(!v || !opts || !opts.length) return '';
+    if(opts.indexOf(v) >= 0) return v;
+    for(var i=0;i<opts.length;i++){ if(norm(opts[i]) === norm(v)) return opts[i]; }
+    for(var j=0;j<opts.length;j++){
+      var o = norm(opts[j]);
+      if(o && (o.indexOf(norm(v)) >= 0 || norm(v).indexOf(o) >= 0)) return opts[j];
+    }
+    return '';
+  }
+
+  /* ---------- 表单字段模拟值（按剧本与场景生成，全部为虚拟数据） ---------- */
   function simValue(fd, t, node){
     var d = new Date();
     var tm = (node && node.time) || t.deadline || '09:00';
-    if(/时间/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+'T'+tm;
+    if(/起止/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+tm+' 至 '+(parseInt(tm,10)+1)+':30（模拟）';
+    if(/时间|日期/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+'T'+tm;
     if(/发现方式/.test(fd)) return String(FACTS.alert||'').split('：')[0] || '安全告警系统';
-    if(/涉及系统|IP/i.test(fd)) return FACTS.sys;
-    if(/描述|现象/.test(fd)) return FACTS.fault;
+    if(/受攻击系统|受影响系统|涉及系统/.test(fd)) return FACTS.sys;
+    if(/IP|域名/i.test(fd)) return FACTS.ip;
+    if(/基本情况|事件经过/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'；发现方式：'+FACTS.alert+'（模拟数据，请核对修改）';
+    if(/现场处置过程|处置过程/.test(fd)) return '1. 接报后初步核实并留存告警截图；2. 隔离受影响主机（'+FACTS.ip+'）；3. 封堵攻击源并保留取证记录（模拟处置）';
+    if(/事件处置结果|处置结果/.test(fd)) return '受影响业务已恢复，故障现象消除，未发现数据外泄（模拟结果，请核对）';
+    if(/整改|工作计划/.test(fd)) return '1. 修补漏洞并更新防护策略；2. 完善备份与恢复演练；3. 责任部门：信息科，7 个工作日内完成复查（模拟计划）';
+    if(/异常现象|描述|现象/.test(fd)) return FACTS.fault;
     if(/判断/.test(fd)) return '结合告警与样本特征（'+FACTS.sample+'），初步判定为'+(SCEN?SCEN.type:'模拟')+'类事件（模拟判定）';
-    if(/核实人|确认人|审批人|联系人|报送人|填报人|研判人|报案人/.test(fd)) return App.curUser()||role.short;
-    if(/范围/.test(fd)) return FACTS.scope;
+    if(/核实人|确认人|审批人|联系人|报送人|填报人|研判人|报案人|评估人/.test(fd)) return App.curUser()||role.short;
+    if(/影响范围|范围/.test(fd)) return FACTS.scope;
     if(/进展/.test(fd)) return FACTS.progress;
+    if(/建议响应等级/.test(fd)){
+      var lv = (SCEN&&SCEN.level)||t.level||'较大';
+      return lv==='特别重大'?'Ⅰ级':(lv==='重大'?'Ⅱ级':(lv==='较大'?'Ⅲ级':'Ⅳ级'));
+    }
+    if(/风险等级/.test(fd)) return '低';
     if(/等级/.test(fd)) return (SCEN&&SCEN.level)||t.level||'较大';
     if(/类型/.test(fd)) return SCEN?SCEN.type:'模拟事件';
     if(/单位/.test(fd)) return (proj.units&&proj.units[0])||'盘州市人民医院';
-    if(/摘要|经过|依据/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'（系统自动填充，请核对修改）';
+    if(/摘要|依据/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'（系统自动填充，请核对修改）';
     if(/患者数/.test(fd)) return '0（虚拟数据，无真实患者）';
     if(/损失/.test(fd)) return FACTS.impact;
     if(/证据清单/.test(fd)) return FACTS.sample+'、告警与故障截图（自动取证）';
-    if(/清单/.test(fd)) return FACTS.sys;
     if(/校验|备份/.test(fd)) return FACTS.backup;
-    if(/结果|验证/.test(fd)) return '业务验证通过（模拟，无真实影响）';
+    if(/验证结果|结果/.test(fd)) return '业务功能验证通过（模拟，无真实影响）';
     if(/兜底|方案/.test(fd)) return FACTS.measure;
     if(/措施/.test(fd)) return FACTS.action;
     if(/意见/.test(fd)) return '同意，按预案执行（模拟审批）';
+    if(/监测渠道/.test(fd)) return '网信办舆情监测、院内值班巡查（模拟）';
+    if(/传播趋势/.test(fd)) return '传播缓慢，未发现大范围扩散（模拟）';
+    if(/口径建议/.test(fd)) return '统一由院宣传部门答复，不透露患者信息（模拟口径）';
+    if(/恢复系统/.test(fd)) return FACTS.sys;
+    if(/清单/.test(fd)) return FACTS.sys;
     return '模拟数据·自动填充';
   }
 
+  /* 向导状态：key → { fields, values, step, done } */
+  var WIZ = {};
+  function wizState(key, fields, t, node, prefill){
+    if(!WIZ[key]) WIZ[key] = { fields: fields, values: {}, step: 0, done: false, inited: false, t: t, node: node };
+    var s = WIZ[key];
+    s.fields = fields; s.t = t; s.node = node;
+    if(!s.inited){
+      fields.forEach(function(f){
+        var v = prefill ? String(simValue(f.label, t, node)||'') : '';
+        if(prefill && wizType(f) === 'select' && f.options.length){
+          v = fitOption(f.options, v) || f.options[0];
+        }
+        s.values[f.label] = v;
+      });
+      s.inited = true;
+    }
+    return s;
+  }
+
+  /* 在容器内渲染分步填写向导：逐字段展示说明，支持一键模拟数据与上一步/下一步 */
+  function mountWizard(host, key, opts){
+    var fields = wizFields(opts.fields);
+    if(!fields.length){ host.innerHTML = ''; return null; }
+    var s = wizState(key, fields, opts.t, opts.node, !!opts.prefill);
+    var name = opts.name || '表单';
+
+    function paint(){
+      if(s.done){
+        host.innerHTML = '<div class="wz-head"><span class="bold">'+App.esc(name)+'</span><span class="tag green">已完成 '+fields.length+' / '+fields.length+'</span></div>'
+          + '<div class="wz-sum">' + fields.map(function(f){
+              var dv = String(s.values[f.label]||'—');
+              if(wizType(f) === 'datetime') dv = dv.replace('T',' ');
+              return '<div class="wz-item"><span class="k">'+App.esc(f.label)+'</span><span class="v">'+App.esc(dv)+'</span></div>';
+            }).join('') + '</div>'
+          + '<div class="wz-acts"><button class="btn sm" data-edit>'+App.icon('edit')+'返回修改</button><span class="grow"></span><span class="tiny dim">已逐字段完成填写，可提交</span></div>';
+        host.querySelector('[data-edit]').onclick = function(){ s.done = false; s.step = 0; paint(); };
+        return;
+      }
+      var f = fields[s.step];
+      var type = wizType(f);
+      var val = String(s.values[f.label]||'');
+      var ctl;
+      if(type === 'select'){
+        ctl = '<select class="input" id="wzInp"><option value="">请选择</option>'
+          + f.options.map(function(o){ return '<option value="'+App.esc(o)+'"'+(val===o?' selected':'')+'>'+App.esc(o)+'</option>'; }).join('')
+          + '</select>';
+      } else if(type === 'datetime'){
+        ctl = '<input class="input" id="wzInp" type="datetime-local" step="60" value="'+App.esc(val)+'">'
+          + '<div class="tiny dim mt2">'+App.icon('clock')+' 使用日期时间选择器填写，统一为 YYYY-MM-DD HH:mm 格式</div>';
+      } else {
+        ctl = type === 'textarea'
+          ? '<textarea class="textarea" id="wzInp" rows="3" placeholder="请按字段说明填写">'+App.esc(val)+'</textarea>'
+          : '<input class="input" id="wzInp" value="'+App.esc(val)+'" placeholder="请按字段说明填写">';
+      }
+      host.innerHTML = '<div class="wz-head"><span class="bold">'+App.esc(name)+'</span><span class="tiny dim">字段 '+(s.step+1)+' / '+fields.length+'</span></div>'
+        + '<div class="wz-bar"><i style="width:'+Math.round((s.step+1)/fields.length*100)+'%"></i></div>'
+        + '<div class="wz-hint"><b>字段说明</b><span>'+(f.hint?App.esc(f.hint):'请按实际情况填写')+'</span></div>'
+        + '<label class="f-label" style="display:block;margin:8px 0 4px">'+App.esc(f.label)+(f.required?'<span class="req"> *</span>':'<span class="tiny dim">（选填）</span>')+'</label>'
+        + ctl
+        + '<div class="wz-acts"><button class="btn sm" data-sim>'+App.icon('refresh')+'一键模拟数据</button><span class="grow"></span>'
+        + '<button class="btn sm" data-prev'+(s.step===0?' disabled':'')+'>上一步</button>'
+        + '<button class="btn primary sm" data-next>'+(s.step===fields.length-1?'完成填写':'下一步')+'</button></div>'
+        + '<div class="tiny dim mt2">一键模拟数据按当前演练剧本与场景生成（虚拟数据），请核对修改后提交。</div>';
+
+      var inp = host.querySelector('#wzInp');
+      if(inp){
+        inp.oninput = function(){ s.values[f.label] = inp.value; };
+        if(type === 'select' || type === 'datetime') inp.onchange = function(){ s.values[f.label] = inp.value; };
+      }
+
+      host.querySelector('[data-sim]').onclick = function(){
+        fields.forEach(function(x){
+          var v = String(simValue(x.label, opts.t, opts.node)||'');
+          /* 下拉控件必须落在选项范围内，避免生成非法值 */
+          if(wizType(x) === 'select' && x.options.length && x.options.indexOf(v) < 0){
+            v = fitOption(x.options, v) || x.options[0];
+          }
+          s.values[x.label] = v;
+        });
+        paint();
+        App.toast('已按剧本生成模拟数据，请逐字段核对修改','ok');
+      };
+      var prev = host.querySelector('[data-prev]');
+      if(prev) prev.onclick = function(){ if(s.step>0){ s.step--; paint(); } };
+      host.querySelector('[data-next]').onclick = function(){
+        var v = String(s.values[f.label]||'').trim();
+        if(f.required && !v){ App.toast('请填写「'+f.label+'」后再继续','err'); return; }
+        if(s.step < fields.length-1){ s.step++; paint(); }
+        else { s.done = true; paint(); }
+      };
+    }
+    paint();
+    return s;
+  }
+
+  /* 基础版表单：逐字段引导填写（初始按剧本自动填充模拟数据） */
   function formsHtml(t, node){
     var forms = (t.forms||[]).map(function(fid){
       return (MOCK.FORM_TEMPLATES||[]).filter(function(f){ return f.id===fid; })[0];
     }).filter(Boolean);
     if(!forms.length) return '';
-    return '<div class="section-title mt3">'+App.icon('edit')+'需提交表单 <span class="tiny dim" style="font-weight:400">已按场景【'+App.esc(SCEN?SCEN.type:'通用')+'】自动填充，请核对修改后提交</span></div>'
+    return '<div class="section-title mt3">'+App.icon('edit')+'需提交表单 <span class="tiny dim" style="font-weight:400">已按场景【'+App.esc(SCEN?SCEN.type:'通用')+'】生成模拟数据，请按字段说明逐项核对</span></div>'
       + forms.map(function(f, fi){
+          var key = 'b-'+t.id+'-'+f.id;
           return '<div class="card mb3" style="padding:12px 14px"><div class="small bold mb2">'+App.esc(f.name)+' <span class="tag gray">'+f.id+'</span></div>'
-            + '<div class="form-grid">'
-            + f.fields.map(function(fd, di){
-                var long = /描述|意见|摘要|进展|清单|方案|依据|经过|情况|范围|措施/.test(fd);
-                var isTime = /时间$/.test(fd);
-                var isWay = fd==='发现方式';
-                var idc = 'wf-'+t.id+'-'+fi+'-'+di;
-                var sv = simValue(fd, t, node);
-                var ctl;
-                if(isTime){
-                  ctl = '<input class="input" type="datetime-local" id="'+idc+'" value="'+App.esc(sv)+'">';
-                } else if(isWay){
-                  var did = 'wfdl-'+t.id+'-'+fi;
-                  ctl = '<input class="input" id="'+idc+'" list="'+did+'" value="'+App.esc(sv)+'" placeholder="下拉选择，也可自由填写">'
-                    + '<datalist id="'+did+'">'+['安全告警系统','值班巡检','医护人员报障','外部单位通报','第三方监测','供应商反馈'].map(function(o){ return '<option value="'+o+'"></option>'; }).join('')+'</datalist>';
-                } else {
-                  ctl = long ? '<textarea class="textarea" id="'+idc+'" rows="2">'+App.esc(sv)+'</textarea>'
-                             : '<input class="input" id="'+idc+'" value="'+App.esc(sv)+'">';
-                }
-                return '<div class="form-row'+(long?' span2':'')+'" style="margin-bottom:10px">'
-                  + '<label class="f-label" for="'+idc+'">'+App.esc(fd)+'<span class="tiny dim">已自动填充</span><span class="req"> *</span></label>'
-                  + ctl + '</div>';
-              }).join('')
-            + '</div><button class="btn primary sm" data-form="'+t.id+'|'+fi+'">'+App.icon('upload')+'提交表单（模拟）</button></div>';
+            + '<div class="wz-host" data-wz="'+App.esc(key)+'" data-wzfid="'+App.esc(f.id)+'"></div>'
+            + '<div class="flex gap3 mt3" style="align-items:center;flex-wrap:wrap"><button class="btn primary sm" data-form="'+t.id+'|'+fi+'">'+App.icon('upload')+'提交表单（模拟）</button>'
+            + '<span class="tiny dim">点击「下一步」逐字段填写并核对，完成全部字段后可提交</span></div></div>';
         }).join('');
   }
 
@@ -280,17 +408,31 @@ document.addEventListener('app:ready', function(e){
       return (MOCK.FORM_TEMPLATES||[]).filter(function(f){ return f.id===fid; })[0];
     }).filter(Boolean);
 
+    /* 表单改为分步向导：初始按剧本预填模拟数据 */
+    var node = nodeForTask(t);
+    host.querySelectorAll('[data-wz]').forEach(function(h){
+      var fid = h.dataset.wzfid;
+      var f = forms.filter(function(x){ return x.id===fid; })[0];
+      if(!f) return;
+      mountWizard(h, h.dataset.wz, { name:f.name, fields:f.fields, t:t, node:node, prefill:true });
+    });
+
     host.querySelectorAll('[data-form]').forEach(function(b){
       b.onclick = function(){
         var parts = b.dataset.form.split('|');
         var fi = +parts[1];
         var f = forms[fi];
         if(!f) return;
+        var key = 'b-'+t.id+'-'+f.id;
+        var st = WIZ[key];
+        if(!st){ App.toast('表单尚未加载完成，请关闭后重新打开','err'); return; }
+        if(!st.done){ App.toast('请先按「下一步」逐字段完成《'+f.name+'》填写','err'); return; }
         var data = {}, missing = [];
-        f.fields.forEach(function(fd, di){
-          var el = host.querySelector('#wf-'+t.id+'-'+fi+'-'+di);
-          var v = el ? String(el.value||'').trim() : '';
-          if(!v) missing.push(fd); else data[fd] = v;
+        st.fields.forEach(function(fd){
+          var v = String(st.values[fd.label]||'').trim();
+          if(wizType(fd) === 'datetime') v = v.replace('T',' ');
+          if(fd.required && !v) missing.push(fd.label);
+          else if(v) data[fd.label] = v;
         });
         if(missing.length){ App.toast('《'+f.name+'》仍有必填项：'+missing.slice(0,3).join('、'),'err'); return; }
         b.disabled = true; b.textContent = '提交中…';
@@ -625,14 +767,9 @@ document.addEventListener('app:ready', function(e){
       + '<span class="tn-go">'+(skipped?'查看跳过记录 ›':(sub?'查看处置记录 ›':'填写处置表单 ›'))+'</span></div>';
   }
 
-  function fieldOf(fl){
-    return typeof fl==='string'
-      ? { label:String(fl||'').trim(), required:true }
-      : { label:String((fl&&(fl.label||fl.name))||'').trim(), required:!(fl&&fl.required===false) };
-  }
-
   function flowForm(d){
-    var fields = (d.fields||[]).map(fieldOf).filter(function(x){ return !!x.label; });
+    var fields = wizFields(d.fields);
+    var wkey = 'p-'+proj.id+'-'+d.nodeId;
     var recv = '<div class="form-row span2" style="margin-bottom:10px"><label class="f-label">下一节点接收人 <span class="req">*</span> <span class="tiny dim">（可多选）</span></label>'
       + '<div class="flex gap3 wrap" id="flReceiverBox">'
       + RECEIVERS.map(function(x, i){ return '<label class="check"><input type="checkbox" value="'+App.esc(x)+'" data-recv="'+i+'">'+App.esc(x)+'</label>'; }).join('')
@@ -642,22 +779,9 @@ document.addEventListener('app:ready', function(e){
         + '<div class="form-grid">'+recv+'</div>'
         + '<div class="tiny dim mb3">该流程未关联表单模板，请直接填写下方实际处置信息。</div>';
     }
-    return '<div class="section-title">'+App.icon('edit')+'处置表单 · '+App.esc(d.formName||'实战处置表单')+' <span class="tiny dim" style="font-weight:400">空表手填，无系统预填数据</span></div>'
-      + '<div class="form-grid">'
-      + recv
-      + fields.map(function(f, i){
-          var idc = 'pf-'+d.nodeId+'-'+i;
-          var long = /描述|意见|摘要|进展|清单|方案|依据|经过|情况|范围|措施|结果|备注/.test(f.label);
-          var isTime = /时间$/.test(f.label);
-          var ctl = isTime
-            ? '<input class="input" type="datetime-local" id="'+App.esc(idc)+'" data-pf="'+i+'" value="">'
-            : (long ? '<textarea class="textarea" id="'+App.esc(idc)+'" data-pf="'+i+'" rows="2" placeholder="请如实填写"></textarea>'
-                    : '<input class="input" id="'+App.esc(idc)+'" data-pf="'+i+'" placeholder="请如实填写">');
-          return '<div class="form-row'+(long?' span2':'')+'" style="margin-bottom:10px">'
-            + '<label class="f-label">'+App.esc(f.label)+(f.required?'<span class="req"> *</span>':'<span class="tiny dim">（选填）</span>')+'</label>'
-            + ctl + '</div>';
-        }).join('')
-      + '</div>';
+    return '<div class="section-title">'+App.icon('edit')+'处置表单 · '+App.esc(d.formName||'实战处置表单')+' <span class="tiny dim" style="font-weight:400">空表手填，逐字段提示说明</span></div>'
+      + '<div class="form-grid">'+recv+'</div>'
+      + '<div class="wz-host" id="pfWiz" data-wzkey="'+App.esc(wkey)+'"></div>';
   }
 
   function flowDoneBody(d){
@@ -707,6 +831,13 @@ document.addEventListener('app:ready', function(e){
         /* 打开处置表单即标记为处置中（导调中心同步展示） */
         if(d.nodeId) API.startNode(d.nodeId).catch(function(){});
         var box = ov.querySelector('#wbFlowBody');
+        /* 模板字段改为分步向导：实战版初始为空表，字段说明引导填写，可一键生成模拟数据 */
+        var wizHost = box.querySelector('#pfWiz');
+        var wkey = 'p-'+proj.id+'-'+d.nodeId;
+        if(wizHost) mountWizard(wizHost, wkey, {
+          name: d.formName || '实战处置表单', fields: d.fields,
+          t: { id: d.nodeId, deadline: d.time, level: '' }, node: { time: d.time }, prefill: false
+        });
         box.insertAdjacentHTML('beforeend','<div class="divider"></div>'
           + '<div class="form-grid">'
           + '<div class="form-row span2"><label class="f-label">发现情况 <span class="tiny dim">（可选）</span></label><textarea class="textarea" id="flFound" rows="2" placeholder="记录观察到的异常现象、涉及主机/IP、影响范围等"></textarea></div>'
@@ -714,17 +845,20 @@ document.addEventListener('app:ready', function(e){
           + '<div class="form-row span2"><label class="f-label">处置结果 <span class="req">*</span></label><input class="input" id="flResult" placeholder="如：已隔离2台主机，业务验证恢复正常"></div>'
           + '<div class="form-row span2"><label class="f-label">证据材料说明 <span class="tiny dim">（可选）</span></label><input class="input" id="flEvidence" placeholder="如：已截图并归档至取证模块"></div>'
           + '</div>'
-          + '<div class="tiny dim mt2">实战版不提供引导提示与预填数据：请自行研判该流程是否属于本岗正确处置动作。误选混淆流程按该流程分值直接扣分；正确流程超时完成按分值的 90% 计分。</div>');
+          + '<div class="tiny dim mt2">实战版不提供预填数据与正确流程提示：请自行研判该流程是否属于本岗正确处置动作。误选混淆流程按该流程分值直接扣分；正确流程超时完成按分值的 90% 计分。表单可按字段说明逐项填写，也可一键生成模拟数据后核对修改。</div>');
         var btn = ov.querySelector('#wbFlowSubmit');
         btn.onclick = function(){
           var forms = {}, missing = [];
-          (d.fields||[]).map(fieldOf).forEach(function(f, i){
-            if(!f.label) return;
-            var el = box.querySelector('[data-pf="'+i+'"]');
-            var v = el ? String(el.value||'').trim() : '';
-            if(f.required && !v) missing.push(f.label);
-            if(v) forms[f.label] = v;
-          });
+          var wst = wizFields(d.fields).length ? WIZ[wkey] : null;
+          if(wst){
+            if(!wst.done){ App.toast('请先按「下一步」逐字段完成表单填写','err'); return; }
+            wst.fields.forEach(function(f){
+              var v = String(wst.values[f.label]||'').trim();
+              if(wizType(f) === 'datetime') v = v.replace('T',' ');
+              if(f.required && !v) missing.push(f.label);
+              else if(v) forms[f.label] = v;
+            });
+          }
           var measure = box.querySelector('#flMeasure').value.trim();
           var result = box.querySelector('#flResult').value.trim();
           var evidence = box.querySelector('#flEvidence').value.trim();

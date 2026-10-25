@@ -682,11 +682,21 @@ router.patch('/impact/:sys', auth.requireAuth, function (req, res) {
 
 /* ---------- 用户 / 角色（只读列表，供页面展示接收人、审批人） ---------- */
 router.get('/users', auth.requireAuth, function (req, res) {
+  const roleMap = {};
+  db.prepare('SELECT ur.user_id, r.id, r.name FROM user_roles ur JOIN roles r ON r.id=ur.role_id ORDER BY r.seq')
+    .all().forEach(function (x) {
+      (roleMap[x.user_id] = roleMap[x.user_id] || []).push({ id: x.id, name: x.name });
+    });
   res.json(db.prepare(
     'SELECT u.id,u.username,u.name,u.role_id,u.org,u.status,r.name AS role_name ' +
     'FROM users u JOIN roles r ON r.id=u.role_id ORDER BY u.id'
   ).all().map(function (u) {
-    return { id: u.id, username: u.username, name: u.name, role: u.role_id, roleName: u.role_name, org: u.org, status: u.status };
+    const roleList = roleMap[u.id] || [{ id: u.role_id, name: u.role_name }];
+    return {
+      id: u.id, username: u.username, name: u.name, role: u.role_id, roleName: u.role_name,
+      roles: roleList.map(function (x) { return x.id; }), roleList: roleList,
+      org: u.org, status: u.status
+    };
   }));
 });
 

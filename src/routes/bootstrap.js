@@ -94,15 +94,25 @@ router.get('/bootstrap', auth.requireAuth, function (req, res) {
   const roles = db.prepare('SELECT * FROM roles ORDER BY seq').all().map(function (r) {
     return {
       id: r.id, name: r.name, short: r.short, icon: r.icon, color: r.color,
-      desc: r.descr, nav: parseJson(r.nav, []), external: !!r.external
+      desc: r.descr, nav: parseJson(r.nav, []), external: !!r.external, status: r.status || '启用'
     };
   });
 
+  const roleMap = {};
+  db.prepare('SELECT ur.user_id, r.id, r.name FROM user_roles ur JOIN roles r ON r.id=ur.role_id ORDER BY r.seq')
+    .all().forEach(function (x) {
+      (roleMap[x.user_id] = roleMap[x.user_id] || []).push({ id: x.id, name: x.name });
+    });
   const users = db.prepare(
     'SELECT u.id,u.username,u.name,u.role_id,u.org,u.status,r.name AS role_name ' +
     'FROM users u JOIN roles r ON r.id=u.role_id ORDER BY u.id'
   ).all().map(function (r) {
-    return { id: r.id, username: r.username, name: r.name, role: r.role_id, roleName: r.role_name, org: r.org, status: r.status };
+    const roleList = roleMap[r.id] || [{ id: r.role_id, name: r.role_name }];
+    return {
+      id: r.id, username: r.username, name: r.name, role: r.role_id, roleName: r.role_name,
+      roles: roleList.map(function (x) { return x.id; }), roleList: roleList,
+      org: r.org, status: r.status
+    };
   });
 
   const projects = db.prepare('SELECT * FROM projects').all().map(mapProject);
@@ -188,9 +198,8 @@ router.get('/bootstrap', auth.requireAuth, function (req, res) {
     scenarios: scenarios,
     scriptNodes: nodes,
     tasks: allTasks,
-    formTemplates: db.prepare('SELECT * FROM form_templates').all().map(function (f) {
-      return { id: f.id, name: f.name, fields: parseJson(f.fields, []) };
-    }),
+    formTemplates: db.prepare('SELECT * FROM form_templates ORDER BY id').all()
+      .map(function (f) { return require('../forms').normalizeTemplate(f); }),
     messages: db.prepare('SELECT * FROM messages ORDER BY seq').all().map(function (m) {
       return { id: m.id, time: m.time, level: m.level, source: m.source, text: m.text, targets: parseJson(m.targets, []) };
     }),

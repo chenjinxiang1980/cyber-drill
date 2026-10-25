@@ -208,6 +208,14 @@ router.post('/:id/forms', auth.requireAuth, loadTask, function (req, res) {
   const tpl = db.prepare('SELECT * FROM form_templates WHERE id=?').get(formId);
   if (!tpl) return res.status(400).json({ error: '表单模板不存在：' + formId });
   if (!data || !Object.keys(data).length) return res.status(400).json({ error: '表单内容为空' });
+  const need = require('../forms').normalizeFields(parseJson(tpl.fields, []));
+  for (let i = 0; i < need.length; i++) {
+    if (need[i].required === false) continue;
+    const v = data[need[i].label];
+    if (v === undefined || v === null || String(v).trim() === '') {
+      return res.status(400).json({ error: '请填写「' + need[i].label + '」' });
+    }
+  }
 
   const r = db.prepare('INSERT INTO form_submissions (task_id,form_id,form_name,data,submitter,user_id,role_id,time) VALUES (?,?,?,?,?,?,?,?)')
     .run(t.id, formId, tpl.name, JSON.stringify(data), req.user.name, req.user.id, req.user.role.id, now());

@@ -173,11 +173,15 @@ window.ReportPage = (function () {
       + '@page{size:A4;margin:2cm}'
       + '@media print{.page{padding:0;max-width:none}}';
 
+    var B = (window.DRILL && DRILL.brand()) || {};
+    var brandUnit = B.unitName || '盘州市人民医院';
+    var brandSystem = B.systemName || '网络安全应急演练系统';
+
     var cover = '<div class="cover"><div class="cls">密级：内部（演练专用）<br>编号：'+App.esc(no)+'</div>'
       + '<h1>网络安全应急演练报告</h1><div class="line"></div><div class="sub">'+App.esc(p.name)+'</div>'
       + '<div class="meta">演练类型：'+App.esc(p.type)+'<br>事件等级：'+App.esc(p.level)+'<br>演练日期：'+App.esc(p.date)+'<br>项目编号：'+App.esc(p.id)+'</div>'
-      + '<div class="meta" style="margin-top:2.6cm">编制单位：盘州市人民医院信息科<br>编制日期：'+dateStr+'<br>编制人：'+App.esc(d.generatedBy||'平台管理员')+'</div>'
-      + '<div class="no">盘州市人民医院　网络安全应急演练平台</div></div>';
+      + '<div class="meta" style="margin-top:2.6cm">编制单位：'+App.esc(brandUnit)+'信息科<br>编制日期：'+dateStr+'<br>编制人：'+App.esc(d.generatedBy||'平台管理员')+'</div>'
+      + '<div class="no">'+App.esc(brandUnit)+'　'+App.esc(brandSystem)+'</div></div>';
 
     var s1 = '<h2>一、演练概况</h2><table>'
       + '<tr><td class="k">项目名称</td><td colspan="3">'+App.esc(p.name)+'</td></tr>'
@@ -266,8 +270,8 @@ window.ReportPage = (function () {
       + (o.ev ? '<li>附件3　取证材料清单（见第九章 9.1）</li>' : '')
       + '<li>附件4　平台审计日志（可在「系统基础管理 → 审计日志」导出 CSV）</li>'
       + '</ol>'
-      + '<div class="sign">编制单位（盖章）：盘州市人民医院信息科<br>编制人：'+App.esc(d.generatedBy||'—')+'　　编制日期：'+dateStr+'<br>审核：____________________　　批准：____________________<br>日期：______年____月____日</div>'
-      + '<div class="foot">本报告由盘州市人民医院网络安全应急演练系统依据演练数据库自动汇总生成，共 '+d.tasks.length+' 项任务、'+d.timeline.length+' 条操作记录、'+d.evidenceStats.total+' 件取证材料。报告内容为演练模拟数据，不含真实患者隐私信息，不作为真实网络安全事件的法定证据材料。</div>';
+      + '<div class="sign">编制单位（盖章）：'+App.esc(brandUnit)+'信息科<br>编制人：'+App.esc(d.generatedBy||'—')+'　　编制日期：'+dateStr+'<br>审核：____________________　　批准：____________________<br>日期：______年____月____日</div>'
+      + '<div class="foot">本报告由'+App.esc(brandUnit)+App.esc(brandSystem)+'依据演练数据库自动汇总生成，共 '+d.tasks.length+' 项任务、'+d.timeline.length+' 条操作记录、'+d.evidenceStats.total+' 件取证材料。报告内容为演练模拟数据，不含真实患者隐私信息，不作为真实网络安全事件的法定证据材料。</div>';
 
     var body = '<div class="page">'+s1+s2+s3+s4+s5+s6+s7+s8+s9+s10+s11+'</div>';
     return '<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="UTF-8">'

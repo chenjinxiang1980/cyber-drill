@@ -53,6 +53,7 @@ app.use('/api/evidence', require('./src/routes/evidence'));
 app.use('/api/content', require('./src/routes/content'));
 app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/drill', require('./src/routes/drill'));
+app.use('/api/system', require('./src/routes/system'));
 
 /* 健康检查 */
 app.get('/api/health', function (req, res) {

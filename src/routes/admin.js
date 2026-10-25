@@ -11,6 +11,10 @@ const { nowSec } = require('../util');
 const router = express.Router();
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 
+/* 权限矩阵可配置的模块（与前端菜单 key 一致） */
+const MODULE_KEYS = ['dashboard', 'workbench', 'collab', 'scenarios', 'script-editor', 'projects', 'screen',
+  'evidence', 'replay', 'evaluation', 'report', 'ledger', 'opinion', 'knowledge', 'admin'];
+
 function adminOnly(req, res, next) {
   if (req.user.role.id !== 'platformadmin') {
     return res.status(403).json({ error: '仅平台管理员可访问系统管理功能' });
@@ -18,13 +22,41 @@ function adminOnly(req, res, next) {
   next();
 }
 
+/* 全部用户角色映射 */
+function roleMapOfUsers() {
+  const map = {};
+  db.prepare(
+    'SELECT ur.user_id, r.id, r.name FROM user_roles ur JOIN roles r ON r.id=ur.role_id ORDER BY r.seq'
+  ).all().forEach(function (x) {
+    (map[x.user_id] = map[x.user_id] || []).push({ id: x.id, name: x.name });
+  });
+  return map;
+}
+
+/* 规整角色列表：去空、去重、校验存在、至少一个 */
+function normalizeRoles(input) {
+  const list = (Array.isArray(input) ? input : [input]).map(function (x) { return String(x || '').trim(); })
+    .filter(Boolean).filter(function (v, i, a) { return a.indexOf(v) === i; });
+  if (!list.length) return { error: '请至少选择一个角色' };
+  for (const rid of list) {
+    if (!db.prepare('SELECT id FROM roles WHERE id=?').get(rid)) return { error: '角色不存在：' + rid };
+  }
+  return { list: list };
+}
+
 router.get('/users', auth.requireAuth, adminOnly, function (req, res) {
   const rows = db.prepare(
     'SELECT u.id,u.username,u.name,u.role_id,u.org,u.status,u.created_at,r.name AS role_name ' +
     'FROM users u JOIN roles r ON r.id=u.role_id ORDER BY u.id'
   ).all();
+  const rmap = roleMapOfUsers();
   res.json(rows.map(function (u) {
-    return { id: u.id, username: u.username, name: u.name, role: u.role_id, roleName: u.role_name, org: u.org, status: u.status, createdAt: u.created_at };
+    const roleList = rmap[u.id] || [{ id: u.role_id, name: u.role_name }];
+    return {
+      id: u.id, username: u.username, name: u.name, role: u.role_id, roleName: u.role_name,
+      roles: roleList.map(function (r) { return r.id; }), roleList: roleList,
+      org: u.org, status: u.status, createdAt: u.created_at
+    };
   }));
 });
 
@@ -32,36 +64,81 @@ router.post('/users', auth.requireAuth, adminOnly, function (req, res) {
   const b = req.body || {};
   const username = String(b.username || '').trim();
   const name = String(b.name || '').trim();
-  const roleId = String(b.role || '').trim();
   if (!/^[A-Za-z0-9_.-]{3,32}$/.test(username)) return res.status(400).json({ error: '账号需为 3-32 位字母、数字或 _ . -' });
   if (!name) return res.status(400).json({ error: '姓名不能为空' });
-  if (!db.prepare('SELECT id FROM roles WHERE id=?').get(roleId)) return res.status(400).json({ error: '角色不存在' });
+  const nr = normalizeRoles(b.roles !== undefined ? b.roles : b.role);
+  if (nr.error) return res.status(400).json({ error: nr.error });
   if (db.prepare('SELECT id FROM users WHERE username=?').get(username)) return res.status(409).json({ error: '账号已存在' });
 
   const pwd = String(b.password || auth.INITIAL_PASSWORD);
   const p = auth.hashPassword(pwd);
   const r = db.prepare('INSERT INTO users (username,name,role_id,org,pwd_salt,pwd_hash,status,must_change,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(username, name, roleId, String(b.org || '盘州市人民医院'), p.salt, p.hash, '启用', 1, nowSec());
-  auth.audit(req, '新建账号 ' + username + '（' + name + '）');
-  res.json({ ok: true, id: Number(r.lastInsertRowid) });
+    .run(username, name, nr.list[0], String(b.org || '盘州市人民医院'), p.salt, p.hash, '启用', 1, nowSec());
+  const uid = Number(r.lastInsertRowid);
+  const ur = db.prepare('INSERT INTO user_roles (user_id,role_id) VALUES (?,?)');
+  nr.list.forEach(function (rid) { ur.run(uid, rid); });
+  auth.audit(req, '新建账号 ' + username + '（' + name + '，角色 ' + nr.list.join('/') + '）');
+  res.json({ ok: true, id: uid });
 });
 
 router.patch('/users/:id', auth.requireAuth, adminOnly, function (req, res) {
   const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
   if (!u) return res.status(404).json({ error: '账号不存在' });
   const b = req.body || {};
-  if (b.name !== undefined) db.prepare('UPDATE users SET name=? WHERE id=?').run(String(b.name), u.id);
-  if (b.org !== undefined) db.prepare('UPDATE users SET org=? WHERE id=?').run(String(b.org), u.id);
-  if (b.role !== undefined) {
-    if (!db.prepare('SELECT id FROM roles WHERE id=?').get(String(b.role))) return res.status(400).json({ error: '角色不存在' });
-    db.prepare('UPDATE users SET role_id=? WHERE id=?').run(String(b.role), u.id);
+
+  let newUsername = u.username;
+  if (b.username !== undefined) {
+    newUsername = String(b.username || '').trim();
+    if (!/^[A-Za-z0-9_.-]{3,32}$/.test(newUsername)) return res.status(400).json({ error: '账号需为 3-32 位字母、数字或 _ . -' });
+    const dup = db.prepare('SELECT id FROM users WHERE username=? AND id<>?').get(newUsername, u.id);
+    if (dup) return res.status(409).json({ error: '账号已存在' });
+  }
+  if (b.name !== undefined && !String(b.name).trim()) return res.status(400).json({ error: '姓名不能为空' });
+
+  let newRoles = null;
+  if (b.roles !== undefined || b.role !== undefined) {
+    const nr = normalizeRoles(b.roles !== undefined ? b.roles : b.role);
+    if (nr.error) return res.status(400).json({ error: nr.error });
+    newRoles = nr.list;
+    const hadAdmin = !!db.prepare('SELECT 1 AS ok FROM user_roles WHERE user_id=? AND role_id=?').get(u.id, 'platformadmin');
+    if (hadAdmin && newRoles.indexOf('platformadmin') < 0) {
+      if (u.id === req.user.id) return res.status(400).json({ error: '不能移除自己的平台管理员角色' });
+      const admins = db.prepare('SELECT COUNT(DISTINCT user_id) AS c FROM user_roles WHERE role_id=?').get('platformadmin').c;
+      if (admins <= 1) return res.status(400).json({ error: '至少保留一个平台管理员账号' });
+    }
   }
   if (b.status !== undefined) {
     if (u.id === req.user.id && String(b.status) !== '启用') return res.status(400).json({ error: '不能停用当前登录账号' });
-    db.prepare('UPDATE users SET status=? WHERE id=?').run(String(b.status) === '停用' ? '停用' : '启用', u.id);
   }
-  auth.audit(req, '修改账号 ' + u.username);
-  res.json({ ok: true });
+
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE users SET username=?, name=?, org=?, status=?, role_id=? WHERE id=?').run(
+      newUsername,
+      b.name !== undefined ? String(b.name).trim() : u.name,
+      b.org !== undefined ? String(b.org).trim() : u.org,
+      b.status !== undefined ? (String(b.status) === '停用' ? '停用' : '启用') : u.status,
+      newRoles ? newRoles[0] : u.role_id,
+      u.id
+    );
+    if (newRoles) {
+      db.prepare('DELETE FROM user_roles WHERE user_id=?').run(u.id);
+      const ur = db.prepare('INSERT INTO user_roles (user_id,role_id) VALUES (?,?)');
+      newRoles.forEach(function (rid) { ur.run(u.id, rid); });
+      /* 已登录会话中不再持有的角色：强制该会话重新登录 */
+      const del = db.prepare('DELETE FROM sessions WHERE user_id=? AND role_id IS NOT NULL AND role_id NOT IN (' +
+        newRoles.map(function () { return '?'; }).join(',') + ')');
+      del.run.apply(del, [u.id].concat(newRoles));
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (e2) {}
+    return res.status(500).json({ error: '保存失败：' + e.message });
+  }
+
+  const unameMsg = newUsername !== u.username ? ('（账号 ' + u.username + ' → ' + newUsername + '）') : '';
+  auth.audit(req, '修改账号 ' + newUsername + unameMsg + (newRoles ? ' 角色 ' + newRoles.join('/') : ''));
+  res.json({ ok: true, username: newUsername, roles: newRoles || undefined });
 });
 
 /* 重置密码 */
@@ -81,28 +158,148 @@ router.post('/users/:id/reset-password', auth.requireAuth, adminOnly, function (
 
 router.get('/roles', auth.requireAuth, adminOnly, function (req, res) {
   res.json(db.prepare('SELECT * FROM roles ORDER BY seq').all().map(function (r) {
-    return { id: r.id, name: r.name, short: r.short, icon: r.icon, color: r.color, desc: r.descr, nav: parseJson(r.nav, []), external: !!r.external };
+    return { id: r.id, name: r.name, short: r.short, icon: r.icon, color: r.color, desc: r.descr, nav: parseJson(r.nav, []), external: !!r.external, status: r.status || '启用' };
   }));
 });
 
-/* 表单模板：列表与新建 */
+/* 调整角色显示顺序（同步登录页角色卡片顺序） */
+router.patch('/roles/order', auth.requireAuth, adminOnly, function (req, res) {
+  const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : [];
+  if (!ids.length) return res.status(400).json({ error: '请提供角色顺序' });
+  const all = db.prepare('SELECT id FROM roles').all().map(function (r) { return r.id; });
+  if (ids.some(function (id) { return all.indexOf(id) < 0; })) return res.status(400).json({ error: '角色不存在' });
+  const up = db.prepare('UPDATE roles SET seq=? WHERE id=?');
+  db.exec('BEGIN');
+  try {
+    ids.forEach(function (id, i) { up.run(i + 1, id); });
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (e2) {}
+    return res.status(500).json({ error: '排序保存失败：' + e.message });
+  }
+  auth.audit(req, '调整角色显示顺序');
+  res.json({ ok: true });
+});
+
+/* 停用 / 启用角色（停用后登录页与账号角色选择不再显示） */
+router.patch('/roles/:id/status', auth.requireAuth, adminOnly, function (req, res) {
+  const r = db.prepare('SELECT * FROM roles WHERE id=?').get(req.params.id);
+  if (!r) return res.status(404).json({ error: '角色不存在' });
+  const st = String((req.body && req.body.status) || '');
+  if (st !== '启用' && st !== '停用') return res.status(400).json({ error: '状态不正确' });
+  if (st === '停用') {
+    if (r.id === 'platformadmin') return res.status(400).json({ error: '平台管理员角色不可停用' });
+    if (r.id === req.user.role.id) return res.status(400).json({ error: '不能停用当前登录角色' });
+    /* 已用该角色登录的会话强制失效 */
+    db.prepare('DELETE FROM sessions WHERE role_id=?').run(r.id);
+  }
+  db.prepare('UPDATE roles SET status=? WHERE id=?').run(st, r.id);
+  auth.audit(req, (st === '停用' ? '停用角色：' : '启用角色：') + r.name);
+  res.json({ ok: true, status: st });
+});
+
+/* 删除角色（仍有账号绑定时禁止删除） */
+router.delete('/roles/:id', auth.requireAuth, adminOnly, function (req, res) {
+  const r = db.prepare('SELECT * FROM roles WHERE id=?').get(req.params.id);
+  if (!r) return res.status(404).json({ error: '角色不存在' });
+  if (r.id === 'platformadmin') return res.status(400).json({ error: '平台管理员角色不可删除' });
+  if (r.id === req.user.role.id) return res.status(400).json({ error: '不能删除当前登录角色' });
+  const cnt = db.prepare('SELECT COUNT(*) AS c FROM user_roles WHERE role_id=?').get(r.id).c;
+  if (cnt) {
+    return res.status(409).json({
+      error: '该角色仍有 ' + cnt + ' 个账号绑定，请先在「用户账号」中解除绑定，或改用停用'
+    });
+  }
+  db.prepare('DELETE FROM roles WHERE id=?').run(r.id);
+  auth.audit(req, '删除角色：' + r.name);
+  res.json({ ok: true });
+});
+
+/* 新增角色（权限矩阵可扩展） */
+router.post('/roles', auth.requireAuth, adminOnly, function (req, res) {
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  if (!name) return res.status(400).json({ error: '角色名称不能为空' });
+  if (name.length > 20) return res.status(400).json({ error: '角色名称不能超过 20 个字' });
+  if (db.prepare('SELECT id FROM roles WHERE name=?').get(name)) return res.status(409).json({ error: '角色名称已存在' });
+  if (b.nav !== undefined && !Array.isArray(b.nav)) return res.status(400).json({ error: '权限列表格式不正确' });
+  const nav = (b.nav || []).map(String).filter(function (k) { return MODULE_KEYS.indexOf(k) >= 0; })
+    .filter(function (v, i, a) { return a.indexOf(v) === i; });
+  const desc = String(b.desc || '').slice(0, 200);
+  const id = 'role_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  const seq = (db.prepare('SELECT MAX(seq) AS m FROM roles').get().m || 0) + 1;
+  db.prepare('INSERT INTO roles (id,name,short,icon,color,descr,nav,external,status,seq) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(id, name, name.slice(0, 8), 'user', '#4f7cff', desc, JSON.stringify(nav), b.external ? 1 : 0, '启用', seq);
+  auth.audit(req, '新增角色：' + name + '（模块 ' + nav.length + ' 个）');
+  res.json({
+    ok: true,
+    role: { id: id, name: name, short: name.slice(0, 8), icon: 'user', color: '#4f7cff', desc: desc, nav: nav, external: !!b.external, status: '启用' }
+  });
+});
+
+/* 修改角色说明与模块权限（平台管理员「系统管理」权限不可移除） */
+router.put('/roles/:id', auth.requireAuth, adminOnly, function (req, res) {
+  const r = db.prepare('SELECT * FROM roles WHERE id=?').get(req.params.id);
+  if (!r) return res.status(404).json({ error: '角色不存在' });
+  const b = req.body || {};
+  let nav = parseJson(r.nav, []);
+  if (b.nav !== undefined) {
+    if (!Array.isArray(b.nav)) return res.status(400).json({ error: '权限列表格式不正确' });
+    nav = b.nav.map(String).filter(function (k) { return MODULE_KEYS.indexOf(k) >= 0; })
+      .filter(function (v, i, a) { return a.indexOf(v) === i; });
+    if (r.id === 'platformadmin' && nav.indexOf('admin') < 0) nav.push('admin');
+  }
+  const desc = b.desc !== undefined ? String(b.desc || '').slice(0, 200) : r.descr;
+  let name = r.name;
+  if (b.name !== undefined) {
+    name = String(b.name || '').trim();
+    if (!name) return res.status(400).json({ error: '角色名称不能为空' });
+    if (name.length > 20) return res.status(400).json({ error: '角色名称不能超过 20 个字' });
+  }
+  db.prepare('UPDATE roles SET name=?, nav=?, descr=? WHERE id=?').run(name, JSON.stringify(nav), desc, r.id);
+  auth.audit(req, '更新角色' + (name !== r.name ? '（' + r.name + ' → ' + name + '）' : '权限：' + r.name) + '，模块 ' + nav.length + ' 个');
+  res.json({
+    ok: true,
+    role: { id: r.id, name: name, short: r.short, icon: r.icon, color: r.color, desc: desc, nav: nav, external: !!r.external }
+  });
+});
+
+/* 表单模板：列表、新建与编辑（内置模板同样可编辑） */
 router.get('/forms', auth.requireAuth, adminOnly, function (req, res) {
   res.json(db.prepare('SELECT * FROM form_templates ORDER BY id').all().map(function (f) {
-    return { id: f.id, name: f.name, fields: parseJson(f.fields, []) };
+    return require('../forms').normalizeTemplate(f);
   }));
 });
 
 router.post('/forms', auth.requireAuth, adminOnly, function (req, res) {
   const b = req.body || {};
-  const name = String(b.name || '').trim();
-  const fields = Array.isArray(b.fields) ? b.fields.map(String).filter(Boolean) : [];
+  const name = String(b.name || '').trim().slice(0, 40);
+  const fields = require('../forms').normalizeFields(b.fields);
   if (!name) return res.status(400).json({ error: '模板名称不能为空' });
   if (!fields.length) return res.status(400).json({ error: '字段不能为空' });
   const maxId = db.prepare("SELECT MAX(CAST(SUBSTR(id,2) AS INTEGER)) AS n FROM form_templates").get().n || 0;
   const id = 'F' + (maxId + 1);
   db.prepare('INSERT INTO form_templates (id,name,fields) VALUES (?,?,?)').run(id, name, JSON.stringify(fields));
-  auth.audit(req, '新建表单模板《' + name + '》');
+  auth.audit(req, '新建表单模板《' + name + '》（字段 ' + fields.length + ' 个）');
   res.json({ ok: true, id: id, name: name, fields: fields });
+});
+
+router.put('/forms/:id', auth.requireAuth, adminOnly, function (req, res) {
+  const tpl = db.prepare('SELECT * FROM form_templates WHERE id=?').get(req.params.id);
+  if (!tpl) return res.status(404).json({ error: '表单模板不存在' });
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 40);
+  const fields = require('../forms').normalizeFields(b.fields);
+  if (!name) return res.status(400).json({ error: '模板名称不能为空' });
+  if (!fields.length) return res.status(400).json({ error: '字段不能为空' });
+  const seen = {};
+  for (let i = 0; i < fields.length; i++) {
+    if (seen[fields[i].label]) return res.status(400).json({ error: '字段名称重复：' + fields[i].label });
+    seen[fields[i].label] = 1;
+  }
+  db.prepare('UPDATE form_templates SET name=?, fields=? WHERE id=?').run(name, JSON.stringify(fields), tpl.id);
+  auth.audit(req, '更新表单模板《' + name + '》（字段 ' + fields.length + ' 个）');
+  res.json({ ok: true, template: { id: tpl.id, name: name, fields: fields } });
 });
 
 /* 数据备份：将 SQLite 单文件复制到 data/backups/（WAL 检查点后复制） */

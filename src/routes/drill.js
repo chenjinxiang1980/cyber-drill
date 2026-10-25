@@ -84,7 +84,7 @@ function formFields(formId) {
   if (!formId) return [];
   const f = db.prepare('SELECT * FROM form_templates WHERE id=?').get(String(formId));
   if (!f) return [];
-  return { name: f.name || formId, fields: parseJson(f.fields, []) };
+  return { name: f.name || formId, fields: require('../forms').normalizeFields(parseJson(f.fields, [])) };
 }
 
 function projectOf(projectId) {
