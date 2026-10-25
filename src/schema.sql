@@ -59,7 +59,11 @@ CREATE TABLE IF NOT EXISTS projects (
   units       TEXT,   -- JSON
   members     TEXT,   -- JSON
   observers   TEXT,   -- JSON
-  mode        TEXT    -- 演练模式：基础版（诱导演练）/ 实战版（自主处置）
+  mode        TEXT,   -- 演练模式：基础版（诱导演练）/ 实战版（自主处置）
+  started_at  TEXT,   -- 实际启动时刻（YYYY-MM-DD HH:mm:ss），恢复演练不重置
+  paused_at   TEXT,   -- 最近一次暂停时刻
+  paused_sec  INTEGER DEFAULT 0, -- 累计暂停秒数（继续时累加）
+  ended_at    TEXT    -- 结束/归档时刻，用于冻结计时
 );
 
 -- 演练场景剧本
@@ -99,7 +103,10 @@ CREATE TABLE IF NOT EXISTS script_nodes (
   required   INTEGER DEFAULT 1,  -- 是否必经步骤（实战版据此判定遗漏）
   flow_type  TEXT DEFAULT 'correct', -- correct=正确流程 / distractor=混淆流程（基础版不显示）
   score      INTEGER DEFAULT 0,  -- 本步骤分值（正确流程得分，混淆流程选错扣分；正确流程合计应≤100）
-  receiver   TEXT   -- 下一节点接收角色名称（基础版默认按剧本流转，实战版由参演人员选择）
+  receiver   TEXT,  -- 下一节点接收角色名称（基础版默认按剧本流转，实战版由参演人员选择）
+  deps       TEXT,  -- JSON：前置节点 ID 列表（全部完成后本节点才可执行；空数组=并行起始节点）
+  pos_x      INTEGER, -- 编排画布 X 坐标（仅用于可视化布局）
+  pos_y      INTEGER  -- 编排画布 Y 坐标
 );
 
 -- 实战版自主处置记录（按剧本节点自主选择处置方案并填写实际情况）
@@ -212,7 +219,8 @@ CREATE TABLE IF NOT EXISTS notifs (
   source TEXT,
   title TEXT,
   descr TEXT,
-  seq   INTEGER
+  seq   INTEGER,
+  target TEXT DEFAULT 'all'   -- all=全员可见；internal=仅院内角色可见
 );
 
 -- 未读状态（按用户）

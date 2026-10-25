@@ -77,7 +77,7 @@ window.ReportPage = (function () {
   function rpIssues(d){
     var out = [];
     d.tasks.filter(function(t){ return t.status!=='已完成'; }).forEach(function(t){
-      out.push('任务 '+t.id+'「'+t.title+'」（'+t.roleName+'，时限 '+t.deadline+'）状态为「'+t.status+'」，未形成闭环。');
+      out.push('任务 '+t.id+'「'+t.title+'」（'+t.roleName+'，处置时长 '+(t.duration?t.duration+' 分钟':'未设置')+'）状态为「'+t.status+'」，未形成闭环。');
     });
     d.scores.forEach(function(s){
       if(s.score!==null && Number(s.score) < Number(s.max)) out.push('考评项「'+s.name+'」扣 '+(s.max-s.score)+' 分：'+(s.note||'未填写具体依据')+'。');
@@ -113,7 +113,7 @@ window.ReportPage = (function () {
       return '<tr><td>'+App.esc(r.role)+'</td><td>'+r.total+'</td><td>'+r.done+'</td><td>'+r.doing+'</td><td>'+r.pending+'</td><td>'+r.overdue+'</td></tr>';
     }).join('');
     var taskRows = d.tasks.map(function(t){
-      return '<tr><td>'+App.esc(t.id)+'</td><td>'+App.esc(t.title)+'</td><td>'+App.esc(t.roleName)+'</td><td>'+App.esc(t.level)+'</td><td>'+App.esc(t.deadline)+'</td><td>'+App.esc(t.status)+'</td></tr>';
+      return '<tr><td>'+App.esc(t.id)+'</td><td>'+App.esc(t.title)+'</td><td>'+App.esc(t.roleName)+'</td><td>'+App.esc(t.level)+'</td><td>'+(t.duration?t.duration+' 分钟':'—')+'</td><td>'+App.esc(t.status)+'</td></tr>';
     }).join('');
     var tlRows = d.timeline.map(function(x){
       return '<tr><td>'+App.esc(x.t)+'</td><td>'+App.esc(x.action)+'</td><td>'+App.esc(x.actor||x.role||'—')+'</td><td>'+App.esc(x.detail||'')+'</td></tr>';
@@ -198,7 +198,7 @@ window.ReportPage = (function () {
       + '<tr><td class="k">观察员</td><td colspan="2">'+App.esc((p.observers||[]).join('、')||'—')+'</td></tr></table>'
       + '<p>本次演练采用"院应急指挥部统一指挥、信息科牵头处置、医务与临床协同、外部单位按需报送"的组织模式，各角色按剧本节点接收任务并在平台内留痕。</p>';
 
-    var s3 = '<h2>三、演练准备</h2><p>1. 场景与剧本：'+(sc?App.esc(sc.name)+'，'+App.esc(sc.descr||'')+'；剧本共 '+sc.nodes+' 个节点，明确各节点责任角色、时限与需提交表单。':'未关联场景剧本。')+'</p>'
+    var s3 = '<h2>三、演练准备</h2><p>1. 场景与剧本：'+(sc?App.esc(sc.name)+'，'+App.esc(sc.descr||'')+'；剧本共 '+sc.nodes+' 个节点，明确各节点责任角色、处置时长与需提交表单。':'未关联场景剧本。')+'</p>'
       + '<p>2. 演练环境：系统部署于独立演练服务器/虚拟机，与医院 HIS、业务网及互联网物理隔离；全部处置动作在平台内模拟记录，不下发真实网络配置命令，不操作生产数据。</p>'
       + '<p>3. 数据准备：演练数据全部为虚拟测试数据，未录入任何真实患者隐私信息；告警、系统 IP、故障现象等由平台按场景自动填充，参演人员核对后确认。</p>'
       + '<p>4. 保障措施：平台账号按角色分配，登录采用口令+验证码；操作全过程写入审计日志（仅追加、不可删除）。</p>';
@@ -228,7 +228,7 @@ window.ReportPage = (function () {
         + '<h3>5.1 分角色完成情况</h3><table><tr><th>接收角色</th><th>任务数</th><th>已完成</th><th>处理中</th><th>待处理</th><th>超时</th></tr>'
         + (byRoleRows || '<tr><td colspan="6">暂无任务</td></tr>') + '</table>';
       if(o.task){
-        s5 += '<h3>5.2 任务明细</h3><table><tr><th style="width:10%">编号</th><th>任务标题</th><th style="width:22%">接收角色</th><th style="width:8%">等级</th><th style="width:11%">时限</th><th style="width:10%">状态</th></tr>'
+        s5 += '<h3>5.2 任务明细</h3><table><tr><th style="width:10%">编号</th><th>任务标题</th><th style="width:22%">接收角色</th><th style="width:8%">等级</th><th style="width:12%">处置时长</th><th style="width:10%">状态</th></tr>'
           + (taskRows || '<tr><td colspan="6">暂无任务</td></tr>') + '</table>';
       }
     }

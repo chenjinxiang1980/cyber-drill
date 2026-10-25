@@ -3,7 +3,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { DatabaseSync } = require('node:sqlite');
-const { now } = require('./util');
+const { now, nowSec } = require('./util');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const DB_FILE = process.env.DRILL_DB || path.join(DATA_DIR, 'drill.db');
@@ -80,9 +80,30 @@ function migrate() {
   addColumn('drill_steps', 'flow_type', "TEXT DEFAULT 'correct'");
   addColumn('drill_steps', 'score', 'REAL DEFAULT 0');
   addColumn('script_nodes', 'receiver', 'TEXT');
+  addColumn('script_nodes', 'deps', 'TEXT');
+  addColumn('script_nodes', 'pos_x', 'INTEGER');
+  addColumn('script_nodes', 'pos_y', 'INTEGER');
   addColumn('drill_steps', 'receiver', 'TEXT');
   addColumn('drill_steps', 'receiver_ok', 'INTEGER DEFAULT 1');
   addColumn('drill_steps', 'skipped', 'INTEGER DEFAULT 0');
+  addColumn('notifs', 'target', "TEXT DEFAULT 'all'");
+  /* 旧库升级：停用「计划时刻」，超时判定改为按上一节点真实完成时间 + 处置时长 */
+  try {
+    db.prepare("UPDATE script_nodes SET time='' WHERE COALESCE(time,'')<>''").run();
+    db.prepare("UPDATE tasks SET deadline='' WHERE COALESCE(deadline,'')<>''").run();
+  } catch (e) {
+    console.warn('[migrate] 计划时刻清理跳过：', e.message);
+  }
+  /* 演练真实计时：实际启动/暂停/结束时刻与累计暂停时长 */
+  const startedNew = !db.prepare('PRAGMA table_info(projects)').all().some(function (c) { return c.name === 'started_at'; });
+  addColumn('projects', 'started_at', 'TEXT');
+  addColumn('projects', 'paused_at', 'TEXT');
+  addColumn('projects', 'paused_sec', 'INTEGER DEFAULT 0');
+  addColumn('projects', 'ended_at', 'TEXT');
+  /* 旧库升级：原「演练中」项目没有真实开始时刻，以升级时刻作为计时起点 */
+  if (startedNew) {
+    db.prepare("UPDATE projects SET started_at=? WHERE status='演练中' AND (started_at IS NULL OR started_at='')").run(nowSec());
+  }
   /* 旧库升级：为未配置取证要求的剧本节点按剧本内容自动生成模拟取证材料清单 */
   try {
     const plan = require('./evidence_plan');
@@ -120,9 +141,9 @@ function migrate() {
   grantNav('commander', 'screen');
   grantNav('platformadmin', 'screen');
   grantNav('itlead', 'screen');
-  /* 旧库升级：任务执行已并入角色工作台，移除各角色的「任务协同中心」菜单 */
+  /* 旧库升级：任务执行已并入角色工作台、剧本编排已并入场景剧本库，移除旧菜单键 */
   try {
-    db.prepare('SELECT id FROM roles').all().forEach(function (r) { revokeNav(r.id, 'tasks'); });
+    db.prepare('SELECT id FROM roles').all().forEach(function (r) { revokeNav(r.id, 'tasks'); revokeNav(r.id, 'script-editor'); });
   } catch (e) {
     console.warn('[migrate] 菜单升级跳过：', e.message);
   }
@@ -133,7 +154,14 @@ function migrate() {
   } catch (e) {
     console.warn('[migrate] 流程分值/混淆流程生成跳过：', e.message);
   }
-  /* 旧库升级：按剧本顺序补齐「下一节点接收人」（取下一正确流程的责任角色，末尾为院应急指挥部） */
+  /* 旧库升级：为存量剧本建立串行前置依赖（保持原顺序行为，可在并行编排画布中改为并行） */
+  try {
+    const n = backfillDeps(db);
+    if (n) console.log('[migrate] 剧本节点前置依赖回填 ' + n + ' 个');
+  } catch (e) {
+    console.warn('[migrate] 前置依赖回填跳过：', e.message);
+  }
+  /* 旧库升级：按剧本顺序补齐「下一节点接收人」（取后继正确流程的责任角色，末尾为院应急指挥部） */
   try {
     const n = require('./drill_plan').backfillReceivers(db);
     if (n) console.log('[migrate] 下一节点接收人补齐 ' + n + ' 个节点');
@@ -222,6 +250,31 @@ function tx(fn) {
 function parseJson(s, fallback) {
   if (s === null || s === undefined || s === '') return fallback;
   try { return JSON.parse(s); } catch (e) { return fallback; }
+}
+
+/* 旧库升级：为未配置前置依赖的剧本节点建立串行链（第 1 个为空，其余依赖前一个）
+ * 混淆流程不参与流转，统一写入空数组；已配置依赖的节点保持原样 */
+function backfillDeps(database) {
+  const up = database.prepare('UPDATE script_nodes SET deps=? WHERE id=?');
+  let count = 0;
+  database.prepare('SELECT id FROM scenarios').all().forEach(function (sc) {
+    const nodes = database.prepare('SELECT id,flow_type,deps FROM script_nodes WHERE scenario_id=? ORDER BY seq').all(sc.id);
+    let prevId = null;
+    nodes.filter(function (n) { return n.flow_type !== 'distractor'; }).forEach(function (n) {
+      if (n.deps === null || n.deps === '') {
+        up.run(JSON.stringify(prevId ? [prevId] : []), n.id);
+        count++;
+      }
+      prevId = n.id;
+    });
+    nodes.filter(function (n) { return n.flow_type === 'distractor'; }).forEach(function (n) {
+      if (n.deps === null || n.deps === '') {
+        up.run('[]', n.id);
+        count++;
+      }
+    });
+  });
+  return count;
 }
 
 module.exports = { db, migrate, isSeeded, tx, parseJson, DB_FILE, DATA_DIR };

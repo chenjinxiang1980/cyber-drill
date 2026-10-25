@@ -22,6 +22,8 @@ var ICONS = {
   knowledge:'<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13z" '+P+'/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" '+P+'/>',
   admin:'<circle cx="12" cy="12" r="3" '+P+'/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" '+P+'/>',
   bell:'<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" '+P+'/><path d="M13.7 21a2 2 0 0 1-3.4 0" '+P+'/>',
+  volume:'<path d="M11 5L6 9H3v6h3l5 4z" '+P+'/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" '+P+'/>',
+  'volume-off':'<path d="M11 5L6 9H3v6h3l5 4z" '+P+'/><path d="M16 9l5 6M21 9l-5 6" '+P+'/>',
   logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" '+P+'/><path d="M16 17l5-5-5-5M21 12H9" '+P+'/>',
   search:'<circle cx="11" cy="11" r="7" '+P+'/><path d="M21 21l-4.3-4.3" '+P+'/>',
   plus:'<path d="M12 5v14M5 12h14" '+P+'/>',
@@ -64,8 +66,7 @@ var NAV_GROUPS = [
     {key:'collab', icon:'chat', label:'演练导调中心', href:'collab.html'}
   ]},
   { title:'编排与资源', items:[
-    {key:'scenarios', icon:'scenarios', label:'场景剧本库', href:'scenarios.html'},
-    {key:'script-editor', icon:'flow', label:'剧本可视化编排', href:'script-editor.html'},
+    {key:'scenarios', icon:'scenarios', label:'场景剧本库与编排', href:'scenarios.html'},
     {key:'projects', icon:'projects', label:'演练项目管理', href:'projects.html'},
     {key:'evidence', icon:'evidence', label:'取证与材料归档', href:'evidence.html'},
     {key:'knowledge', icon:'knowledge', label:'预案知识库', href:'knowledge.html'},
@@ -102,7 +103,7 @@ function mountShell(pageKey){
   var brandLogo = B.logo || 'img/logo.png';
   var brandSystem = B.systemName || '网络安全应急演练';
   var brandUnit = B.unitName || '盘州市人民医院';
-  var brandVer = B.version || 'v0.1.6';
+  var brandVer = B.version || 'v0.1.7';
   var brandGh = B.github || 'https://github.com/chenjinxiang1980/cyber-drill';
   var brandGe = B.gitee || 'https://gitee.com/habeas/cyber-drill';
   var html = '<aside class="sidebar"><div class="brand"><span class="logo brand-logo"><img src="'+brandLogo+'" alt="'+App.esc(brandUnit)+'院徽"></span><span class="bt"><div class="t1">'+App.esc(brandSystem)+'</div><div class="t2">'+App.esc(brandUnit)+' · DRILL</div></span></div><nav class="nav">';
@@ -127,7 +128,8 @@ function mountShell(pageKey){
     + '<span class="proj-sel" onclick="App.switchProject()">'+icon('projects')+'<b id="topProj"></b><span class="dim">切换 ▾</span></span>'
     + '<span id="topLive"></span>'
     + '<span class="right tb-clock" id="topClock"></span>'
-    + '<span class="bell" onclick="App.showNotifs()">'+icon('bell')+'<span class="n" id="bellN">0</span></span>'
+    + '<span class="bell" onclick="App.showNotifs()">'+icon('bell')+'<span class="n" id="bellN" style="display:none">0</span></span>'
+    + '<span class="bell voice-btn" id="voiceBtn" onclick="App.toggleVoice()" title="语音播报"></span>'
     + '<span class="role-chip"><span class="av">'+(r.name||'?').slice(0,1)+'</span>'+r.name+'</span>'
     + '<span class="tb-out" onclick="location.href=\'password.html\'">'+icon('lock')+'修改密码</span>'
     + '<span class="tb-out" onclick="App.logout()">'+icon('logout')+'退出</span>'
@@ -137,6 +139,125 @@ function mountShell(pageKey){
   // 时钟（立即启动，不依赖数据）
   function tick(){ var d=new Date(); var el=document.getElementById('topClock'); if(el) el.textContent = d.toLocaleDateString('zh-CN')+' '+d.toTimeString().slice(0,8); }
   tick(); setInterval(tick,1000);
+}
+
+/* 未读消息角标：数字 >0 时显示，打开消息弹窗后自动隐藏 */
+function setBell(n){
+  var b = document.getElementById('bellN');
+  if(!b) return;
+  b.textContent = String(n);
+  b.style.display = n > 0 ? '' : 'none';
+}
+/* ---------- 语音引擎（浏览器内置 speechSynthesis，零依赖、本机记忆开关） ---------- */
+var VOICE_KEY = 'pzy_voice_on';
+var seenNotif = null;
+var voiceLastText = '';
+var voiceTimer = null;
+var voiceSeq = 0;
+function voiceSupported(){
+  return typeof window !== 'undefined' && !!window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function';
+}
+function voiceOn(){
+  try{ return localStorage.getItem(VOICE_KEY) !== '0'; }catch(e){ return true; }
+}
+function buildUtterance(t){
+  var u = new SpeechSynthesisUtterance(t);
+  u.lang = 'zh-CN'; u.rate = 1; u.pitch = 1;
+  var zh = (window.speechSynthesis.getVoices() || []).filter(function(v){ return /^zh|chinese/i.test(v.lang || ''); })[0];
+  if(zh) u.voice = zh;
+  return u;
+}
+function voiceSpeak(text, opts){
+  if(!voiceSupported()) return;
+  var always = !!(opts && opts.always);
+  /* 站内消息提醒不受语音开关限制（opts.always）；其余播报受顶栏开关控制 */
+  if(!always && !voiceOn()) return;
+  var t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+  if(!t) return;
+  if(t.length > 220) t = t.slice(0, 220) + '…';
+  if(t === voiceLastText && !(opts && opts.force)) return;
+  voiceLastText = t;
+  var seq = ++voiceSeq;
+  try{
+    var synth = window.speechSynthesis;
+    if(!(opts && opts.queue)){
+      /* cancel 为异步操作，立即 speak 会吞掉首字（如「请填写」的「请」），延后播报 */
+      if(synth.speaking || synth.pending || synth.paused) synth.cancel();
+      if(voiceTimer){ clearTimeout(voiceTimer); voiceTimer = null; }
+      voiceTimer = setTimeout(function(){
+        voiceTimer = null;
+        if(seq !== voiceSeq) return;
+        if(!always && !voiceOn()) return;
+        try{ synth.speak(buildUtterance(t)); }catch(e){}
+      }, 200);
+    } else {
+      synth.speak(buildUtterance(t));
+    }
+  }catch(e){}
+}
+function voiceStop(){
+  if(voiceTimer){ clearTimeout(voiceTimer); voiceTimer = null; }
+  voiceSeq++;
+  try{ if(voiceSupported()) window.speechSynthesis.cancel(); }catch(e){}
+}
+function syncVoiceBtn(){
+  var b = document.getElementById('voiceBtn');
+  if(!b) return;
+  var on = voiceOn() && voiceSupported();
+  b.innerHTML = icon(on ? 'volume' : 'volume-off');
+  b.classList.toggle('off', !on);
+  b.title = voiceSupported()
+    ? (on ? '语音播报已开启（点击关闭）' : '语音播报已关闭（点击开启）')
+    : '当前浏览器不支持语音合成';
+}
+function toggleVoice(){
+  if(!voiceSupported()){ toast('当前浏览器不支持语音合成，请使用 Chrome / Edge 等现代浏览器','warn'); return; }
+  var next = !voiceOn();
+  try{ localStorage.setItem(VOICE_KEY, next ? '1' : '0'); }catch(e){}
+  if(!next) voiceStop();
+  voiceLastText = '';
+  syncVoiceBtn();
+  toast(next ? '语音播报已开启' : '语音播报已关闭', next ? 'ok' : '');
+  if(next) voiceSpeak('语音播报已开启', { force:true });
+}
+function refreshNotifBadge(){
+  API.getNotifs().then(function(ns){
+    MOCK.NOTIFS = ns;
+    var unread = ns.filter(function(x){ return !x.read; });
+    setBell(unread.length);
+    /* 语音提醒：未读站内消息不受语音开关限制；新到达的消息实时播报 */
+    if(seenNotif === null){
+      if(unread.length) voiceSpeak('您有 '+unread.length+' 条未读站内消息，请查看', { always:true, force:true });
+    } else {
+      var fresh = unread.filter(function(x){ return !seenNotif[x.id]; });
+      if(fresh.length){
+        var lead = fresh.length > 1 ? '有 '+fresh.length+' 条新消息，最新一条：' : '新消息：';
+        voiceSpeak(lead+fresh[0].title+'。'+fresh[0].desc, { always:true, force:true });
+      }
+    }
+    seenNotif = {};
+    ns.forEach(function(x){ seenNotif[x.id] = 1; });
+  }).catch(function(){});
+}
+var notifPoll = null;
+var liveTick = null;
+/* 顶栏演练计时：按真实起止时刻每秒本地推算 T+HH:MM:SS */
+function renderLiveChip(){
+  var live = document.getElementById('topLive');
+  if(!live) return;
+  var proj = API.activeProject();
+  if(!proj){ live.innerHTML = '<span class="live-chip none"><span class="dot"></span>暂无演练</span>'; return; }
+  if(proj.status==='演练中' || proj.status==='暂停'){
+    var paused = proj.status==='暂停';
+    live.innerHTML = '<span class="live-chip'+(paused?' none':'')+'"><span class="dot"></span>'
+      + (paused?'演练已暂停':'演练进行中') + ' · ' + App.esc(proj.level||'') + '级事件 · T+' + API.fmtElapsed(API.elapsedOf(proj)) + '</span>';
+  } else {
+    live.innerHTML = '<span class="live-chip none"><span class="dot"></span>' + App.esc(proj.status) + '</span>';
+  }
+}
+function startNotifPolling(){
+  if(notifPoll) return;
+  notifPoll = setInterval(refreshNotifBadge, 15000);
 }
 
 /* 数据加载完成后刷新顶栏与徽标（bootstrap 之后调用） */
@@ -156,19 +277,13 @@ function refreshShell(){
   if(tp) tp.textContent = proj ? proj.name : '未选择演练项目';
 
   var live = document.getElementById('topLive');
-  if(live){
-    if(proj && proj.status==='演练中'){
-      live.innerHTML = '<span class="live-chip"><span class="dot"></span>演练进行中 · '+proj.level+'级事件 · T+'+API.drillElapsed()+'</span>';
-    } else {
-      live.innerHTML = '<span class="live-chip none"><span class="dot"></span>'+(proj?proj.status:'暂无演练')+'</span>';
-    }
-  }
+  if(live){ renderLiveChip(); }
+  if(!liveTick) liveTick = setInterval(renderLiveChip, 1000);
 
-  // 未读通知
-  API.getNotifs().then(function(ns){
-    var n = document.getElementById('bellN');
-    if(n) n.textContent = ns.filter(function(x){ return !x.read; }).length;
-  });
+  // 未读通知：立即刷新并定时轮询，演练中的节点/得分消息无需刷新页面即可更新角标
+  refreshNotifBadge();
+  startNotifPolling();
+  syncVoiceBtn();
 
   // 工作台待办数量在页面内展示，顶栏不再显示任务徽标
 }
@@ -183,9 +298,9 @@ function toast(msg, type){
 }
 function modal(opts){
   var ov = document.createElement('div'); ov.className='overlay';
-  ov.innerHTML = '<div class="modal'+(opts.wide?' wide':'')+'"><div class="m-head">'+opts.title+'<span class="x">×</span></div><div class="m-body">'+opts.body+'</div>'+(opts.foot?'<div class="m-foot">'+opts.foot+'</div>':'')+'</div>';
+  ov.innerHTML = '<div class="modal'+(opts.wide?' wide':'')+(opts.full?' full':'')+'"><div class="m-head">'+opts.title+'<span class="x">×</span></div><div class="m-body">'+opts.body+'</div>'+(opts.foot?'<div class="m-foot">'+opts.foot+'</div>':'')+'</div>';
   document.body.appendChild(ov);
-  function close(){ ov.remove(); }
+  function close(){ if(opts.onClose) opts.onClose(); ov.remove(); }
   ov.querySelector('.x').onclick=close;
   ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
   ov.close = close;
@@ -241,8 +356,15 @@ function switchProject(){
 }
 function showNotifs(){
   API.getNotifs().then(function(ns){
-    modal({ title:'消息通知', wide:true, body:'<div class="timeline">'+ns.map(function(n){ return '<div class="tl-item '+(n.level==='P0'?'err':n.level==='P1'?'warn':'gray')+'"><span class="tl-dot"></span><div class="tl-time">'+n.time+' · 来源：'+n.source+'</div><div class="tl-title">'+n.title+'</div><div class="tl-desc">'+n.desc+'</div></div>'; }).join('')+'</div>',
-      onOpen:function(ov){ API.readNotifs(); var b=document.getElementById('bellN'); if(b)b.textContent='0'; } });
+    var list = ns.slice().reverse(); /* 最新消息在最上方 */
+    var body = list.length ? '<div class="timeline">'+list.map(function(n){
+      return '<div class="tl-item '+(n.level==='P0'?'err':n.level==='P1'?'warn':'gray')+'"><span class="tl-dot"></span>'
+        + '<div class="tl-time">'+App.esc(n.time)+' · 来源：'+App.esc(n.source)+'</div>'
+        + '<div class="tl-title">'+App.esc(n.title)+(n.read?'':' <span class="tag blue">未读</span>')+'</div>'
+        + '<div class="tl-desc">'+App.esc(n.desc)+'</div></div>';
+    }).join('')+'</div>' : '<div class="empty">'+icon('bell')+'<div>暂无站内消息</div></div>';
+    modal({ title:'站内消息', wide:true, body:body,
+      onOpen:function(ov){ API.readNotifs(); setBell(0); } });
   });
 }
 function statusTag(s){
@@ -294,6 +416,7 @@ function boot(pageKey){
 
 window.App = { boot:boot, icon:icon, ICONS:ICONS, toast:toast, modal:modal, drawer:drawer, confirmSim:confirmSim,
   logout:logout, switchProject:switchProject, showNotifs:showNotifs, statusTag:statusTag, levelTag:levelTag,
-  refreshShell:refreshShell,
+  refreshShell:refreshShell, renderLiveChip:renderLiveChip, toggleVoice:toggleVoice,
+  voice:{ speak:voiceSpeak, stop:voiceStop, on:voiceOn, supported:voiceSupported, sync:syncVoiceBtn },
   barChart:barChart, hbar:hbar, donut:donut, curRole:curRole, curUser:curUser, esc:function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');} };
 })();

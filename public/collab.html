@@ -234,7 +234,7 @@ document.addEventListener('app:ready', function(e){
           +   '<span class="pg-title" title="'+esc(n.title)+'">'+esc(n.title)+'</span>'
           +   '<span class="tag '+lab[0]+'">'+lab[1]+'</span></div>'
           + '<div class="pg-meta">'+App.icon('user')+'<span>责任：'+esc(n.target||'—')+'</span></div>'
-          + '<div class="pg-meta">'+App.icon('clock')+'<span>'+(n.opTime ? ('操作：'+esc(n.actor||'—')+' · '+esc(n.opTime)) : ('计划：'+esc(n.planTime||'—')))+'</span></div>'
+          + '<div class="pg-meta">'+App.icon('clock')+'<span>'+(n.opTime ? ('操作：'+esc(n.actor||'—')+' · '+esc(n.opTime)) : ('处置时长：'+(n.duration?esc(n.duration)+' 分钟':'未设置')))+'</span></div>'
           + (n.scope==='external' ? '<div class="pg-tags"><span class="tag yellow">院外上报沟通</span></div>' : '')
           + '</div>';
       }).join('');

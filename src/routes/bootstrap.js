@@ -4,6 +4,8 @@ const express = require('express');
 const { db, parseJson } = require('../db');
 const auth = require('../auth');
 const { nowSec } = require('../util');
+const notify = require('../notify');
+const clock = require('../drill_clock');
 
 const router = express.Router();
 
@@ -18,13 +20,16 @@ function mapProject(r) {
     id: r.id, name: r.name, type: r.type, date: r.date, scenarioId: r.scenario_id,
     level: r.level, status: r.status, target: r.target,
     units: parseJson(r.units, []), members: parseJson(r.members, []), observers: parseJson(r.observers, []),
-    mode: r.mode || '基础版'
+    mode: r.mode || '基础版',
+    startedAt: r.started_at || null, pausedAt: r.paused_at || null,
+    pausedSec: Number(r.paused_sec) || 0, endedAt: r.ended_at || null,
+    elapsedSec: clock.elapsedSec(r)
   };
 }
 
 function mapScenario(r) {
   return {
-    id: r.id, name: r.name, type: r.type, level: r.level, difficulty: r.difficulty,
+    id: r.id, name: r.name, type: r.type, level: r.level,
     status: r.status, version: r.version, updated: r.updated, nodes: r.nodes, desc: r.descr,
     alert: r.alert || ''
   };
@@ -32,7 +37,7 @@ function mapScenario(r) {
 
 function mapNode(r) {
   return {
-    id: r.id, scenarioId: r.scenario_id, type: r.type, title: r.title, target: r.target, time: r.time,
+    id: r.id, scenarioId: r.scenario_id, type: r.type, title: r.title, target: r.target,
     timeout: r.timeout, form: r.form || undefined, att: r.att || undefined,
     desc: r.descr, branches: parseJson(r.branches, []),
     guide: r.guide || '', keywords: (r.keywords || '').split(',').filter(Boolean),
@@ -41,7 +46,10 @@ function mapNode(r) {
     evidenceReq: parseJson(r.evidence_req, []),
     flowType: r.flow_type === 'distractor' ? 'distractor' : 'correct',
     score: Number(r.score || 0) || 0,
-    receiver: r.receiver || ''
+    receiver: r.receiver || '',
+    deps: parseJson(r.deps, []),
+    posX: r.pos_x === null || r.pos_x === undefined ? null : Number(r.pos_x),
+    posY: r.pos_y === null || r.pos_y === undefined ? null : Number(r.pos_y)
   };
 }
 
@@ -203,7 +211,10 @@ router.get('/bootstrap', auth.requireAuth, function (req, res) {
     messages: db.prepare('SELECT * FROM messages ORDER BY seq').all().map(function (m) {
       return { id: m.id, time: m.time, level: m.level, source: m.source, text: m.text, targets: parseJson(m.targets, []) };
     }),
-    notifs: db.prepare('SELECT * FROM notifs ORDER BY seq').all().map(function (n) {
+    notifs: db.prepare('SELECT * FROM notifs ORDER BY seq').all().filter(function (n) {
+      /* 外部单位仅可见公开通知，演练内部消息按权限隔离 */
+      return !isExternal || (n.target || 'all') !== 'internal';
+    }).map(function (n) {
       return {
         id: n.id, time: n.time, level: n.level, source: n.source, title: n.title, desc: n.descr,
         read: readRows.some(function (r) { return r.notif_id === n.id; })
@@ -261,9 +272,51 @@ router.patch('/projects/:id/status', auth.requireAuth, function (req, res) {
   if (allow.indexOf(status) < 0) return res.status(400).json({ error: '非法的项目状态' });
   const p = db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id);
   if (!p) return res.status(404).json({ error: '演练项目不存在' });
-  db.prepare('UPDATE projects SET status=? WHERE id=?').run(status, p.id);
+  const prev = p.status;
+  /* 真实计时：启动记录起点，暂停冻结，继续扣除暂停时长，结束/归档冻结 */
+  const ts = nowSec();
+  let started = p.started_at, pausedAt = p.paused_at;
+  let pausedSec = Number(p.paused_sec) || 0, endedAt = p.ended_at;
+  if (status === '未开始') {
+    started = null; pausedAt = null; pausedSec = 0; endedAt = null;
+  } else if (status === '演练中') {
+    if (!started) started = ts;
+    if (prev === '暂停' && pausedAt) {
+      pausedSec += clock.secBetween(pausedAt, ts);
+      pausedAt = null;
+    }
+    endedAt = null;
+  } else if (status === '暂停' && prev !== '暂停') {
+    pausedAt = ts;
+  } else if ((status === '已结束' || status === '已归档') && prev !== status) {
+    if (pausedAt) {
+      pausedSec += clock.secBetween(pausedAt, ts);
+      pausedAt = null;
+    }
+    endedAt = ts;
+  }
+  db.prepare('UPDATE projects SET status=?, started_at=?, paused_at=?, paused_sec=?, ended_at=? WHERE id=?')
+    .run(status, started, pausedAt, pausedSec, endedAt, p.id);
   auth.audit(req, '更新项目 ' + p.id + ' 状态为「' + status + '」');
-  res.json({ ok: true, project: mapProject(Object.assign({}, p, { status: status })) });
+  /* 站内消息：演练启动/继续、演练结束 */
+  const mode = p.mode || '基础版';
+  if (status === '演练中' && prev !== '演练中') {
+    const resume = prev === '暂停';
+    notify.push({
+      title: (resume ? '演练继续' : '演练开始') + ' · ' + p.name,
+      desc: '演练项目「' + p.name + '」' + (resume ? '已恢复' : '已启动') + '（' + mode + '，' + (p.level || '较大') + '级事件）。请各参演角色进入角色工作台按预案处置。',
+      level: p.level === '重大' ? 'P0' : 'P1',
+      source: '演练调度'
+    });
+  } else if (status === '已结束' && prev !== '已结束') {
+    notify.push({
+      title: '演练结束 · ' + p.name,
+      desc: '演练项目「' + p.name + '」（' + mode + '）已结束，请前往复盘评估查看综合得分与考评结果。',
+      level: 'P1',
+      source: '演练调度'
+    });
+  }
+  res.json({ ok: true, project: mapProject(db.prepare('SELECT * FROM projects WHERE id=?').get(p.id)) });
 });
 
 module.exports = router;

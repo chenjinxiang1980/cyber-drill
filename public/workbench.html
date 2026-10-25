@@ -36,6 +36,17 @@ document.addEventListener('app:ready', function(e){
   /* 实战版：可选下一节点接收角色 + 取证材料完成情况（未归档不允许结束演练） */
   var RECEIVERS = [];
   var EV = { done:0, total:0, pending:0, pendingItems:[] };
+  /* 新任务语音提醒基线：仅在待办项新增时播报，首次加载与完成推进不播报 */
+  var lastTaskSig = null;
+  function announceNewTasks(ids, label){
+    var sig = ids.map(String).sort().join(',');
+    if(lastTaskSig === null){ lastTaskSig = sig; return; }
+    if(sig === lastTaskSig) return;
+    var prev = lastTaskSig ? lastTaskSig.split(',') : [];
+    var added = ids.filter(function(x){ return prev.indexOf(String(x)) < 0; });
+    lastTaskSig = sig;
+    if(added.length) App.voice.speak('有新的'+label+'到达，共 '+added.length+' 项，请及时处理');
+  }
   var SIM = MOCK.SIM_DATA || {};
   var FACTS = (SCEN && SIM[SCEN.type]) || SIM['通用'] || {
     sys:'院内业务系统（模拟地址 10.20.x.x）', fault:'模拟故障现象（通用兜底，请按实际修改）',
@@ -52,6 +63,7 @@ document.addEventListener('app:ready', function(e){
     '<div class="page-head"><div><h1>'+App.esc(role.name)+' · 工作台</h1>'
     + '<div class="sub">'+App.esc(proj.name)+' · '+(isPractical?'实战版：自主研判处置':'基础版：按剧本流程逐步执行')+(isExternal?' · <span style="color:var(--warn)">外部单位受限视图</span>':'')+'</div></div>'
     + '<div class="acts">'
+    + (started ? '<span class="live-chip" id="wbLive"><span class="dot"></span>演练进行中 · T+'+API.fmtElapsed(API.elapsedOf(proj))+'</span>' : '')
     + '<button class="btn" id="btnFault">'+App.icon('alert')+'查看故障通报</button>'
     + (isPractical && proj.status==='演练中' && ['commander','platformadmin','itlead'].indexOf(role.id)>=0
         ? '<button class="btn danger" id="btnFinish">'+App.icon('check')+'完成演练</button>' : '')
@@ -70,7 +82,7 @@ document.addEventListener('app:ready', function(e){
     +   '</div>'
     +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色待办任务<span class="more">'+(isPractical?'已发现故障 · 自主处置':'按剧本流程逐步执行')+'</span></div>'
     +     '<div id="wbTasks"><div class="small dim">加载中…</div></div></div>'
-    +   '<div class="card"><div class="card-title">'+App.icon('score')+'演练评分<span class="more">'+(isPractical?'偏离/超时扣分':'时限达成率')+'</span></div><div id="wbScore" class="small dim">正在汇总…</div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('score')+'演练评分<span class="more">'+(isPractical?'偏离/超时扣分':'处置时长达成率')+'</span></div><div id="wbScore" class="small dim">正在汇总…</div></div>'
     +   '<div class="card"><div class="card-title">'+App.icon('eye')+'本角色关注态势</div><div id="wbFeed"><div class="small dim">加载中…</div></div></div>'
     + '</div>';
 
@@ -78,6 +90,22 @@ document.addEventListener('app:ready', function(e){
     App.toast('正在刷新工作台数据…','ok');
     if(isPractical){ renderPractical(); renderScore(); } else { renderBasic(); renderScore(); }
   };
+
+  /* 页头演练计时：按真实起止时刻每秒刷新 */
+  if(started){
+    setInterval(function(){
+      var el = document.getElementById('wbLive');
+      if(!el) return;
+      var p = API.activeProject() || proj;
+      if(p.status==='暂停'){
+        el.className = 'live-chip none';
+        el.innerHTML = '<span class="dot"></span>演练已暂停 · T+'+API.fmtElapsed(API.elapsedOf(p));
+      } else {
+        el.className = 'live-chip';
+        el.innerHTML = '<span class="dot"></span>演练进行中 · T+'+API.fmtElapsed(API.elapsedOf(p));
+      }
+    }, 1000);
+  }
 
   /* ---------- 关联剧本节点 ---------- */
   function nodeForTask(t){
@@ -127,7 +155,7 @@ document.addEventListener('app:ready', function(e){
   /* ---------- 表单字段模拟值（按剧本与场景生成，全部为虚拟数据） ---------- */
   function simValue(fd, t, node){
     var d = new Date();
-    var tm = (node && node.time) || t.deadline || '09:00';
+    var tm = p2(d.getHours())+':'+p2(d.getMinutes());
     if(/起止/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+tm+' 至 '+(parseInt(tm,10)+1)+':30（模拟）';
     if(/时间|日期/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+'T'+tm;
     if(/发现方式/.test(fd)) return String(FACTS.alert||'').split('：')[0] || '安全告警系统';
@@ -186,12 +214,19 @@ document.addEventListener('app:ready', function(e){
     return s;
   }
 
+  /* 字段自动朗读文本：「请填写」在前，仅跟字段说明内容 */
+  function speechHint(h){
+    var t = String(h||'').replace(/\s+/g,' ').trim().replace(/[。！？；，,.;\s]+$/,'');
+    return t ? '请填写，' + t : '请填写';
+  }
+
   /* 在容器内渲染分步填写向导：逐字段展示说明，支持一键模拟数据与上一步/下一步 */
   function mountWizard(host, key, opts){
     var fields = wizFields(opts.fields);
     if(!fields.length){ host.innerHTML = ''; return null; }
     var s = wizState(key, fields, opts.t, opts.node, !!opts.prefill);
     var name = opts.name || '表单';
+    var speechSeq = 0;
 
     function paint(){
       if(s.done){
@@ -237,6 +272,12 @@ document.addEventListener('app:ready', function(e){
         if(type === 'select' || type === 'datetime') inp.onchange = function(){ s.values[f.label] = inp.value; };
       }
 
+      /* 打开流程/切换字段后延时 0.5 秒再朗读，避免语音被页面渲染打断导致播报不全 */
+      var seq = ++speechSeq, hintAtPaint = speechHint(f.hint);
+      setTimeout(function(){
+        if(s.done || seq !== speechSeq) return;
+        App.voice.speak(hintAtPaint, { force:true });
+      }, 500);
       host.querySelector('[data-sim]').onclick = function(){
         fields.forEach(function(x){
           var v = String(simValue(x.label, opts.t, opts.node)||'');
@@ -278,17 +319,17 @@ document.addEventListener('app:ready', function(e){
         }).join('');
   }
 
-  /* ---------- 基础版：仅显示当前正确流程，完成后进入下一步 ---------- */
+  /* ---------- 基础版：按剧本依赖并行开放，前置全部完成即可处置 ---------- */
   function stepCard(t, node, idx, total){
     var action = node ? (node.action || '应急处置') : '应急处置';
     var desc = node ? node.desc : (t.desc || '按预案完成本岗处置');
     var guide = node ? node.guide : '';
     var limit = (node && node.timeout) ? node.timeout+' 分钟' : '—';
-    return '<div class="section-title">'+App.icon('flow')+'当前步骤 '+idx+' / '+total+' <span class="tiny dim" style="font-weight:400">完成本步骤后自动进入下一流程</span></div>'
+    return '<div class="section-title">'+App.icon('flow')+'当前处置流程 <span class="tiny dim" style="font-weight:400">完成本流程后，满足前置条件的后续流程将并行开放</span></div>'
       + '<div class="card" style="padding:14px 16px;border-color:rgba(47,129,247,.35)">'
       +   '<div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px">'
       +     '<div><div class="small bold">'+App.esc(t.title)+'</div>'
-      +     '<div class="tk-meta mt2"><span class="mono">'+App.esc(t.id)+'</span><span class="mono">计划 '+App.esc(node&&node.time||t.deadline||'—')+'</span><span>时限 '+limit+'</span>'+App.levelTag(t.level)+'</div></div>'
+      +     '<div class="tk-meta mt2"><span class="mono">'+App.esc(t.id)+'</span><span>处置时长 '+limit+'</span>'+App.levelTag(t.level)+'</div></div>'
       +     App.statusTag(t.status)+'</div>'
       +   '<div class="kv mt3">'
       +     '<span class="k">处置动作</span><span class="bold">'+App.esc(action)+'</span>'
@@ -304,23 +345,28 @@ document.addEventListener('app:ready', function(e){
       +   '<div class="flex wrap gap2" id="watt-'+t.id+'">'+(t.atts&&t.atts.length?attHtml(t):'<span class="small dim">暂无附件 · 上传后即时刷新</span>')+'</div>'
       +   formsHtml(t, node)
       +   '<div class="divider"></div>'
-      +   '<button class="btn ok" data-finish="'+t.id+'">'+App.icon('check')+'完成本步骤，进入下一流程</button>'
-      +   '<div class="tiny dim mt2">仅基础版展示正确处置流程；完成后本步骤归档，工作台自动切换到下一节点。</div>'
+      +   '<button class="btn ok" data-finish="'+t.id+'">'+App.icon('check')+'完成本流程</button>'
+      +   '<div class="tiny dim mt2">仅基础版展示正确处置流程；完成本流程后归档，其后续流程在满足前置条件时自动开放。</div>'
       + '</div>';
   }
 
-  /* 列表行：完成态可查看归档记录，当前步点击打开完整处置表单弹窗 */
-  function basicRow(t, node, state, idx, total){
-    var done = state === 'done';
+  /* 列表行：完成态可查看归档记录；可处置 / 前置未完成 区分展示 */
+  function basicRow(t, node, state){
+    var done = state === 'done', locked = state === 'locked';
+    var limit = (node && node.timeout) ? node.timeout+' 分钟' : '—';
     var meta = '<span class="mono">'+App.esc(t.id)+'</span>'
-      + '<span>计划 '+App.esc((node&&node.time)||t.deadline||'—')+'</span>'
-      + (node&&node.timeout?'<span>时限 '+node.timeout+' 分钟</span>':'')
+      + '<span>处置时长 '+limit+'</span>'
       + (node&&node.action?'<span>'+App.esc(node.action)+'</span>':'');
-    return '<div class="tn-row '+(done?'done':'cur')+'" data-'+(done?'view':'open')+'="'+App.esc(t.id)+'" role="button" tabindex="0">'
-      + '<span class="tn-ic">'+(done?App.icon('check'):App.icon('alert'))+'</span>'
+    var blocked = (t.blockedBy||[]).map(function(x){ return x.title||x.id; });
+    if(locked && blocked.length) meta += '<span style="color:var(--warn)">待完成：'+App.esc(blocked.join('、'))+'</span>';
+    var tag = done ? '<span class="tag green">已完成</span>'
+      : (locked ? '<span class="tag gray">前置未完成</span>' : '<span class="tag red">可处置（并行）</span>');
+    return '<div class="tn-row '+(done?'done':'cur')+'" '+(locked?'style="opacity:.55;cursor:not-allowed" ':'')
+      + 'data-'+(done?'view':(locked?'lock':'open'))+'="'+App.esc(t.id)+'" role="button" tabindex="0">'
+      + '<span class="tn-ic">'+(done?App.icon('check'):(locked?App.icon('lock'):App.icon('alert')))+'</span>'
       + '<div class="tn-main"><div class="tn-title">'+App.esc(t.title)+'</div><div class="tn-meta">'+meta+'</div></div>'
-      + (done?'<span class="tag green">已完成</span>':'<span class="tag red">当前步骤 '+idx+' / '+total+'</span>')
-      + '<span class="tn-go">'+(done?'查看归档记录 ›':'打开处置表单 ›')+'</span></div>';
+      + tag
+      + '<span class="tn-go">'+(done?'查看归档记录 ›':(locked?'请先完成前置流程':'打开处置表单 ›'))+'</span></div>';
   }
 
   function renderBasic(){
@@ -328,27 +374,33 @@ document.addEventListener('app:ready', function(e){
     host.innerHTML = '<div class="small dim">正在加载本角色待办任务…</div>';
     API.getTasks().then(function(ts){
       var mine = (ts||[]).filter(function(t){ return t.projectId===proj.id && t.role===role.id; });
+      var done = mine.filter(function(t){ return t.status==='已完成'; });
+      var avail = mine.filter(function(t){ return t.status!=='已完成' && t.available!==false; });
+      var locked = mine.filter(function(t){ return t.status!=='已完成' && t.available===false; });
+      announceNewTasks(avail.map(function(t){ return t.id; }), '待办任务');
       if(!mine.length){
         host.innerHTML = '<div class="empty">'+App.icon('check')+'<div>本角色暂无待办任务</div><div class="tiny dim mt2">剧本基线中未分配本角色节点，或任务已完成</div></div>';
         return;
       }
-      var done = mine.filter(function(t){ return t.status==='已完成'; });
-      var idx = -1;
-      for(var i=0;i<mine.length;i++){ if(mine[i].status!=='已完成'){ idx=i; break; } }
-      var head = '<div class="tiny dim" style="margin-bottom:10px">本角色流程进度 <b>'+done.length+' / '+mine.length+'</b> 步 · 点击列表行打开完整处置表单（弹窗形式）</div>';
-      var rows = done.map(function(t){ return basicRow(t, nodeForTask(t), 'done', 0, mine.length); }).join('');
-      if(idx<0){
-        host.innerHTML = head + '<div class="task-nav">'+rows+'</div>'
-          + '<div class="empty mt3">'+App.icon('check')+'<div>本角色负责的流程已全部完成</div><div class="tiny dim mt2">可前往复盘评估查看时限达成情况</div></div>';
-      } else {
-        rows += basicRow(mine[idx], nodeForTask(mine[idx]), 'cur', idx+1, mine.length);
-        host.innerHTML = head + '<div class="task-nav">'+rows+'</div>'
-          + '<div class="tiny dim mt2">当前步骤需点开弹窗核对处置动作、提交表单与附件；完成后列表自动推进到下一步。</div>';
-      }
+      var head = '<div class="tiny dim" style="margin-bottom:10px">本角色流程进度 <b>'+done.length+' / '+mine.length+'</b> 步 · 当前可处置 <b style="color:var(--accent2)">'+avail.length+'</b> 项（可并行）· 点击列表行打开完整处置表单（弹窗形式）</div>';
+      var rows = done.map(function(t){ return basicRow(t, nodeForTask(t), 'done'); }).join('')
+        + avail.map(function(t){ return basicRow(t, nodeForTask(t), 'cur'); }).join('')
+        + locked.map(function(t){ return basicRow(t, nodeForTask(t), 'locked'); }).join('');
+      host.innerHTML = head + '<div class="task-nav">'+rows+'</div>'
+        + (avail.length ? '<div class="tiny dim mt2">当前有 '+avail.length+' 项流程可并行处置：需点开弹窗核对处置动作、提交表单与附件；完成后满足前置条件的后续流程自动开放。</div>'
+          : (locked.length ? '<div class="tiny dim mt2">当前暂无可处置流程，等待前置流程完成后自动开放（置灰项为前置未完成）。</div>'
+            : '<div class="empty mt3">'+App.icon('check')+'<div>本角色负责的流程已全部完成</div><div class="tiny dim mt2">可前往复盘评估查看处置时长达成情况</div></div>'));
       host.querySelectorAll('[data-open]').forEach(function(row){
         row.onclick = function(){
           var t = mine.filter(function(x){ return String(x.id)===String(row.dataset.open); })[0];
-          if(t) openBasicTask(t, idx+1, mine.length);
+          if(t) openBasicTask(t, 0, mine.length);
+        };
+      });
+      host.querySelectorAll('[data-lock]').forEach(function(row){
+        row.onclick = function(){
+          var t = mine.filter(function(x){ return String(x.id)===String(row.dataset.lock); })[0];
+          var names = t ? (t.blockedBy||[]).map(function(x){ return x.title||x.id; }).join('、') : '';
+          App.toast('请先完成前置流程'+(names?'：'+names:''),'warn');
         };
       });
       host.querySelectorAll('[data-view]').forEach(function(row){
@@ -394,7 +446,7 @@ document.addEventListener('app:ready', function(e){
         + '<span class="k">任务编号</span><span class="mono">'+App.esc(t.id)+'</span>'
         + '<span class="k">处置动作</span><span class="bold">'+App.esc((node&&node.action)||'应急处置')+'</span>'
         + '<span class="k">处置内容</span><span class="small" style="line-height:1.75">'+App.esc((node&&node.desc)||t.desc||'—')+'</span>'
-        + '<span class="k">计划时刻</span><span class="mono">'+App.esc((node&&node.time)||t.deadline||'—')+'</span>'
+        + '<span class="k">处置时长</span><span>'+(node&&node.timeout?node.timeout+' 分钟':'未设置')+'</span>'
         + '<span class="k">当前状态</span><span>'+App.statusTag(t.status)+'</span>'
         + '</div>'
         + '<div class="sim-banner mt3">'+App.icon('check')+'<span>本步骤已完成并归档（接单 → 提交处置 → 完成），列表行仅供查看，不可重复提交。</span></div>',
@@ -748,23 +800,25 @@ document.addEventListener('app:ready', function(e){
   /* ---------- 实战版：本角色全部候选处置流程（正确流程与混淆流程外观一致） ---------- */
   function flowRow(d){
     var sub = d.submitted;
+    var locked = !sub && !!d.locked;
     var skipped = !!(sub && sub.skipped);
     var statusTag = skipped
       ? '<span class="tag gray">已跳过</span>'
       : (sub
         ? '<span class="tag '+(sub.correct?'green':'red')+'">已提交</span>'
-        : '<span class="tag red">待处置</span>');
-    var meta = '<span class="mono">计划 '+App.esc(d.time||'—')+'</span>'
-      + (d.timeout?'<span>时限 '+d.timeout+' 分钟</span>':'')
+        : (locked ? '<span class="tag gray">前置未完成</span>' : '<span class="tag red">待处置</span>'));
+    var meta = '<span>处置时长 '+(d.timeout?d.timeout+' 分钟':'—')+'</span>'
       + (d.action?'<span>'+App.esc(d.action)+'</span>':'')
-      + (d.formName?'<span>表单：'+App.esc(d.formName)+'</span>':'');
-    return '<div class="tn-row '+(sub?'done':'cur')+'" data-flow="'+App.esc(d.nodeId)+'" role="button" tabindex="0">'
-      + '<span class="tn-ic">'+(sub?App.icon('check'):App.icon('alert'))+'</span>'
+      + (d.formName?'<span>表单：'+App.esc(d.formName)+'</span>':'')
+      + (locked && (d.blockedBy||[]).length ? '<span style="color:var(--warn)">待完成：'+App.esc(d.blockedBy.map(function(x){ return x.title||x.id; }).join('、'))+'</span>' : '');
+    return '<div class="tn-row '+(sub?'done':'cur')+'" '+(locked?'style="opacity:.55;cursor:not-allowed" ':'')
+      + 'data-flow="'+App.esc(d.nodeId)+'" data-locked="'+(locked?1:0)+'" role="button" tabindex="0">'
+      + '<span class="tn-ic">'+(sub?App.icon('check'):(locked?App.icon('lock'):App.icon('alert')))+'</span>'
       + '<div class="tn-main"><div class="tn-title">'+App.esc(d.title||d.action||'处置流程')+'</div>'
       + '<div class="tn-meta">'+meta+'</div></div>'
       + statusTag
-      + (!sub ? '<button class="btn sm outline" data-skip="'+App.esc(d.nodeId)+'" title="判定该流程不属于本岗处置动作，不执行">跳过（不执行）</button>' : '')
-      + '<span class="tn-go">'+(skipped?'查看跳过记录 ›':(sub?'查看处置记录 ›':'填写处置表单 ›'))+'</span></div>';
+      + (!sub && !locked ? '<button class="btn sm outline" data-skip="'+App.esc(d.nodeId)+'" title="判定该流程不属于本岗处置动作，不执行">跳过（不执行）</button>' : '')
+      + '<span class="tn-go">'+(skipped?'查看跳过记录 ›':(sub?'查看处置记录 ›':(locked?'前置流程完成后开放':'填写处置表单 ›')))+'</span></div>';
   }
 
   function flowForm(d){
@@ -801,7 +855,7 @@ document.addEventListener('app:ready', function(e){
       + '<span class="k">处置时刻</span><span class="mono">'+App.esc(sub.stepTime||'—')+'</span>'
       + '<span class="k">处置人</span><span>'+App.esc(sub.user||'—')+'</span>'
       + '<span class="k">判定结果</span><span>'+(sub.correct
-          ? '<span class="tag green">正确流程 · 得分 +'+sub.delta+'</span>'+(sub.ontime?'':' <span class="tag yellow">超出计划时限</span>')
+          ? '<span class="tag green">正确流程 · 得分 +'+sub.delta+'</span>'+(sub.ontime?'':' <span class="tag yellow">超出处置时长</span>')
           : '<span class="tag red">混淆流程 · 扣分 '+Math.abs(sub.delta)+'</span>')+'</span>'
       + '<span class="k">下一节点接收人</span><span>'+(sub.receiver?App.esc(sub.receiver):'—')
         +(sub.correct?(sub.receiverOk?'':' <span class="tag red">选择错误 · 扣本流程10%</span>'):'')+'</span>'
@@ -820,8 +874,7 @@ document.addEventListener('app:ready', function(e){
       title:'处置流程 · '+App.esc(d.title||d.action||'系统故障'),
       wide:true,
       body:'<div class="fm-strip">'+App.icon('alert')+'<span><b>'+App.esc(d.title||'')+'</b><br>'+App.esc(d.desc||'请结合故障通报研判本流程是否属于本岗正确处置动作')+'</span></div>'
-        + '<div class="kv mb3"><span class="k">计划时刻</span><span class="mono">'+App.esc(d.time||'—')+'</span>'
-        + '<span class="k">节点时限</span><span>'+(d.timeout?d.timeout+' 分钟':'—')+'</span>'
+        + '<div class="kv mb3"><span class="k">处置时长</span><span>'+(d.timeout?d.timeout+' 分钟':'未设置')+'</span>'
         + '<span class="k">责任角色</span><span>'+App.esc(d.target||'—')+'</span></div>'
         + '<div id="wbFlowBody">'+(sub?flowDoneBody(d):flowForm(d))+'</div>',
       foot:'<button class="btn" id="wbFlowClose">关闭</button>'+(sub?'':'<button class="btn primary" id="wbFlowSubmit">'+App.icon('check')+'提交处置记录</button>'),
@@ -836,7 +889,7 @@ document.addEventListener('app:ready', function(e){
         var wkey = 'p-'+proj.id+'-'+d.nodeId;
         if(wizHost) mountWizard(wizHost, wkey, {
           name: d.formName || '实战处置表单', fields: d.fields,
-          t: { id: d.nodeId, deadline: d.time, level: '' }, node: { time: d.time }, prefill: false
+          t: { id: d.nodeId, deadline: '', level: '' }, node: { time: '' }, prefill: false
         });
         box.insertAdjacentHTML('beforeend','<div class="divider"></div>'
           + '<div class="form-grid">'
@@ -878,7 +931,7 @@ document.addEventListener('app:ready', function(e){
           }).then(function(r){
             var recvTip = r.correct && r.receiverOk===0 ? '（接收人选择错误，扣本流程10%）' : '';
             App.toast(r.correct
-              ? '处置记录已提交：正确流程，得分 +'+r.delta+(r.ontime?'':';超出计划时限')+recvTip
+              ? '处置记录已提交：正确流程，得分 +'+r.delta+(r.ontime?'':';超出处置时长')+recvTip
               : '处置记录已提交：混淆流程，扣分 '+Math.abs(r.delta),
               r.correct && r.receiverOk!==0 ? 'ok':'warn');
             ov.close();
@@ -942,19 +995,27 @@ document.addEventListener('app:ready', function(e){
       RECEIVERS = data.receivers || [];
       EV = data.evidence || EV;
       updateFinishBtn();
-      var pending = flows.filter(function(d){ return !d.submitted; }).length;
+      var lockedCount = flows.filter(function(d){ return !d.submitted && d.locked; }).length;
+      var pending = flows.filter(function(d){ return !d.submitted && !d.locked; }).length;
+      announceNewTasks(flows.filter(function(d){ return !d.submitted && !d.locked; }).map(function(d){ return d.nodeId; }), '处置流程');
       if(!flows.length){
         host.innerHTML = '<div class="empty">'+App.icon('lock')+'<div>本角色暂无可处置流程</div>'
           + '<div class="tiny dim mt2">剧本基线中未分配本角色处置节点</div></div>';
         return;
       }
-      host.innerHTML = '<div class="tiny dim" style="margin-bottom:10px">本角色候选处置流程 <b>'+flows.length+'</b> 个（待处置 <b style="color:var(--err)">'+pending+'</b> 个）· 点击列表行填写完整处置表单，判定不属于本岗动作可点「跳过（不执行）」</div>'
+      host.innerHTML = '<div class="tiny dim" style="margin-bottom:10px">本角色候选处置流程 <b>'+flows.length+'</b> 个（待处置 <b style="color:var(--err)">'+pending+'</b> 个'
+        + (lockedCount?'，前置未完成 <b>'+lockedCount+'</b> 个':'')+'）· 点击列表行填写完整处置表单，判定不属于本岗动作可点「跳过（不执行）」</div>'
         + '<div class="task-nav">'+flows.map(flowRow).join('')+'</div>'
-        + '<div class="tiny dim mt2">列表同时包含正确处置流程与混淆流程，外观一致、不提示属性：误选混淆流程按该流程分值直接扣分；正确流程超时完成按 90% 计分；跳过混淆流程可加少量分，跳过正确流程则在结束演练时按该流程分值扣分。</div>';
+        + '<div class="tiny dim mt2">列表同时包含正确处置流程与混淆流程，外观一致、不提示属性：误选混淆流程按该流程分值直接扣分；正确流程超时完成按 90% 计分；跳过混淆流程可加少量分，跳过正确流程则在结束演练时按该流程分值扣分。未满足前置条件的流程会置灰锁定，前置完成后自动开放。</div>';
       host.querySelectorAll('[data-flow]').forEach(function(row){
         row.onclick = function(){
           var d = flows.filter(function(x){ return String(x.nodeId)===String(row.dataset.flow); })[0];
-          if(d) openFlow(d);
+          if(!d) return;
+          if(!d.submitted && d.locked){
+            App.toast('前置流程未完成'+(d.blockedBy&&d.blockedBy.length?'：'+d.blockedBy.map(function(x){ return x.title||x.id; }).join('、'):'')+'，完成后自动开放','warn');
+            return;
+          }
+          openFlow(d);
         };
       });
       host.querySelectorAll('[data-skip]').forEach(function(b){

@@ -237,7 +237,7 @@ function apply(db, opts) {
   const pad = function (n) { return n < 10 ? '0' + n : String(n); };
   const today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
   const del = db.prepare('DELETE FROM script_nodes WHERE scenario_id=?');
-  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,required) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,required,deps) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
   const out = [];
   Object.keys(SCEN).forEach(function (sid) {
     const sc = db.prepare('SELECT * FROM scenarios WHERE id=?').get(sid);
@@ -245,8 +245,9 @@ function apply(db, opts) {
     const steps = SCEN[sid];
     del.run(sid);
     steps.forEach(function (r, i) {
-      ins.run(sid + '-' + (i + 1), sid, r[0], r[1], r[2], r[3], r[4] || null, '', '', r[6] || '',
-        JSON.stringify([]), i, r[7] || '', r[8] || '', r[9] || '', r[5] ? 1 : 0);
+      ins.run(sid + '-' + (i + 1), sid, r[0], r[1], r[2], '', r[4] || null, '', '', r[6] || '',
+        JSON.stringify([]), i, r[7] || '', r[8] || '', r[9] || '', r[5] ? 1 : 0,
+        JSON.stringify(i ? [sid + '-' + i] : []));
     });
     const version = opts.bump === false ? (sc.version || 'v1.0') : bump(sc.version);
     db.prepare('UPDATE scenarios SET nodes=?, version=?, updated=? WHERE id=?')

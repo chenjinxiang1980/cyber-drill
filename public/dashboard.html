@@ -35,7 +35,7 @@ document.addEventListener('app:ready', function(e){
     + '<div class="sim-banner">'+App.icon('alert')+'<span>本看板所有告警、事件、系统状态均为<b>演练模拟数据</b>，与医院真实生产环境无关，系统不操作任何生产网络与设备。</span></div>'
     + '<div class="grid grid-4" id="kpis"></div>'
     + '<div class="grid mt4" style="grid-template-columns:1.5fr 1fr;margin-top:16px">'
-    +   '<div class="card"><div class="card-title">'+App.icon('flow')+'剧本时序进度<span class="more" onclick="location.href=\'script-editor.html\'">查看剧本 ▸</span></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('flow')+'剧本时序进度<span class="more" onclick="location.href=\'scenarios.html?edit=1\'">查看剧本 ▸</span></div>'
     +     '<div class="scroll-panel" id="scriptBox"></div></div>'
     +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色任务完成状态<span class="more dim tiny">悬停暂停滚动</span></div>'
     +     '<div class="scroll-panel" id="roleBox"></div></div>'
@@ -79,22 +79,24 @@ document.addEventListener('app:ready', function(e){
       { l:'当前事件等级', v:proj.level, cls:'err', f:'依据剧本S01研判', ic:'alert' },
       { l:'待办任务', v:allTasks.filter(function(t){return t.status!=='已完成';}).length, cls:'warn', f:'超时 '+overdue+' 项', ic:'tasks' },
       { l:'参演角色在线', v:proj.members.length, cls:'info', f:'观察员 '+proj.observers.length+' 人', ic:'user' },
-      { l:'演练已进行', v:API.drillElapsed(), cls:'ok', f:'启动于 '+String(proj.date).slice(11), ic:'clock' }
+      { l:'演练已进行', v:API.drillElapsed(), cls:'ok', f:(proj.startedAt?'启动于 '+String(proj.startedAt).slice(0,16):'项目状态：'+(proj.status||'未开始')), ic:'clock', id:'d-elapsed' }
     ];
     document.getElementById('kpis').innerHTML = k.map(function(x){
-      return '<div class="kpi '+x.cls+'"><div class="k-label">'+App.icon(x.ic)+x.l+'</div><div class="k-value">'+x.v+'</div><div class="k-foot">'+x.f+'</div></div>';
+      return '<div class="kpi '+x.cls+'"'+(x.id?' id="'+x.id+'"':'')+'><div class="k-label">'+App.icon(x.ic)+x.l+'</div><div class="k-value">'+x.v+'</div><div class="k-foot">'+x.f+'</div></div>';
     }).join('');
   }
+  /* 每秒本地推算真实计时 */
+  setInterval(function(){
+    var el = document.querySelector('#d-elapsed .k-value');
+    if(el) el.textContent = API.drillElapsed();
+  }, 1000);
 
   function renderScript(){
     var nodes = DATA.nodes || [];
     if(!nodes.length){ autoScroll(document.getElementById('scriptBox'), '<div class="tiny dim">当前剧本暂无节点</div>'); return; }
-    var lastTime = nodes[nodes.length-1].time;
-    var now = '11:30';
-    var html = '<div class="timeline">' + nodes.map(function(n){
-      var st = n.time <= now ? (n.time===lastTime?'warn':'ok') : 'gray';
+    var html = '<div class="timeline">' + nodes.map(function(n, i){
       var icon = n.type==='alert'?'bell':n.type==='branch'?'flow':n.type==='report'?'send':n.type==='end'?'power':'tasks';
-      return '<div class="tl-item '+st+'"><span class="tl-dot"></span><div class="flex gap2"><span class="tl-time">'+n.time+' · T节点</span></div><div class="tl-title">'+App.icon(icon)+' '+n.title+'</div><div class="tl-desc">接收：'+n.target+(n.form?' · 需提交：'+(MOCK.FORM_TEMPLATES.filter(function(f){return f.id===n.form;})[0]||{}).name:'')+(n.timeout?' · 超时'+n.timeout+'min提醒':'')+'</div></div>';
+      return '<div class="tl-item gray"><span class="tl-dot"></span><div class="flex gap2"><span class="tl-time">第 '+(i+1)+' 节点</span></div><div class="tl-title">'+App.icon(icon)+' '+n.title+'</div><div class="tl-desc">接收：'+n.target+(n.form?' · 需提交：'+(MOCK.FORM_TEMPLATES.filter(function(f){return f.id===n.form;})[0]||{}).name:'')+(n.timeout?' · 处置时长 '+n.timeout+' 分钟':'')+'</div></div>';
     }).join('') + '</div>';
     autoScroll(document.getElementById('scriptBox'), html);
   }

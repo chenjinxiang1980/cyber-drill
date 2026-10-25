@@ -33,6 +33,20 @@ window.API = (function () {
       return r;
     });
   }
+  /* 删除演练项目（平台管理员）：服务端清除全部关联数据，本地同步移除 */
+  function deleteProject(id) {
+    return DRILL.del('/content/projects/' + encodeURIComponent(id)).then(function (r) {
+      window.MOCK.PROJECTS = (window.MOCK.PROJECTS || []).filter(function (p) { return p.id !== id; });
+      MOCK.TASKS = (MOCK.TASKS || []).filter(function (t) { return t.projectId !== id; });
+      MOCK.EVIDENCE = (MOCK.EVIDENCE || []).filter(function (e) { return e.projectId !== id; });
+      if (sessionStorage.getItem('pzy_proj') === id) {
+        var nx = (window.MOCK.PROJECTS || [])[0];
+        if (nx) sessionStorage.setItem('pzy_proj', nx.id);
+        else sessionStorage.removeItem('pzy_proj');
+      }
+      return r;
+    });
+  }
   function updateProjectMembers(id, members) {
     return DRILL.patch('/content/projects/' + encodeURIComponent(id) + '/members', { members: members }).then(function (r) {
       var p = (MOCK.PROJECTS || []).filter(function (x) { return x.id === id; })[0];
@@ -43,17 +57,37 @@ window.API = (function () {
   function updateProjectStatus(id, status) {
     return DRILL.patch('/projects/' + encodeURIComponent(id) + '/status', { status: status }).then(function (r) {
       var p = (MOCK.PROJECTS || []).filter(function (x) { return x.id === id; })[0];
-      if (p) p.status = status;
+      if (p) {
+        if (r && r.project) Object.keys(r.project).forEach(function (k) { p[k] = r.project[k]; });
+        else p.status = status;
+      }
       return r;
     });
   }
+  /* 解析本地时间字符串（YYYY-MM-DD HH:mm[:ss]）为毫秒 */
+  function parseLocal(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(s || ''));
+    if (!m) return NaN;
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)).getTime();
+  }
+  /* 真实已进行秒数：未启动返回 null；暂停/结束取冻结时刻；扣除累计暂停时长 */
+  function elapsedOf(p) {
+    if (!p || !p.startedAt) return null;
+    var start = parseLocal(p.startedAt);
+    if (!isFinite(start)) return null;
+    var end = p.endedAt ? parseLocal(p.endedAt) : (p.pausedAt ? parseLocal(p.pausedAt) : Date.now());
+    if (!isFinite(end)) end = Date.now();
+    var sec = Math.floor((end - start) / 1000 - (Number(p.pausedSec) || 0));
+    return sec > 0 ? sec : 0;
+  }
+  function fmtElapsed(sec) {
+    if (sec === null || sec === undefined) return '00:00:00';
+    var s = Math.max(0, Math.floor(Number(sec) || 0));
+    var p2 = function (n) { return n < 10 ? '0' + n : '' + n; };
+    return p2(Math.floor(s / 3600)) + ':' + p2(Math.floor(s % 3600 / 60)) + ':' + p2(s % 60);
+  }
   function drillElapsed() {
-    var p = activeProject();
-    if (!p || p.status !== '演练中') return '00:00';
-    var start = new Date(String(p.date).replace(/-/g, '/'));
-    var mins = Math.max(0, Math.round((Date.now() - start.getTime()) / 60000));
-    var h = Math.floor(mins / 60), m = mins % 60;
-    return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
+    return fmtElapsed(elapsedOf(activeProject()));
   }
 
   /* ---------- 任务 ---------- */
@@ -183,21 +217,21 @@ window.API = (function () {
     return DRILL.post('/content/scenarios', s).then(function (r) {
       (MOCK.SCENARIOS = MOCK.SCENARIOS || []).push({
         id: r.id, name: s.name, type: s.type || '', level: s.level || '一般',
-        difficulty: s.difficulty || '实战版', status: '草稿', version: 'v1.0',
+        status: '草稿', version: 'v1.0',
         updated: new Date().toISOString().slice(0, 10), nodes: 0, desc: s.desc || '', alert: s.alert || ''
       });
       return r;
     });
   }
-  function saveScriptNodes(scenarioId, nodes, difficulty, alert) {
-    return DRILL.post('/content/script-nodes', { scenarioId: scenarioId, nodes: nodes, difficulty: difficulty, alert: alert }).then(function (r) {
+  function saveScriptNodes(scenarioId, nodes, alert, name) {
+    return DRILL.post('/content/script-nodes', { scenarioId: scenarioId, nodes: nodes, alert: alert, name: name }).then(function (r) {
       var s = (MOCK.SCENARIOS || []).filter(function (x) { return x.id === scenarioId; })[0];
       if (s) {
         s.version = r.version;
         s.nodes = r.count;
         s.updated = r.updated;
-        if (r.difficulty) s.difficulty = r.difficulty;
         if (r.alert !== undefined) s.alert = r.alert;
+        if (r.name) s.name = r.name;
       }
       /* 本地节点缓存同步，保证回放/编排切换场景后读到最新编排 */
       MOCK.SCRIPT_NODES = (MOCK.SCRIPT_NODES || []).filter(function (n) { return n.scenarioId !== scenarioId; })
@@ -443,7 +477,8 @@ window.API = (function () {
   return {
     login: login, logout: logout, curRole: curRole, changePassword: changePassword, me: me,
     activeProject: activeProject, setActiveProject: setActiveProject,
-    getProjects: getProjects, createProject: createProject, updateProjectMembers: updateProjectMembers, updateProjectStatus: updateProjectStatus, drillElapsed: drillElapsed,
+    getProjects: getProjects, createProject: createProject, deleteProject: deleteProject, updateProjectMembers: updateProjectMembers, updateProjectStatus: updateProjectStatus,
+    drillElapsed: drillElapsed, elapsedOf: elapsedOf, fmtElapsed: fmtElapsed,
     getTasks: getTasks, deleteTask: deleteTask, completeTask: completeTask, resetTasks: resetTasks,
     acceptTask: acceptTask, submitTask: submitTask,
     getTaskAttachments: getTaskAttachments, uploadTaskAttachments: uploadTaskAttachments,

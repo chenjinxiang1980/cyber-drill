@@ -19,8 +19,7 @@ table.mx-table td:first-child, table.mx-table th:first-child{text-align:left;whi
 .mx-cell.mx-lock{cursor:not-allowed;opacity:.7}
 tr.ext td{background:rgba(210,153,34,.07)}
 .adm-pane{display:none} .adm-pane.on{display:block}
-.chan-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px dashed var(--border)}
-.chan-row:last-child{border-bottom:none}
+
 </style>
 </head>
 <body data-page="admin">
@@ -36,14 +35,10 @@ document.addEventListener('app:ready', function(e){
   });
   var templates = MOCK.FORM_TEMPLATES.slice();
   var auditBase = MOCK.AUDIT_LOGS.slice();
+  var auditPage = 1;
+  var auditPageSize = 10;
   var BRAND_ADMIN = role.id === 'platformadmin'; /* 系统设置仅平台管理员可维护 */
-  var channels = [
-    { name:'站内消息', desc:'任务/告警实时推送至工作台铃铛', on:true },
-    { name:'短信（模拟）', desc:'P0事件与超时督办短信提醒，演练中不真实发送', on:true },
-    { name:'邮件（模拟）', desc:'日报与归档通知，演练中不真实发送', on:false }
-  ];
-
-  var MODS = [['dashboard','演练看板'],['workbench','角色工作台'],['collab','演练导调'],['scenarios','场景剧本库'],['script-editor','剧本编辑'],['projects','演练项目'],['screen','监视大屏'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['report','演练报告'],['ledger','台账统计'],['opinion','公告舆情'],['knowledge','预案知识库'],['admin','系统管理']];
+  var MODS = [['dashboard','演练看板'],['workbench','角色工作台'],['collab','演练导调'],['scenarios','剧本库与编排'],['projects','演练项目'],['screen','监视大屏'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['report','演练报告'],['ledger','台账统计'],['opinion','公告舆情'],['knowledge','预案知识库'],['admin','系统管理']];
   function roleName(id){ var r = MOCK.ROLES.filter(function(x){ return x.id===id; })[0]; return r ? r.name : id; }
   function objOf(a){ var m = a.match(/《(.+?)》/); if(m) return m[1]; var i = a.indexOf('：'); return i>=0 ? a.slice(i+1) : '—'; }
 
@@ -76,13 +71,19 @@ document.addEventListener('app:ready', function(e){
     + '<div class="adm-pane" id="pane-audit">'
     +   '<div class="sim-banner" style="border-color:rgba(248,81,73,.5);color:var(--err);background:var(--err-dim)">'+App.icon('lock')+'<span><b>日志仅可查看，不可删除修改（防篡改）。</b>本模块不提供任何删除/编辑入口，导出留痕同样写入审计。</span></div>'
     +   '<div class="card"><div class="card-title">'+App.icon('eye')+'审计日志<span class="more">共 <span id="aCnt" class="mono">0</span> 条</span></div>'
-    +   '<div class="filters" style="margin-bottom:12px"><input class="input grow" id="aKw" placeholder="搜索用户 / 操作 / 时间…"></div>'
-    +   '<div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>用户</th><th>角色</th><th>操作</th><th>对象</th><th>IP</th></tr></thead><tbody id="aBody"></tbody></table></div></div>'
+    +   '<div class="filters" style="margin-bottom:12px"><input class="input grow" id="aKw" placeholder="搜索用户 / 操作 / 时间…"><span class="tiny dim" style="white-space:nowrap">每页</span><select class="select" id="aPageSize" style="width:auto;min-width:96px" title="每页显示条数"><option value="10" selected>10 条</option><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option></select></div>'
+    +   '<div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>用户</th><th>角色</th><th>操作</th><th>对象</th><th>IP</th></tr></thead><tbody id="aBody"></tbody></table></div>'
+    +   '<div class="pager" id="aPager"></div></div>'
     + '</div>'
     + '<div class="adm-pane" id="pane-ops">'
     +   '<div class="grid grid-2">'
-    +     '<div class="card"><div class="card-title">'+App.icon('bell')+'消息通知渠道配置</div><div id="chBody"></div>'
-    +     '<div class="tiny dim mt3">渠道开关仅作用于演练平台提醒链路（模拟），真实应急通讯以院内应急通讯录为准。</div></div>'
+    +     '<div class="card"><div class="card-title">'+App.icon('bell')+'站内消息通知<span class="more tiny dim">默认开启 · 无需配置</span></div>'
+    +       '<div class="kv">'
+    +         '<span class="k">消息渠道</span><span>站内消息（唯一渠道）</span>'
+    +         '<span class="k">推送内容</span><span>演练开始/继续、节点完成情况、处置得分、演练结束综合得分、系统自动考评结果</span>'
+    +         '<span class="k">查看方式</span><span>点击页面右上角铃铛查看，角标数字为未读消息数</span>'
+    +       '</div>'
+    +       '<div class="tiny dim mt3">已取消短信、邮件模拟渠道配置；所有提醒仅在演练平台内展示，不对外发送。</div></div>'
     +     '<div class="card"><div class="card-title">'+App.icon('db')+'数据备份</div>'
     +       '<div class="kv"><span class="k">备份范围</span><span>账号配置 / 剧本库 / 台账 / 审计日志 / 取证档案索引</span>'
     +       '<span class="k">上次备份</span><span class="mono" id="bkLast">读取中…</span>'
@@ -98,7 +99,7 @@ document.addEventListener('app:ready', function(e){
       +   '<div class="form-grid">'
       +     '<div class="form-row"><label class="f-label">系统名称 <span class="req">*</span></label><input class="input" id="bsName" maxlength="40" placeholder="如 网络安全应急演练系统"></div>'
       +     '<div class="form-row"><label class="f-label">单位名称 <span class="req">*</span></label><input class="input" id="bsUnit" maxlength="40" placeholder="如 盘州市人民医院"></div>'
-      +     '<div class="form-row"><label class="f-label">版本信息</label><input class="input" id="bsVer" maxlength="20" placeholder="如 v0.1.6"></div>'
+      +     '<div class="form-row"><label class="f-label">版本信息</label><input class="input" id="bsVer" maxlength="20" placeholder="如 v0.1.7"></div>'
       +     '<div class="form-row"><label class="f-label">GitHub 项目地址</label><input class="input" id="bsGh" type="url" placeholder="https://github.com/..."></div>'
       +     '<div class="form-row"><label class="f-label">Gitee 项目地址</label><input class="input" id="bsGe" type="url" placeholder="https://gitee.com/..."></div>'
       +   '</div>'
@@ -506,39 +507,59 @@ document.addEventListener('app:ready', function(e){
   };
 
   /* ---------- d) 审计日志 ---------- */
+  /* 页码窗口：总页数≤7 全显示，否则显示首尾页与当前页±2，中间以省略号连接 */
+  function auditPageSeq(total, cur){
+    if(total <= 7){ var all = []; for(var i=1;i<=total;i++) all.push(i); return all; }
+    var out = [1];
+    var start = Math.max(2, cur - 2), end = Math.min(total - 1, cur + 2);
+    if(start > 2) out.push('…');
+    for(var j=start;j<=end;j++) out.push(j);
+    if(end < total - 1) out.push('…');
+    out.push(total);
+    return out;
+  }
   function renderAudit(){
     var kw = document.getElementById('aKw').value.trim().toLowerCase();
     var list = auditBase.filter(function(a){
       if(!kw) return true;
       return (a.time+' '+a.user+' '+roleName(a.role)+' '+a.action).toLowerCase().indexOf(kw) >= 0;
     });
-    document.getElementById('aCnt').textContent = auditBase.length;
-    document.getElementById('aBody').innerHTML = list.length ? list.map(function(a){
+    var total = list.length;
+    var pages = Math.max(1, Math.ceil(total / auditPageSize));
+    if(auditPage > pages) auditPage = pages;
+    if(auditPage < 1) auditPage = 1;
+    var rows = list.slice((auditPage-1)*auditPageSize, auditPage*auditPageSize);
+    document.getElementById('aCnt').textContent = total;
+    document.getElementById('aBody').innerHTML = rows.length ? rows.map(function(a){
       return '<tr><td class="mono">'+App.esc(a.time)+'</td><td>'+App.esc(a.user)+'</td><td class="dim">'+App.esc(roleName(a.role))+'</td><td>'+App.esc(a.action)+'</td><td class="dim">'+App.esc(objOf(a.action))+'</td><td class="mono dim">'+App.esc(a.ip)+'</td></tr>';
     }).join('') : '<tr><td colspan="6"><div class="empty">'+App.icon('search')+'<div>无匹配日志</div></div></td></tr>';
-  }
-  document.getElementById('aKw').addEventListener('input', renderAudit);
 
-  /* ---------- e) 通知与备份 ---------- */
-  function renderChannels(){
-    document.getElementById('chBody').innerHTML = channels.map(function(c,i){
-      return '<div class="chan-row"><span class="grow"><b>'+App.esc(c.name)+'</b><div class="tiny dim">'+App.esc(c.desc)+'</div></span>'
-        + '<button class="btn sm '+(c.on?'ok':'')+'" data-ch="'+i+'">'+(c.on?'已开启':'已关闭')+'</button></div>';
-    }).join('');
-    document.querySelectorAll('#chBody [data-ch]').forEach(function(b){
+    var pager = document.getElementById('aPager');
+    if(!total){ pager.innerHTML = '<span class="pg-info">共 0 条</span>'; return; }
+    var html = '<span class="pg-info">第 '+auditPage+' / '+pages+' 页 · 共 '+total+' 条</span>'
+      + '<button class="btn sm" data-pg="'+(auditPage-1)+'"'+(auditPage<=1?' disabled':'')+'>上一页</button>';
+    auditPageSeq(pages, auditPage).forEach(function(p){
+      html += p==='…'
+        ? '<span class="pg-ellipsis">…</span>'
+        : '<button class="btn sm'+(p===auditPage?' primary':'')+'" data-pg="'+p+'">'+p+'</button>';
+    });
+    html += '<button class="btn sm" data-pg="'+(auditPage+1)+'"'+(auditPage>=pages?' disabled':'')+'>下一页</button>';
+    pager.innerHTML = html;
+    pager.querySelectorAll('[data-pg]').forEach(function(b){
       b.onclick = function(){
-        var c = channels[+b.dataset.ch];
-        var next = c.on ? '关闭' : '开启';
-        App.confirmSim('将通知渠道「'+c.name+'」'+next+'？', function(){
-          c.on = !c.on;
-          API.addAudit('通知渠道'+next+'：'+c.name).then(function(){
-            renderChannels();
-            App.toast('演练模拟：渠道已'+next,'ok');
-          });
-        });
+        auditPage = Number(b.dataset.pg) || 1;
+        renderAudit();
       };
     });
   }
+  document.getElementById('aKw').addEventListener('input', function(){ auditPage = 1; renderAudit(); });
+  document.getElementById('aPageSize').addEventListener('change', function(){
+    auditPageSize = Number(this.value) || 10;
+    auditPage = 1;
+    renderAudit();
+  });
+
+  /* ---------- e) 通知与备份：站内消息默认开启，无需配置 ---------- */
   document.getElementById('bkBtn').onclick = function(){
     App.confirmSim('立即将演练数据库备份到服务器 data/backups 目录（不接触医院真实生产库）？', function(){
       var prog = document.getElementById('bkProg'), bar = document.getElementById('bkBar'), pctEl = document.getElementById('bkPct');
@@ -564,7 +585,7 @@ document.addEventListener('app:ready', function(e){
   /* ---------- f) 系统设置（仅平台管理员） ---------- */
   var BRAND_DEFAULTS = {
     systemName:'网络安全应急演练系统', unitName:'盘州市人民医院', logo:'img/logo.png',
-    version:'v0.1.6', github:'https://github.com/chenjinxiang1980/cyber-drill', gitee:'https://gitee.com/habeas/cyber-drill'
+    version:'v0.1.7', github:'https://github.com/chenjinxiang1980/cyber-drill', gitee:'https://gitee.com/habeas/cyber-drill'
   };
   var brandLogoUrl = 'img/logo.png';
 
@@ -625,7 +646,7 @@ document.addEventListener('app:ready', function(e){
     };
   }
 
-  renderUsers(); renderForms(); renderAudit(); renderChannels(); loadLastBackup();
+  renderUsers(); renderForms(); renderAudit(); loadLastBackup();
   if(BRAND_ADMIN) initBrand();
 });
 App.boot('admin');

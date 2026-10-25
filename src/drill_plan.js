@@ -190,7 +190,7 @@ function ensureBasicTasks(db, project) {
     if (n.action === '上报审批' && n.target === '院应急指挥部') formId = 'F4';
     const forms = formId ? [formId] : [];
     insert.run(prefix + String(i + 1).padStart(2, '0'), project.id, roleId, n.title, n.descr || '',
-      n.time || '', '待处理', level, JSON.stringify(forms), n.id, i + 1);
+      '', '待处理', level, JSON.stringify(forms), n.id, i + 1);
     count++;
   });
   return count;
@@ -239,7 +239,7 @@ function ensureDistractors(db) {
     const nodes = db.prepare("SELECT * FROM script_nodes WHERE scenario_id=? AND type!='end' AND COALESCE(flow_type,'correct')!='distractor' ORDER BY seq").all(sc.id);
     if (!nodes.length) return;
     const maxSeq = db.prepare('SELECT MAX(seq) AS m FROM script_nodes WHERE scenario_id=?').get(sc.id).m || 0;
-    const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+    const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,deps,pos_x,pos_y) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
     const byRole = {};
     nodes.forEach(function (n) {
       const roleId = ROLE_BY_TARGET[n.target] || 'duty';
@@ -261,8 +261,8 @@ function ensureDistractors(db) {
       picked.forEach(function (title, k) {
         seq++;
         ins.run('D' + sc.id + '-' + roleId + '-' + (k + 1), sc.id, first.type || 'task', title, first.target,
-          first.time || '', first.timeout || null, first.form || '', '', '处置流程：' + title, '[]', seq,
-          '', '', first.action || '', '[]', '[]', 0, 'distractor', 10);
+          '', first.timeout || null, first.form || '', '', '处置流程：' + title, '[]', seq,
+          '', '', first.action || '', '[]', '[]', 0, 'distractor', 10, '[]', null, null);
         count++;
       });
     });
@@ -278,21 +278,58 @@ function backfillFlowScores(db) {
   return { scored: scored, distractors: ensureDistractors(db) };
 }
 
-/* 下一节点接收人：按剧本顺序取下一个正确流程的责任角色，最后一个流程流转至院应急指挥部 */
+/* 安全解析节点前置依赖（JSON 数组） */
+function parseDeps(v) {
+  try {
+    const arr = JSON.parse(v || '[]');
+    return Array.isArray(arr) ? arr.filter(Boolean).map(String) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+/* 下一节点接收人：按依赖关系取后继正确流程的责任角色并集，无后继时流转至院应急指挥部 */
 function backfillReceivers(db) {
   const scenarios = db.prepare('SELECT id FROM scenarios').all();
   const up = db.prepare('UPDATE script_nodes SET receiver=? WHERE id=?');
   let count = 0;
   scenarios.forEach(function (sc) {
     const nodes = db.prepare("SELECT * FROM script_nodes WHERE scenario_id=? AND type!='end' AND COALESCE(flow_type,'correct')!='distractor' ORDER BY seq").all(sc.id);
-    nodes.forEach(function (n, i) {
+    nodes.forEach(function (n) {
       if (String(n.receiver || '').trim()) return;
-      const next = nodes[i + 1] ? nodes[i + 1].target : '院应急指挥部';
-      up.run(next, n.id);
+      const targets = [];
+      nodes.forEach(function (x) {
+        if (!parseDeps(x.deps).length || parseDeps(x.deps).indexOf(n.id) < 0) return;
+        const t = String(x.target || '').trim();
+        if (t && targets.indexOf(t) < 0) targets.push(t);
+      });
+      up.run(targets.length ? targets.join('、') : '院应急指挥部', n.id);
       count++;
     });
   });
   return count;
+}
+
+/* 基础版任务可用性：前置全部完成才可处置
+ * 返回 nodeId -> { available, blockedBy:[{id,title}] } */
+function basicNodeAvailability(db, projectId) {
+  const p = db.prepare('SELECT scenario_id FROM projects WHERE id=?').get(projectId);
+  if (!p) return {};
+  const nodes = db.prepare('SELECT id,title,deps,flow_type,type FROM script_nodes WHERE scenario_id=?').all(p.scenario_id);
+  const byId = {};
+  nodes.forEach(function (n) { byId[n.id] = n; });
+  const done = new Set(db.prepare("SELECT node_id FROM tasks WHERE project_id=? AND status='已完成'").all(projectId)
+    .map(function (r) { return r.node_id; }));
+  const map = {};
+  nodes.forEach(function (n) {
+    if (n.type === 'end' || n.flow_type === 'distractor') return;
+    const pending = parseDeps(n.deps).filter(function (id) { return byId[id] && !done.has(id); });
+    map[n.id] = {
+      available: pending.length === 0,
+      blockedBy: pending.map(function (id) { return { id: id, title: byId[id].title }; })
+    };
+  });
+  return map;
 }
 
 /* 旧库升级：信息科负责人「上报审批」节点绑定《网络和数据安全事件反馈单》（F8）
@@ -326,5 +363,6 @@ function backfillFeedbackForm(db) {
 
 module.exports = {
   ROLE_BY_TARGET, FORM_BY_ACTION, buildDecision, canHandle, ensureBasicTasks, backfillBasicTasks,
-  defaultScores, ensureDistractors, backfillFlowScores, backfillReceivers, backfillFeedbackForm
+  defaultScores, ensureDistractors, backfillFlowScores, backfillReceivers, backfillFeedbackForm,
+  parseDeps, basicNodeAvailability
 };

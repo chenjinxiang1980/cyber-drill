@@ -7,6 +7,8 @@ const { db, parseJson } = require('../db');
 const auth = require('../auth');
 const { makeUploader, handleUploadError, MAX_MB } = require('../upload');
 const { now, hhmm, fmtSize } = require('../util');
+const { basicNodeAvailability } = require('../drill_plan');
+const notify = require('../notify');
 
 const router = express.Router();
 const upload = makeUploader('tasks');
@@ -41,6 +43,18 @@ function activeProjectId() {
   return r ? r.value : null;
 }
 
+/* 任务前置可用性（基础版按剧本依赖解锁） */
+function availabilityOf(task) {
+  if (!task || !task.node_id) return { available: true, blockedBy: [] };
+  const map = basicNodeAvailability(db, task.project_id);
+  return map[task.node_id] || { available: true, blockedBy: [] };
+}
+
+function blockedError(av) {
+  const names = (av.blockedBy || []).map(function (x) { return x.title || x.id; }).join('、');
+  return '请先完成前置流程' + (names ? '：' + names : '');
+}
+
 /* 列表 */
 router.get('/', auth.requireAuth, function (req, res) {
   const rows = db.prepare('SELECT * FROM tasks ORDER BY seq').all();
@@ -49,12 +63,21 @@ router.get('/', auth.requireAuth, function (req, res) {
   const atts = db.prepare('SELECT * FROM task_attachments ORDER BY id').all();
   const byTask = {};
   atts.forEach(function (a) { (byTask[a.task_id] = byTask[a.task_id] || []).push(a); });
+  const availByProject = {};
+  rows.filter(function (t) {
+    return !practical[t.project_id] && taskAccess(req.user, t);
+  }).forEach(function (t) {
+    if (!availByProject[t.project_id]) availByProject[t.project_id] = basicNodeAvailability(db, t.project_id);
+  });
   res.json(rows.filter(function (t) {
     return !practical[t.project_id] && taskAccess(req.user, t);
   }).map(function (t) {
+    const av = (t.node_id && availByProject[t.project_id] && availByProject[t.project_id][t.node_id])
+      || { available: true, blockedBy: [] };
     return {
       id: t.id, projectId: t.project_id, role: t.role_id, title: t.title, desc: t.descr,
       deadline: t.deadline, status: t.status, level: t.level, nodeId: t.node_id || null,
+      available: av.available !== false, blockedBy: av.blockedBy || [],
       forms: parseJson(t.forms, []),
       atts: (byTask[t.id] || []).map(function (a) {
         return { id: a.id, name: a.name, type: a.type, size: a.size, url: a.url, by: a.uploader, time: a.time, auto: !!a.auto };
@@ -67,6 +90,8 @@ router.get('/', auth.requireAuth, function (req, res) {
 router.post('/:id/accept', auth.requireAuth, loadTask, function (req, res) {
   const t = req.task;
   if (t.status === '已完成') return res.status(400).json({ error: '任务已完成，无需接单' });
+  const av = availabilityOf(t);
+  if (!av.available) return res.status(400).json({ error: blockedError(av), blockedBy: av.blockedBy });
   db.prepare("UPDATE tasks SET status='处理中', accepted_at=COALESCE(accepted_at,?) WHERE id=?").run(hhmm(), t.id);
   db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')
     .run(t.project_id, hhmm(), req.user.name, req.user.role.id, '接单处理',
@@ -93,8 +118,10 @@ router.post('/:id/submit', auth.requireAuth, loadTask, function (req, res) {
 /* 完成任务 */
 router.post('/:id/complete', auth.requireAuth, loadTask, function (req, res) {
   const t = req.task;
-  const doneAt = hhmm();
-  db.prepare("UPDATE tasks SET status='已完成', completed_at=?, accepted_at=COALESCE(accepted_at,?) WHERE id=?").run(doneAt, doneAt, t.id);
+  const av = availabilityOf(t);
+  if (!av.available && t.status !== '已完成') return res.status(400).json({ error: blockedError(av), blockedBy: av.blockedBy });
+  const doneAt = now();
+  db.prepare("UPDATE tasks SET status='已完成', completed_at=?, accepted_at=COALESCE(accepted_at,?) WHERE id=?").run(doneAt, hhmm(), t.id);
   db.prepare('INSERT INTO evidence (id,type,name,size,time,role_id,uploader,user_id,auto,task_id,project_id,file_path,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run('E' + Date.now(), '处置记录', '任务处置记录-' + t.id + '(模拟)', '9 KB', hhmm(),
       req.user.role.id, req.user.name, req.user.id, 0, t.id, t.project_id, null, now());
@@ -102,6 +129,16 @@ router.post('/:id/complete', auth.requireAuth, loadTask, function (req, res) {
     .run(t.project_id, hhmm(), req.user.name, req.user.role.id, '任务完成',
       '任务 ' + t.id + ' 已完成，处置留痕已归档', '', nextSeq(t.project_id));
   auth.audit(req, '完成任务 ' + t.id);
+  /* 站内消息：节点完成情况与当前节点进度 */
+  const proj = db.prepare('SELECT name FROM projects WHERE id=?').get(t.project_id);
+  const prog = db.prepare("SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status='已完成' THEN 1 ELSE 0 END),0) AS done FROM tasks WHERE project_id=?").get(t.project_id);
+  notify.push({
+    title: '节点完成 · ' + t.title,
+    desc: '演练项目「' + (proj ? proj.name : t.project_id) + '」任务 ' + t.id + ' 已由 ' + req.user.name
+      + '（' + req.user.role.name + '）完成，已完成 ' + (prog ? prog.done : 0) + '/' + (prog ? prog.total : 0) + ' 个节点。',
+    level: 'P2',
+    source: '角色工作台'
+  });
   res.json({ ok: true, status: '已完成' });
 });
 

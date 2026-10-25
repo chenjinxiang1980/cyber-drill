@@ -95,22 +95,24 @@ function run() {
     });
 
     /* 场景 */
-    const si = db.prepare('INSERT INTO scenarios (id,name,type,level,difficulty,status,version,updated,nodes,descr,alert) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+    const si = db.prepare('INSERT INTO scenarios (id,name,type,level,status,version,updated,nodes,descr,alert) VALUES (?,?,?,?,?,?,?,?,?,?)');
     M.SCENARIOS.forEach(function (s) {
-      si.run(s.id, s.name, s.type, s.level, s.difficulty, s.status, s.version, s.updated, s.nodes || 0, s.desc || '', s.alert || '');
+      si.run(s.id, s.name, s.type, s.level, s.status, s.version, s.updated, s.nodes || 0, s.desc || '', s.alert || '');
     });
 
     /* 项目 */
-    const pi = db.prepare('INSERT INTO projects (id,name,type,date,scenario_id,level,status,target,units,members,observers) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+    const pi = db.prepare('INSERT INTO projects (id,name,type,date,scenario_id,level,status,target,units,members,observers,started_at,paused_sec) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
     M.PROJECTS.forEach(function (p) {
+      /* 初始即为「演练中」的项目以初始化时刻作为真实计时起点 */
       pi.run(p.id, p.name, p.type, p.date, p.scenarioId, p.level, p.status, p.target || '',
-        JSON.stringify(p.units || []), JSON.stringify(p.members || []), JSON.stringify(p.observers || []));
+        JSON.stringify(p.units || []), JSON.stringify(p.members || []), JSON.stringify(p.observers || []),
+        p.status === '演练中' ? ts : null, 0);
     });
 
     /* 任务 */
     const ti = db.prepare('INSERT INTO tasks (id,project_id,role_id,title,descr,deadline,status,level,forms,seq) VALUES (?,?,?,?,?,?,?,?,?,?)');
     M.TASKS.forEach(function (t, i) {
-      ti.run(t.id, t.projectId, t.role, t.title, t.desc || '', t.deadline, t.status, t.level,
+      ti.run(t.id, t.projectId, t.role, t.title, t.desc || '', '', t.status, t.level,
         JSON.stringify(t.forms || []), i);
       /* 原型中已存在的字符串附件同步为附件记录 */
       (t.atts || []).forEach(function (a) {

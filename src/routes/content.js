@@ -3,11 +3,13 @@
 const express = require('express');
 const path = require('node:path');
 const fs = require('node:fs');
-const { db, parseJson } = require('../db');
+const { db, tx, parseJson } = require('../db');
 const auth = require('../auth');
 const { makeUploader, handleUploadError } = require('../upload');
 const { now, hhmm, fmtSize, nowSec } = require('../util');
-const { ensureBasicTasks } = require('../drill_plan');
+const { ensureBasicTasks, parseDeps } = require('../drill_plan');
+const notify = require('../notify');
+const clock = require('../drill_clock');
 
 const router = express.Router();
 const kbUpload = makeUploader('knowledge');
@@ -56,7 +58,10 @@ router.post('/messages', auth.requireAuth, function (req, res) {
 
 /* ---------- 通知 ---------- */
 router.get('/notifs', auth.requireAuth, function (req, res) {
-  const rows = db.prepare('SELECT * FROM notifs ORDER BY seq').all();
+  const rows = db.prepare('SELECT * FROM notifs ORDER BY seq').all().filter(function (n) {
+    /* 外部单位仅可见公开通知，演练内部消息按权限隔离 */
+    return !req.user.role.external || (n.target || 'all') !== 'internal';
+  });
   const read = db.prepare('SELECT notif_id FROM notif_reads WHERE user_id=?').all(req.user.id)
     .map(function (r) { return r.notif_id; });
   res.json(rows.map(function (n) {
@@ -190,6 +195,13 @@ function isExternalNode(n) {
   return EXT_ORG_RE.test(text) || EXT_EVENT_RE.test(text);
 }
 
+function opStamp(v, date) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{1,2}-\d{1,2}/.test(s)) return s.slice(0, 16);
+  return date + ' ' + s.slice(0, 5);
+}
+
 function nodeProgress(project, channel) {
   const nodes = db.prepare('SELECT * FROM script_nodes WHERE scenario_id=? ORDER BY seq').all(project.scenario_id)
     .filter(function (n) { return n.type !== 'end'; });
@@ -213,13 +225,20 @@ function nodeProgress(project, channel) {
   db.prepare('SELECT node_id,user,started_at FROM drill_node_state WHERE project_id=?').all(project.id).forEach(function (r) {
     doingMap[r.node_id] = r;
   });
-  /* 实战版逐环节放出：仅展示已发现环节，避免提前泄露后续剧本 */
+  /* 实战版按前置依赖放出环节：前置全部完成（或本环节已产生处置/处置中记录）才展示，避免提前泄露后续剧本 */
   const visible = {};
   if (mode === '实战版') {
-    for (let i = 0; i < nodes.length; i++) {
-      visible[nodes[i].id] = true;
-      if (!doneMap[nodes[i].id]) break;
-    }
+    const nodeById = {};
+    nodes.forEach(function (n) { nodeById[n.id] = n; });
+    nodes.forEach(function (n) {
+      const recorded = !!(doneMap[n.id] || doingMap[n.id]);
+      if (n.flow_type === 'distractor') {
+        visible[n.id] = recorded;
+        return;
+      }
+      const deps = parseJson(n.deps, []).filter(function (id) { return !!nodeById[id]; });
+      visible[n.id] = recorded || deps.every(function (id) { return !!doneMap[id]; });
+    });
   }
   const out = [];
   nodes.forEach(function (n, i) {
@@ -242,26 +261,26 @@ function nodeProgress(project, channel) {
       status = 'done';
       const tl = tlByTask[task.id];
       actor = tl ? (tl.actor || '') : '';
-      opTime = tl ? (date + ' ' + String(tl.t || '').slice(0, 5))
-        : (task.completed_at ? (date + ' ' + String(task.completed_at).slice(0, 5)) : '');
+      opTime = tl ? opStamp(tl.t, date) : opStamp(task.completed_at, date);
       detail = (tl && tl.detail) || task.descr || '';
     } else if ((task && task.status === '处理中') || doing) {
       status = 'doing';
       actor = (doing && doing.user) || '';
       opTime = doing && doing.started_at
         ? String(doing.started_at).slice(0, 16)
-        : (task && task.accepted_at ? (date + ' ' + String(task.accepted_at).slice(0, 5)) : '');
+        : opStamp(task && task.accepted_at, date);
       detail = task ? (task.descr || '') : (doing ? '已打开处置表单，正在处置' : '');
     } else {
       status = task && task.status === '超时' ? 'overdue' : 'pending';
       const tl = task ? tlByTask[task.id] : null;
-      if (tl) { actor = tl.actor || ''; opTime = date + ' ' + String(tl.t || '').slice(0, 5); detail = tl.detail || ''; }
+      if (tl) { actor = tl.actor || ''; opTime = opStamp(tl.t, date); detail = tl.detail || ''; }
     }
     /* 导调中心仅展示处置中与已完成的节点，待处置/超时未处置不显示 */
     if (status !== 'done' && status !== 'doing' && status !== 'wrong') return;
     out.push({
       id: n.id, seq: i + 1, title: n.title, target: n.target, action: n.action || '',
-      planTime: n.time ? (date + ' ' + String(n.time).slice(0, 5)) : '',
+      planTime: '',
+      duration: Number(n.timeout) || null,
       scope: scope, status: status, actor: actor, opTime: opTime, detail: detail,
       correct: step ? !!step.correct : null, ontime: step ? !!step.ontime : null
     });
@@ -288,7 +307,7 @@ router.get('/drill-progress', auth.requireAuth, function (req, res) {
 /* ---------- 场景剧本 ---------- */
 router.get('/scenarios', auth.requireAuth, function (req, res) {
   res.json(db.prepare('SELECT * FROM scenarios').all().map(function (s) {
-    return { id: s.id, name: s.name, type: s.type, level: s.level, difficulty: s.difficulty, status: s.status, version: s.version, updated: s.updated, nodes: s.nodes, desc: s.descr, alert: s.alert || '' };
+    return { id: s.id, name: s.name, type: s.type, level: s.level, status: s.status, version: s.version, updated: s.updated, nodes: s.nodes, desc: s.descr, alert: s.alert || '' };
   }));
 });
 
@@ -300,7 +319,7 @@ router.patch('/scenarios/:id', auth.requireAuth, function (req, res) {
   const s = db.prepare('SELECT * FROM scenarios WHERE id=?').get(req.params.id);
   if (!s) return res.status(404).json({ error: '剧本不存在' });
   const b = req.body || {};
-  const fields = { name: 'name', type: 'type', level: 'level', difficulty: 'difficulty', status: 'status', desc: 'descr', alert: 'alert', version: 'version', nodes: 'nodes' };
+  const fields = { name: 'name', type: 'type', level: 'level', status: 'status', desc: 'descr', alert: 'alert', version: 'version', nodes: 'nodes' };
   Object.keys(fields).forEach(function (k) {
     if (b[k] !== undefined) db.prepare('UPDATE scenarios SET ' + fields[k] + '=? WHERE id=?').run(String(b[k]), s.id);
   });
@@ -318,8 +337,8 @@ router.post('/scenarios', auth.requireAuth, function (req, res) {
   if (!b.name) return res.status(400).json({ error: '剧本名称不能为空' });
   const maxId = db.prepare("SELECT MAX(CAST(SUBSTR(id,2) AS INTEGER)) AS n FROM scenarios").get().n || 0;
   const id = 'S' + String(maxId + 1).padStart(2, '0');
-  db.prepare('INSERT INTO scenarios (id,name,type,level,difficulty,status,version,updated,nodes,descr,alert) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-    .run(id, String(b.name), String(b.type || ''), String(b.level || '一般'), String(b.difficulty || '实战版'),
+  db.prepare('INSERT INTO scenarios (id,name,type,level,status,version,updated,nodes,descr,alert) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(id, String(b.name), String(b.type || ''), String(b.level || '一般'),
       '草稿', 'v1.0', now().slice(0, 10), 0, String(b.desc || ''), String(b.alert || ''));
   auth.audit(req, '新建剧本《' + b.name + '》');
   res.json({ ok: true, id: id });
@@ -328,13 +347,39 @@ router.post('/scenarios', auth.requireAuth, function (req, res) {
 /* ---------- 剧本节点保存（可视化编排） ---------- */
 router.get('/script-nodes', auth.requireAuth, function (req, res) {
   res.json(db.prepare('SELECT * FROM script_nodes ORDER BY scenario_id,seq').all().map(function (n) {
-    return { id: n.id, scenarioId: n.scenario_id, type: n.type, title: n.title, target: n.target, time: n.time, timeout: n.timeout, form: n.form || undefined, att: n.att || undefined, desc: n.descr, branches: parseJson(n.branches, []), guide: n.guide || '', keywords: n.keywords || '', action: n.action || '', required: n.required !== 0, wrong: parseJson(n.wrong, []), evidenceReq: parseJson(n.evidence_req, []), flowType: n.flow_type === 'distractor' ? 'distractor' : 'correct', score: Number(n.score || 0), receiver: n.receiver || '' };
+    return { id: n.id, scenarioId: n.scenario_id, type: n.type, title: n.title, target: n.target, timeout: n.timeout, form: n.form || undefined, att: n.att || undefined, desc: n.descr, branches: parseJson(n.branches, []), guide: n.guide || '', keywords: n.keywords || '', action: n.action || '', required: n.required !== 0, wrong: parseJson(n.wrong, []), evidenceReq: parseJson(n.evidence_req, []), flowType: n.flow_type === 'distractor' ? 'distractor' : 'correct', score: Number(n.score || 0), receiver: n.receiver || '', deps: parseDeps(n.deps), posX: n.pos_x === null || n.pos_x === undefined ? null : Number(n.pos_x), posY: n.pos_y === null || n.pos_y === undefined ? null : Number(n.pos_y) };
   }));
 });
 
 function bumpVersion(v) {
   const m = /^v(\d+)\.(\d+)$/.exec(String(v || 'v1.0'));
   return m ? 'v' + m[1] + '.' + (Number(m[2]) + 1) : 'v1.1';
+}
+
+/* 依赖图拓扑排序（稳定，按数组原顺序出队）：无环返回节点 ID 顺序，有环返回 null */
+function topoSortNodes(list, depMap) {
+  const ids = list.map(function (n) { return String(n.id); });
+  const present = {};
+  const indeg = {}, children = {};
+  ids.forEach(function (id) { present[id] = true; indeg[id] = 0; children[id] = []; });
+  ids.forEach(function (id) {
+    depMap[id].forEach(function (d) {
+      if (!present[d]) return;
+      indeg[id]++;
+      children[d].push(id);
+    });
+  });
+  const queue = ids.filter(function (id) { return !indeg[id]; });
+  const out = [];
+  while (queue.length) {
+    const id = queue.shift();
+    out.push(id);
+    children[id].forEach(function (c) {
+      indeg[c]--;
+      if (!indeg[c]) queue.push(c);
+    });
+  }
+  return out.length === ids.length ? out : null;
 }
 
 router.post('/script-nodes', auth.requireAuth, function (req, res) {
@@ -347,44 +392,99 @@ router.post('/script-nodes', auth.requireAuth, function (req, res) {
   const scenario = String((req.body && req.body.scenarioId) || 'S01');
   const sc = db.prepare('SELECT * FROM scenarios WHERE id=?').get(scenario);
   if (!sc) return res.status(404).json({ error: '场景剧本不存在' });
-  const del = db.prepare('DELETE FROM script_nodes WHERE scenario_id=?');
-  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,receiver) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
-  del.run(scenario);
-  const plan = require('../evidence_plan');
-  /* 未设置下一节点接收人时，按剧本顺序取下一个正确流程的责任角色（最后一个流转至院应急指挥部） */
-  const correctList = nodes.filter(function (n) { return n.type !== 'end' && n.flowType !== 'distractor'; });
-  nodes.forEach(function (n, i) {
-    const wrong = Array.isArray(n.wrong) ? n.wrong.map(function (x) { return String(x || '').trim(); }).filter(Boolean).slice(0, 5) : [];
-    const flowType = n.flowType === 'distractor' ? 'distractor' : 'correct';
-    let receiver = receiverStr(n.receiver);
-    if (!receiver && flowType !== 'distractor') {
-      const at = correctList.indexOf(n);
-      receiver = at >= 0 && correctList[at + 1] ? String(correctList[at + 1].target || '') : '院应急指挥部';
+  /* 只保存本场景节点：调用方可能提交全量节点，其他场景节点直接忽略 */
+  const sceneNodes = nodes.filter(function (n) { return !n.scenarioId || String(n.scenarioId) === scenario; });
+
+  /* 节点 ID 唯一性校验（依赖关系以节点 ID 为键） */
+  const byId = {}, seen = {};
+  for (let i = 0; i < sceneNodes.length; i++) {
+    const id = String(sceneNodes[i].id || '');
+    if (!id) return res.status(400).json({ error: '节点 ID 不能为空' });
+    if (seen[id]) return res.status(400).json({ error: '节点 ID 重复：' + id });
+    const owner = db.prepare('SELECT scenario_id FROM script_nodes WHERE id=?').get(id);
+    if (owner && owner.scenario_id !== scenario) {
+      return res.status(400).json({ error: '节点 ID 与其他剧本冲突：' + id });
     }
-    /* 混淆流程不产生取证要求，不参与逐项取证提醒 */
-    let evReq = flowType === 'distractor' ? [] : plan.normalizeReq(n.evidenceReq);
-    if (!evReq.length && flowType !== 'distractor' && String(n.type || 'task') !== 'end') {
-      evReq = plan.autoEvidenceReq({ title: n.title, target: n.target, action: n.action, guide: n.guide, desc: n.desc, form: n.form });
-    }
-    const rawScore = Math.round(Number(n.score || 0));
-    const scoreVal = Math.max(0, Math.min(100, isNaN(rawScore) ? 0 : rawScore));
-    ins.run(String(n.id || ('N' + (i + 1))), scenario, String(n.type || 'task'), String(n.title || ''), String(n.target || ''),
-      String(n.time || ''), n.timeout || null, String(n.form || ''), String(n.att || ''), String(n.desc || ''),
-      JSON.stringify(n.branches || []), i, String(n.guide || ''), String(n.keywords || ''),
-      String(n.action || ''), JSON.stringify(wrong), JSON.stringify(evReq), n.required === false ? 0 : 1,
-      flowType, scoreVal, receiver);
+    seen[id] = true;
+    byId[id] = sceneNodes[i];
+  }
+
+  /* 依赖清洗：仅允许引用同场景、非自身、非混淆流程、非结束节点的前置 */
+  const correctNodes = sceneNodes.filter(function (n) { return n.flowType !== 'distractor'; });
+  const depMap = {};
+  correctNodes.forEach(function (n) {
+    const deps = [];
+    (Array.isArray(n.deps) ? n.deps : []).forEach(function (d) {
+      const id = String(d || '');
+      if (!id || id === String(n.id) || deps.indexOf(id) >= 0) return;
+      const pre = byId[id];
+      if (!pre || pre.flowType === 'distractor' || pre.type === 'end') return;
+      deps.push(id);
+    });
+    depMap[String(n.id)] = deps;
   });
-  /* 同步场景剧本库：节点数、版本号、更新时间、难度（版本号在保存时递增，保证剧本库版本一致） */
-  const version = bumpVersion(sc.version);
-  const updated = now().slice(0, 10);
-  const difficulty = String((req.body && req.body.difficulty) || sc.difficulty || '');
-  const alertText = (req.body && typeof req.body.alert === 'string') ? String(req.body.alert).slice(0, 1000) : (sc.alert || '');
-  /* 场景库节点数按正确流程统计（混淆流程不计入剧本步骤数） */
-  const correctCount = nodes.filter(function (n) { return n.flowType !== 'distractor'; }).length;
-  db.prepare('UPDATE scenarios SET nodes=?, version=?, updated=?, difficulty=?, alert=? WHERE id=?')
-    .run(correctCount, version, updated, difficulty, alertText, scenario);
-  auth.audit(req, '保存剧本编排《' + sc.name + '》' + correctCount + ' 个流程节点，版本 ' + sc.version + '→' + version);
-  res.json({ ok: true, count: correctCount, scenarioId: scenario, version: version, updated: updated, difficulty: difficulty, alert: alertText });
+  const order = topoSortNodes(correctNodes, depMap);
+  if (!order) return res.status(400).json({ error: '剧本存在循环依赖，请检查节点前置关系' });
+
+  /* 接收人推导：后继正确流程的责任角色并集，无后继流转至院应急指挥部 */
+  const succTargets = {};
+  correctNodes.forEach(function (n) {
+    const t = String(n.target || '').trim();
+    depMap[String(n.id)].forEach(function (d) {
+      succTargets[d] = succTargets[d] || [];
+      if (t && succTargets[d].indexOf(t) < 0) succTargets[d].push(t);
+    });
+  });
+
+  const distractors = sceneNodes.filter(function (n) { return n.flowType === 'distractor'; });
+  const ordered = order.map(function (id) { return byId[id]; }).concat(distractors);
+  const name = req.body && typeof req.body.name === 'string' ? String(req.body.name).trim().slice(0, 60) : '';
+
+  const del = db.prepare('DELETE FROM script_nodes WHERE scenario_id=?');
+  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,receiver,deps,pos_x,pos_y) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  const plan = require('../evidence_plan');
+  tx(function () {
+    del.run(scenario);
+    ordered.forEach(function (n, i) {
+      const id = String(n.id);
+      const flowType = n.flowType === 'distractor' ? 'distractor' : 'correct';
+      const wrong = Array.isArray(n.wrong) ? n.wrong.map(function (x) { return String(x || '').trim(); }).filter(Boolean).slice(0, 5) : [];
+      let receiver = flowType === 'distractor' ? '' : receiverStr(n.receiver);
+      if (!receiver && flowType !== 'distractor') {
+        const targets = succTargets[id] || [];
+        receiver = targets.length ? targets.join('、') : '院应急指挥部';
+      }
+      /* 混淆流程不产生取证要求，不参与逐项取证提醒 */
+      let evReq = flowType === 'distractor' ? [] : plan.normalizeReq(n.evidenceReq);
+      if (!evReq.length && flowType !== 'distractor' && String(n.type || 'task') !== 'end') {
+        evReq = plan.autoEvidenceReq({ title: n.title, target: n.target, action: n.action, guide: n.guide, desc: n.desc, form: n.form });
+      }
+      const rawScore = Math.round(Number(n.score || 0));
+      const scoreVal = Math.max(0, Math.min(100, isNaN(rawScore) ? 0 : rawScore));
+      const px = n.posX === null || n.posX === undefined || n.posX === '' || isNaN(Number(n.posX)) ? null : Math.round(Number(n.posX));
+      const py = n.posY === null || n.posY === undefined || n.posY === '' || isNaN(Number(n.posY)) ? null : Math.round(Number(n.posY));
+      ins.run(id, scenario, String(n.type || 'task'), String(n.title || ''), String(n.target || ''),
+        '', n.timeout || null, String(n.form || ''), String(n.att || ''), String(n.desc || ''),
+        JSON.stringify(n.branches || []), i, String(n.guide || ''), String(n.keywords || ''),
+        String(n.action || ''), JSON.stringify(wrong), JSON.stringify(evReq), n.required === false ? 0 : 1,
+        flowType, scoreVal, receiver, JSON.stringify(flowType === 'distractor' ? [] : depMap[id]), px, py);
+    });
+    /* 同步场景剧本库：名称、节点数、版本号、更新时间、故障通报 */
+    const version = bumpVersion(sc.version);
+    const updated = now().slice(0, 10);
+    const alertText = (req.body && typeof req.body.alert === 'string') ? String(req.body.alert).slice(0, 1000) : (sc.alert || '');
+    const finalName = name || sc.name;
+    db.prepare('UPDATE scenarios SET name=?, nodes=?, version=?, updated=?, alert=? WHERE id=?')
+      .run(finalName, correctNodes.length, version, updated, alertText, scenario);
+    return { version: version, updated: updated, alert: alertText, name: finalName };
+  });
+  /* 事务内已完成版本号递增，重新读取最新版本用于响应 */
+  const nowSc = db.prepare('SELECT name,version,updated,alert,nodes FROM scenarios WHERE id=?').get(scenario);
+  auth.audit(req, '保存剧本编排《' + nowSc.name + '》' + correctNodes.length + ' 个流程节点，版本 ' + sc.version + '→' + nowSc.version);
+  res.json({
+    ok: true, count: correctNodes.length, scenarioId: scenario,
+    version: nowSc.version, updated: nowSc.updated, alert: nowSc.alert || '', name: nowSc.name
+  });
 });
 
 /* ---------- 项目 ---------- */
@@ -392,8 +492,22 @@ function projectDto(p) {
   return {
     id: p.id, name: p.name, type: p.type, date: p.date, scenarioId: p.scenario_id, level: p.level,
     status: p.status, target: p.target, mode: p.mode || '基础版',
+    startedAt: p.started_at || null, pausedAt: p.paused_at || null,
+    pausedSec: Number(p.paused_sec) || 0, endedAt: p.ended_at || null,
+    elapsedSec: clock.elapsedSec(p),
     units: parseJson(p.units, []),
     members: parseJson(p.members, []), observers: parseJson(p.observers, [])
+  };
+}
+
+/* 大屏项目 DTO：透出真实计时字段，供大屏按秒本地推算 */
+function monitorProjectDto(p) {
+  return {
+    id: p.id, name: p.name, date: p.date, status: p.status, mode: p.mode || '基础版',
+    level: p.level, scenarioId: p.scenario_id,
+    startedAt: p.started_at || null, pausedAt: p.paused_at || null,
+    pausedSec: Number(p.paused_sec) || 0, endedAt: p.ended_at || null,
+    elapsedSec: clock.elapsedSec(p)
   };
 }
 
@@ -468,6 +582,51 @@ router.patch('/projects/:id/members', auth.requireAuth, function (req, res) {
   res.json({ ok: true, project: projectDto(db.prepare('SELECT * FROM projects WHERE id=?').get(p.id)) });
 });
 
+/* 删除演练项目（仅平台管理员）：清除全部关联数据与上传文件，不可恢复 */
+router.delete('/projects/:id', auth.requireAuth, function (req, res) {
+  if (req.user.role.id !== 'platformadmin') return res.status(403).json({ error: '仅平台管理员可删除演练项目' });
+  const p = db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id);
+  if (!p) return res.status(404).json({ error: '演练项目不存在' });
+
+  const taskCount = db.prepare('SELECT COUNT(*) AS c FROM tasks WHERE project_id=?').get(p.id).c;
+  /* 汇总待物理删除的上传文件（任务附件 + 取证材料） */
+  const files = [];
+  db.prepare('SELECT file_path FROM task_attachments WHERE task_id IN (SELECT id FROM tasks WHERE project_id=?)').all(p.id)
+    .forEach(function (a) { if (a.file_path) files.push(a.file_path); });
+  db.prepare('SELECT file_path FROM evidence WHERE project_id=? OR task_id IN (SELECT id FROM tasks WHERE project_id=?)').all(p.id, p.id)
+    .forEach(function (e) { if (e.file_path) files.push(e.file_path); });
+
+  tx(function () {
+    db.prepare('DELETE FROM task_attachments WHERE task_id IN (SELECT id FROM tasks WHERE project_id=?)').run(p.id);
+    db.prepare('DELETE FROM form_submissions WHERE task_id IN (SELECT id FROM tasks WHERE project_id=?)').run(p.id);
+    db.prepare('DELETE FROM evidence WHERE project_id=? OR task_id IN (SELECT id FROM tasks WHERE project_id=?)').run(p.id, p.id);
+    db.prepare('DELETE FROM tasks WHERE project_id=?').run(p.id);
+    db.prepare('DELETE FROM drill_steps WHERE project_id=?').run(p.id);
+    db.prepare('DELETE FROM drill_node_state WHERE project_id=?').run(p.id);
+    db.prepare('DELETE FROM timeline WHERE project_id=?').run(p.id);
+    db.prepare('DELETE FROM seq_flow WHERE project_id=?').run(p.id);
+    db.prepare('DELETE FROM scores WHERE project_id=?').run(p.id);
+    db.prepare('DELETE FROM snapshots WHERE project_id=?').run(p.id);
+    db.prepare('DELETE FROM ledger WHERE project_id=?').run(p.id);
+    db.prepare('DELETE FROM opinion WHERE project_id=?').run(p.id);
+    db.prepare('DELETE FROM projects WHERE id=?').run(p.id);
+  });
+
+  files.forEach(function (f) {
+    try { fs.unlinkSync(path.join(__dirname, '..', '..', 'uploads', f)); } catch (e) {}
+  });
+
+  /* 删除的是当前项目时，切换到剩余项目；无剩余项目则清空 */
+  if (activeProjectId() === p.id) {
+    const next = db.prepare('SELECT id FROM projects ORDER BY date DESC').get();
+    if (next) db.prepare("UPDATE settings SET value=? WHERE key='active_project'").run(next.id);
+    else db.prepare("DELETE FROM settings WHERE key='active_project'").run();
+  }
+
+  auth.audit(req, '删除演练项目 ' + p.id + '《' + p.name + '》并清理全部关联数据（任务 ' + taskCount + ' 项、上传文件 ' + files.length + ' 个）');
+  res.json({ ok: true, id: p.id, tasks: taskCount, files: files.length });
+});
+
 /* ---------- 快照 ---------- */
 router.get('/snapshots', auth.requireAuth, function (req, res) {
   res.json(db.prepare('SELECT * FROM snapshots ORDER BY id').all().map(function (s) {
@@ -539,6 +698,15 @@ router.post('/evaluation/scores', auth.requireAuth, function (req, res) {
     up.run(String(s.itemId), pid, Number(s.score) || 0, Number(s.max) || 10, String(s.note || ''), ts);
   });
   auth.audit(req, '执行系统自动考评（' + items.length + ' 项指标）');
+  /* 站内消息：自动考评合计得分 */
+  const sum = items.reduce(function (a, s) { return a + (Number(s.score) || 0); }, 0);
+  const max = items.reduce(function (a, s) { return a + (Number(s.max) || 0); }, 0);
+  notify.push({
+    title: '系统自动考评完成',
+    desc: '已更新 ' + items.length + ' 项考评指标，合计得分 ' + sum + (max ? '/' + max : '') + '。',
+    level: 'P1',
+    source: '系统考评'
+  });
   res.json({ ok: true, time: ts });
 });
 
@@ -731,9 +899,7 @@ router.get('/sim-data', auth.requireAuth, function (req, res) {
  * 大屏用于投影演示：免登录公开只读，仅返回演练模拟态势统计，不含账号与审计明细
  */
 router.get('/monitor', function (req, res) {
-  const projects = db.prepare('SELECT * FROM projects ORDER BY date DESC').all().map(function (p) {
-    return { id: p.id, name: p.name, date: p.date, status: p.status, mode: p.mode || '基础版', level: p.level, scenarioId: p.scenario_id };
-  });
+  const projects = db.prepare('SELECT * FROM projects ORDER BY date DESC').all().map(monitorProjectDto);
   const pid = String(req.query.projectId || '') || activeProjectId() || (projects[0] && projects[0].id);
   const p = projects.filter(function (x) { return x.id === pid; })[0] || projects[0];
   if (!p) {

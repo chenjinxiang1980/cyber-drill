@@ -12,7 +12,7 @@ const router = express.Router();
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 
 /* 权限矩阵可配置的模块（与前端菜单 key 一致） */
-const MODULE_KEYS = ['dashboard', 'workbench', 'collab', 'scenarios', 'script-editor', 'projects', 'screen',
+const MODULE_KEYS = ['dashboard', 'workbench', 'collab', 'scenarios', 'projects', 'screen',
   'evidence', 'replay', 'evaluation', 'report', 'ledger', 'opinion', 'knowledge', 'admin'];
 
 function adminOnly(req, res, next) {
@@ -342,9 +342,15 @@ router.get('/report/:projectId', auth.requireAuth, adminOnly, function (req, res
     return r ? { name: r.name, short: r.short } : { name: rid, short: rid };
   };
 
+  const durationMap = {};
+  if (project.scenario_id) {
+    db.prepare('SELECT id,timeout FROM script_nodes WHERE scenario_id=?').all(project.scenario_id)
+      .forEach(function (n) { durationMap[n.id] = Number(n.timeout) || null; });
+  }
+
   const tasks = db.prepare('SELECT * FROM tasks WHERE project_id=? ORDER BY seq,id').all(pid).map(function (t) {
     const r = roleName(t.role_id);
-    return { id: t.id, title: t.title, descr: t.descr, role: t.role_id, roleName: r.name, level: t.level, deadline: t.deadline, status: t.status };
+    return { id: t.id, title: t.title, descr: t.descr, role: t.role_id, roleName: r.name, level: t.level, deadline: t.deadline, duration: t.node_id ? durationMap[t.node_id] : null, status: t.status };
   });
   const total = tasks.length;
   const done = tasks.filter(function (t) { return t.status === '已完成'; }).length;

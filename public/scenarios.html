@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>场景剧本库 · 盘州市人民医院网络安全应急演练系统</title>
+<title>场景剧本库与编排 · 盘州市人民医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
 <link rel="stylesheet" href="styles.css">
 <style>
@@ -14,6 +14,52 @@
 .sc-acts{border-top:1px dashed var(--border);padding-top:12px;margin-top:12px}
 .sc-grid{grid-template-columns:repeat(3,1fr)}
 @media (max-width:1400px){.sc-grid{grid-template-columns:repeat(2,1fr)}}
+.editor-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.editor-bar .grow{flex:1}
+.se-layout{display:flex;gap:16px;align-items:flex-start}
+.se-palette{width:230px;flex:none}
+.pal-item{display:flex;align-items:center;gap:10px;border:1px dashed var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:12.5px;color:var(--text2);transition:.15s}
+.pal-item:hover{border-color:var(--accent);color:var(--text);background:var(--accent-dim)}
+.pal-item svg{width:16px;height:16px;flex:none}
+.pal-item small{margin-left:auto;color:var(--text3);font-size:10.5px}
+.se-canvas{flex:1;min-width:0;display:flex;flex-direction:column;gap:14px}
+.se-graph-wrap{position:relative}
+.se-graph{position:relative;overflow:auto;height:calc(100vh - 330px);min-height:400px;background:var(--bg);border:1px solid var(--border2);border-radius:10px;background-image:linear-gradient(rgba(47,129,247,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(47,129,247,.07) 1px,transparent 1px);background-size:24px 24px;background-position:-1px -1px;cursor:grab}
+.se-graph.panning{cursor:grabbing;user-select:none}
+.se-stage{position:absolute;left:0;top:0}
+.se-zoom{position:absolute;top:10px;right:16px;z-index:20;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(15,23,42,.9);border:1px solid var(--border2);border-radius:8px;backdrop-filter:blur(4px)}
+.se-zoom .pct{min-width:44px;text-align:center;font-family:var(--mono);font-size:12px;color:var(--text2)}
+.se-zoom-view{position:relative;min-width:100%;min-height:100%}
+.dag-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.dag-edge{fill:none;stroke:var(--border2);stroke-width:1.8;pointer-events:stroke;cursor:pointer;transition:stroke .12s}
+.dag-edge:hover{stroke:var(--err);stroke-width:2.6}
+.dag-edge.branch{stroke:var(--purple);stroke-dasharray:5 4}
+.dag-edge-label{font-size:10.5px;fill:var(--text3);pointer-events:none;user-select:none}
+.dag-node{position:absolute;width:236px;background:var(--panel);border:1px solid var(--border2);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25);transition:border-color .12s,box-shadow .12s;z-index:2}
+.dag-node:hover{border-color:var(--accent)}
+.dag-node.is-branch{border-color:var(--purple);box-shadow:inset 3px 0 0 var(--purple),0 2px 8px rgba(0,0,0,.25)}
+.dag-node.active{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim),0 2px 8px rgba(0,0,0,.25)}
+.dag-node.dragging{opacity:.86;z-index:20}
+.dag-head{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px dashed var(--border);cursor:grab;user-select:none}
+.dag-head:active{cursor:grabbing}
+.dag-ic{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:none}
+.dag-ic svg{width:14px;height:14px}
+.dag-title{flex:1;min-width:0;font-size:12.5px;font-weight:600;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dag-body{padding:8px 10px 9px}
+.dag-meta{font-size:10.5px;color:var(--text3);display:flex;gap:8px;flex-wrap:wrap}
+.dag-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.dag-tags .tag{font-size:9.5px;padding:1px 5px}
+.dag-ops{display:flex;gap:5px;justify-content:flex-end;margin-top:7px}
+.dag-ops .btn{font-size:10.5px;padding:2px 7px}
+.dag-port{position:absolute;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;background:var(--panel);border:2px solid var(--accent);z-index:4}
+.dag-port.in{left:-7px}
+.dag-port.out{right:-7px;cursor:crosshair}
+.dag-port.out:hover{background:var(--accent);box-shadow:0 0 0 4px var(--accent-dim)}
+.dag-pool{border:1px dashed var(--border2);border-radius:10px;padding:12px;background:rgba(47,129,247,.03)}
+.dag-pool-head{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);margin-bottom:10px}
+.dag-pool-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:10px}
+.dag-pool .dag-node{position:relative;width:auto;border-style:dashed;box-shadow:none}
+.dag-empty{padding:48px;text-align:center;color:var(--text3)}
 </style>
 </head>
 <body data-page="scenarios">
@@ -25,10 +71,10 @@ document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
   var BUILTIN = ['S01','S02','S03','S04','S05','S06','S07','S08'];
-  var f = { q:'', type:'', level:'', diff:'' };
+  var f = { q:'', type:'', level:'' };
 
   page.innerHTML =
-    '<div class="page-head"><div><h1>场景剧本库</h1><div class="sub">内置 8 个医院典型网络安全事件场景 · 支持自定义场景导入导出（全部为演练模拟数据）</div></div>'
+    '<div class="page-head"><div><h1>场景剧本库与编排</h1><div class="sub">内置 8 个医院典型网络安全事件场景 · 点击「编辑剧本」打开并行编排画布（节点可配置多个前置、并行推进）</div></div>'
     + '<div class="acts">'
     + '<button class="btn" id="btnImport">'+App.icon('upload')+'导入场景</button>'
     + '<button class="btn primary" id="btnNew">'+App.icon('plus')+'新建自定义场景</button></div></div>'
@@ -37,7 +83,6 @@ document.addEventListener('app:ready', function(e){
     + '<span class="input" style="display:flex;align-items:center;gap:8px;width:260px;color:var(--text3)">'+App.icon('search')+'<input class="input" id="fQ" placeholder="按场景名称/类型搜索…" style="border:none;background:transparent;padding:0;flex:1"></span>'
     + '<select class="select" id="fType"><option value="">全部事件类型</option>'+MOCK.DICT.eventTypes.map(function(t){ return '<option>'+t+'</option>'; }).join('')+'</select>'
     + '<select class="select" id="fLevel"><option value="">全部等级</option>'+MOCK.DICT.levels.map(function(l){ return '<option>'+l+'</option>'; }).join('')+'</select>'
-    + '<select class="select" id="fDiff"><option value="">全部难度</option><option>基础版</option><option>实战版</option></select>'
     + '<span class="dim small" id="fCount"></span></div>'
     + '<div class="grid sc-grid" id="scGrid"></div>';
 
@@ -49,7 +94,6 @@ document.addEventListener('app:ready', function(e){
       if(f.q && (s.name+s.type).toLowerCase().indexOf(f.q.toLowerCase())<0) return false;
       if(f.type && s.type!==f.type) return false;
       if(f.level && s.level!==f.level) return false;
-      if(f.diff && s.difficulty.indexOf(f.diff)<0) return false;
       return true;
     });
     document.getElementById('fCount').textContent = '共 '+list.length+' 个场景（内置 '+MOCK.SCENARIOS.filter(function(s){ return BUILTIN.indexOf(s.id)>=0; }).length+' · 自定义 '+(MOCK.SCENARIOS.length-MOCK.SCENARIOS.filter(function(s){ return BUILTIN.indexOf(s.id)>=0; }).length)+'）';
@@ -60,7 +104,7 @@ document.addEventListener('app:ready', function(e){
       return '<div class="card sc-card">'
       + '<div class="flex gap2" style="justify-content:space-between"><div class="flex gap2"><span class="tag gray mono">'+s.id+'</span>'+App.levelTag(s.level)+'</div>'+App.statusTag(s.status)+'</div>'
       + '<div class="sc-name">'+App.esc(s.name)+'</div>'
-      + '<div class="flex gap2 wrap mt2"><span class="tag blue">'+s.type+'</span><span class="tag '+(s.difficulty.indexOf('基础')>=0?'green':'purple')+'">'+s.difficulty+'</span><span class="mono dim small">'+s.version+'</span></div>'
+      + '<div class="flex gap2 wrap mt2"><span class="tag blue">'+s.type+'</span><span class="mono dim small">'+s.version+'</span></div>'
       + '<div class="sc-desc">'+App.esc(s.desc)+'</div>'
       + '<div class="sc-foot"><span>'+App.icon('flow')+' '+s.nodes+' 个节点</span><span class="right">更新于 '+s.updated+'</span>'+(builtin?'<span class="tag gray">内置</span>':'<span class="tag purple">自定义</span>')+'</div>'
       + '<div class="flex gap1 wrap sc-acts">'
@@ -75,7 +119,7 @@ document.addEventListener('app:ready', function(e){
       b.onclick = function(){
         var s = scenarioById(b.dataset.id);
         if(!s) return;
-        if(b.dataset.act==='edit'){ location.href = 'script-editor.html?scenario='+s.id; }
+        if(b.dataset.act==='edit'){ openEditor(s.id); }
         else if(b.dataset.act==='copy'){ doCopy(s); }
         else if(b.dataset.act==='toggle'){ doToggle(s); }
         else if(b.dataset.act==='export'){ doExport(s); }
@@ -90,7 +134,7 @@ document.addEventListener('app:ready', function(e){
       onOpen:function(ov){ ov.querySelector('#cpNo').onclick=ov.close; ov.querySelector('#cpYes').onclick=function(){
         var n = ov.querySelector('#cpName').value.trim();
         if(!n){ App.toast('请填写新场景名称','err'); return; }
-        API.addScenario({ name:n, type:s.type, level:s.level, difficulty:s.difficulty, status:'停用', version:'v1.0', updated:today(), nodes:s.nodes, desc:s.desc }).then(function(ns){
+        API.addScenario({ name:n, type:s.type, level:s.level, status:'停用', version:'v1.0', updated:today(), nodes:s.nodes, desc:s.desc }).then(function(ns){
           ov.close(); render(); App.toast('已复制为自定义场景 '+ns.id+'（演练模拟）','ok');
         });
       }; } });
@@ -125,7 +169,6 @@ document.addEventListener('app:ready', function(e){
   document.getElementById('fQ').oninput = function(){ f.q=this.value; render(); };
   document.getElementById('fType').onchange = function(){ f.type=this.value; render(); };
   document.getElementById('fLevel').onchange = function(){ f.level=this.value; render(); };
-  document.getElementById('fDiff').onchange = function(){ f.diff=this.value; render(); };
 
   document.getElementById('btnNew').onclick = function(){
     App.modal({ title:'新建自定义场景', wide:true,
@@ -133,24 +176,23 @@ document.addEventListener('app:ready', function(e){
       + '<div class="form-row span2"><label class="f-label">场景名称<span class="req">*</span></label><input class="input" id="ncName" placeholder="如：医保专线中断应急演练"></div>'
       + '<div class="form-row"><label class="f-label">事件类型</label><select class="select" id="ncType">'+MOCK.DICT.eventTypes.map(function(t){ return '<option>'+t+'</option>'; }).join('')+'</select></div>'
       + '<div class="form-row"><label class="f-label">事件等级</label><select class="select" id="ncLevel">'+MOCK.DICT.levels.map(function(l){ return '<option>'+l+'</option>'; }).join('')+'</select></div>'
-      + '<div class="form-row"><label class="f-label">难度</label><select class="select" id="ncDiff"><option>基础版</option><option>实战版</option></select></div>'
       + '<div class="form-row"><label class="f-label">初始状态</label><select class="select" id="ncStatus"><option>启用</option><option>停用</option></select></div>'
       + '<div class="form-row span2"><label class="f-label">场景描述</label><textarea class="textarea" id="ncDesc" placeholder="推演目标、涉及系统、关键节点说明（全部为虚拟演练内容）…"></textarea></div>'
-      + '</div><div class="tiny dim">创建后可在「剧本可视化编排」中补充节点时序。</div>',
+      + '</div><div class="tiny dim">创建后可在列表中点击「编辑剧本」弹窗补充节点时序。</div>',
       foot:'<button class="btn" id="ncNo">取消</button><button class="btn primary" id="ncYes">创建场景</button>',
       onOpen:function(ov){ ov.querySelector('#ncNo').onclick=ov.close; ov.querySelector('#ncYes').onclick=function(){
         var n = ov.querySelector('#ncName').value.trim();
         if(!n){ App.toast('请填写场景名称','err'); return; }
-        API.addScenario({ name:n, type:ov.querySelector('#ncType').value, level:ov.querySelector('#ncLevel').value, difficulty:ov.querySelector('#ncDiff').value, status:ov.querySelector('#ncStatus').value, version:'v1.0', updated:today(), nodes:0, desc:ov.querySelector('#ncDesc').value.trim()||'（暂无描述）' }).then(function(ns){
-          ov.close(); render(); App.toast('演练模拟：自定义场景 '+ns.id+' 已创建','ok');
+        API.addScenario({ name:n, type:ov.querySelector('#ncType').value, level:ov.querySelector('#ncLevel').value, status:ov.querySelector('#ncStatus').value, version:'v1.0', updated:today(), nodes:0, desc:ov.querySelector('#ncDesc').value.trim()||'（暂无描述）' }).then(function(ns){
+          ov.close(); render(); App.toast('演练模拟：自定义场景 '+ns.id+' 已创建，可在列表中点击「编辑剧本」编排节点','ok');
         });
       }; } });
   };
 
   document.getElementById('btnImport').onclick = function(){
     App.modal({ title:'导入场景（JSON）', wide:true,
-      body:'<div class="form-row"><label class="f-label">粘贴场景 JSON<span class="req">*</span></label><textarea class="textarea" id="imJson" style="min-height:180px;font-family:var(--mono)" placeholder=\'{"name":"XX应急演练","type":"勒索病毒","level":"较大","difficulty":"基础版","desc":"…"}\'></textarea></div>'
-      + '<div class="tiny dim">结构要求：name / type 必填，level、difficulty、desc 选填；导入后将作为自定义场景追加至场景库。</div>',
+      body:'<div class="form-row"><label class="f-label">粘贴场景 JSON<span class="req">*</span></label><textarea class="textarea" id="imJson" style="min-height:180px;font-family:var(--mono)" placeholder=\'{"name":"XX应急演练","type":"勒索病毒","level":"较大","desc":"…"}\'></textarea></div>'
+      + '<div class="tiny dim">结构要求：name / type 必填，level、desc 选填；导入后将作为自定义场景追加至场景库，演练模式在新建演练项目时选择。</div>',
       foot:'<button class="btn" id="imNo">取消</button><button class="btn primary" id="imYes">校验并导入</button>',
       onOpen:function(ov){ ov.querySelector('#imNo').onclick=ov.close; ov.querySelector('#imYes').onclick=function(){
         var raw = ov.querySelector('#imJson').value.trim();
@@ -158,13 +200,740 @@ document.addEventListener('app:ready', function(e){
         var obj;
         try{ obj = JSON.parse(raw); }catch(err){ App.toast('导入失败：JSON 解析错误 · '+err.message,'err'); return; }
         if(!obj || typeof obj!=='object' || Array.isArray(obj) || !obj.name || !obj.type){ App.toast('导入失败：缺少 name / type 字段，结构不符合场景规范','err'); return; }
-        API.addScenario({ name:String(obj.name), type:String(obj.type), level:(MOCK.DICT.levels.indexOf(obj.level)>=0?obj.level:'一般'), difficulty:(String(obj.difficulty||'').indexOf('实战')>=0?'实战版':'基础版'), status:'停用', version:'v1.0', updated:today(), nodes:(obj.nodes&&obj.nodes.length?obj.nodes.length:0), desc:String(obj.desc||'（导入场景，暂无描述）') }).then(function(ns){
+        API.addScenario({ name:String(obj.name), type:String(obj.type), level:(MOCK.DICT.levels.indexOf(obj.level)>=0?obj.level:'一般'), status:'停用', version:'v1.0', updated:today(), nodes:(obj.nodes&&obj.nodes.length?obj.nodes.length:0), desc:String(obj.desc||'（导入场景，暂无描述）') }).then(function(ns){
           ov.close(); render(); App.toast('演练模拟：场景导入成功（'+ns.id+'），默认停用待编排','ok');
         });
       }; } });
   };
 
+  /* ================= 剧本可视化编排（全屏弹窗） ================= */
+  var TYPES = {
+    alert:  { label:'告警', icon:'bell',   color:'var(--err)',    dim:'var(--err-dim)' },
+    task:   { label:'任务', icon:'tasks',  color:'var(--accent)', dim:'var(--accent-dim)' },
+    branch: { label:'分支', icon:'flow',   color:'var(--purple)', dim:'var(--purple-dim)' },
+    report: { label:'上报', icon:'send',   color:'var(--info)',   dim:'var(--info-dim)' },
+    end:    { label:'终止', icon:'power',  color:'var(--text2)',  dim:'var(--elev)' }
+  };
+  var ACTION_TYPES = ['告警核实','隔离处置','处置恢复','取证留痕','上报审批','业务兜底','协同沟通','其他'];
+
+  function clone(x){ return JSON.parse(JSON.stringify(x)); }
+  function kwText(n){ var k = n.keywords; return Array.isArray(k) ? k.join(',') : (k||''); }
+  function evText(n){
+    return (Array.isArray(n.evidenceReq) ? n.evidenceReq : []).map(function(x){
+      return [x.type||'处置记录', x.name||'', x.note||''].join('|');
+    }).join('\n');
+  }
+  /* 按剧本节点内容自动生成相符的取证材料（与后端规则一致） */
+  function autoEv(n){
+    var title = n.title||'处置环节', target = n.target||'—';
+    var action = n.action||'', guide = n.guide||n.desc||'按预案执行处置';
+    var out = [{ type:'处置记录', name:'处置记录-'+title+'.md', note:'责任角色：'+target+'；处置要点：'+String(guide).slice(0,80) }];
+    if(n.form) out.push({ type:'表单文书', name:'表单文书-'+title+'.md', note:'节点关联表单 '+n.form+' 提交后的归档文书（演练虚拟版本）。' });
+    if(/取证|样本|日志|排查|分析/.test(action+title+guide)) out.push({ type:'样本摘要', name:'样本摘要-'+title+'.txt', note:'虚拟样本摘要（仅哈希与特征描述，不含真实恶意程序）。' });
+    if(/隔离|断网|封堵|切换|恢复|停机/.test(action+title)) out.push({ type:'操作日志', name:'操作日志-'+title+'.md', note:'系统/网络设备操作记录片段（演练虚拟日志）。' });
+    return out.slice(0, 6);
+  }
+  function parseEvText(text){
+    return String(text||'').split('\n').map(function(line){
+      var p = line.split('|');
+      if(p.length<2) return null;
+      var name = String(p[1]||'').trim();
+      if(!name) return null;
+      var type = String(p[0]||'').trim();
+      if(['附件截图','操作日志','处置记录','样本摘要','表单文书','上报材料','报案材料','附件'].indexOf(type)<0) type = '处置记录';
+      return { type:type, name:name.slice(0,160), note:String(p.slice(2).join('|')||'').trim().slice(0,400) };
+    }).filter(function(x){ return !!x; }).slice(0,6);
+  }
+  function fallbackNodes(s){
+    return [
+      { id:'FN1', type:'alert', title:'T+0 '+s.type+'模拟告警推送', target:'信息科值班员', timeout:10, desc:'推送「'+s.name+'」场景模拟告警（实战版仅原始告警）', flowType:'correct', score:10, deps:[] },
+      { id:'FN2', type:'task', title:'核实与初步处置', target:'网络安全管理员', timeout:15, desc:'按预案核实异常并执行模拟处置、留存证据', flowType:'correct', score:20, deps:['FN1'] },
+      { id:'FN3', type:'report', title:'研判简报上报指挥部', target:'信息科负责人', timeout:10, form:'F2', desc:'形成研判简报并提交院应急指挥部', flowType:'correct', score:20, deps:['FN2'] },
+      { id:'FN4', type:'end', title:'演练终止与复盘', target:'院应急指挥部', desc:'下达终止指令，进入复盘评估', deps:['FN3'] }
+    ];
+  }
+  function normNodes(list){
+    var arr = clone(list || []);
+    arr.forEach(function(n, i){
+      n.deps = Array.isArray(n.deps) ? n.deps.filter(function(x){ return !!x; }).map(String) : [];
+      if(n.posX === undefined) n.posX = null;
+      if(n.posY === undefined) n.posY = null;
+      if(!n.id) n.id = 'N' + (i + 1);
+    });
+    return arr;
+  }
+  function loadNodes(id){
+    var s = scenarioById(id);
+    var own = (MOCK.SCRIPT_NODES || []).filter(function(n){ return n.scenarioId===id; });
+    if(own.length) return normNodes(own);
+    return (id==='S01') ? normNodes((MOCK.SCRIPT_NODES || []).filter(function(n){ return !n.scenarioId; })) : normNodes(fallbackNodes(s));
+  }
+
+  /* 打开剧本编排弹窗：每个场景独立闭包状态，关闭即丢弃 */
+  function openEditor(scenarioId){
+    var curId = (scenarioId && scenarioById(scenarioId)) ? scenarioId : 'S01';
+    var nodes = loadNodes(curId);
+    var playTimer = null, dragNode = null, linkDrag = null, panState = null;
+    var s0 = scenarioById(curId);
+    var NODE_W = 236;
+    var zoom = 1, ZOOM_MIN = 0.2, ZOOM_MAX = 2, ZOOM_STEP = 0.1;
+
+    var ov = App.modal({
+      title:'剧本并行编排 · '+s0.id+' '+s0.name,
+      full:true,
+      body:
+        '<div class="editor-wrap">'
+        + '<div class="editor-bar">'
+        +   '<select class="select" id="seSel" style="min-width:210px">'+MOCK.SCENARIOS.map(function(s){ return '<option value="'+s.id+'"'+(s.id===curId?' selected':'')+'>'+s.id+' · '+App.esc(s.name)+'</option>'; }).join('')+'</select>'
+        +   '<input class="input" id="seName" style="width:260px" maxlength="60" value="'+App.esc(s0.name)+'" placeholder="剧本名称（必填，最长 60 字）">'
+        +   '<span class="grow"></span>'
+        +   '<button class="btn sm" id="btnAdd">'+App.icon('plus')+'添加节点</button>'
+        +   '<button class="btn sm" id="btnAuto">'+App.icon('flow')+'自动布局</button>'
+        +   '<button class="btn sm" id="btnPlay">'+App.icon('play')+'预览推演</button>'
+        +   '<button class="btn sm primary" id="btnSave">'+App.icon('check')+'保存剧本</button>'
+        + '</div>'
+        + '<div class="sim-banner">'+App.icon('alert')+'<span>编排操作仅写入演练平台剧本库（模拟），不会向任何真实网络、系统下发指令。节点数据为虚拟演练内容。</span></div>'
+        + '<div class="card" style="border-color:rgba(248,81,73,.35)">'
+        +   '<div class="card-title">'+App.icon('alert')+'演练初始故障通报<span class="more">工作台弹窗 + 顶部固定告警</span></div>'
+        +   '<div class="tiny dim mb2">演练开始后，角色工作台先弹窗展示该故障内容，随后在页面正上方以醒目红色告警条常驻显示。基础版与实战版共用同一份通报，各角色内容一致。</div>'
+        +   '<div class="form-row"><label class="f-label">故障通报内容</label><textarea class="textarea" id="seAlert" rows="3" placeholder="如：T+0 监控平台推送紧急告警：……">'+App.esc(s0.alert||'')+'</textarea></div>'
+        + '</div>'
+        + '<div class="se-layout">'
+        +   '<div class="card se-palette">'
+        +     '<div class="card-title">'+App.icon('flow')+'节点类型</div>'
+        +     Object.keys(TYPES).map(function(k){ return '<div class="pal-item" data-type="'+k+'"><span style="color:'+TYPES[k].color+'">'+App.icon(TYPES[k].icon)+'</span>'+TYPES[k].label+'节点<small>点击添加</small></div>'; }).join('')
+        +     '<div class="pal-item" data-type="__distractor"><span style="color:var(--warn)">'+App.icon('alert')+'</span>混淆流程节点<small>点击添加</small></div>'
+        +     '<div class="divider"></div>'
+        +     '<div class="section-title">流程分值</div>'
+        +     '<div id="seSum" class="small muted"></div>'
+        +   '</div>'
+        +   '<div class="se-canvas">'
+        +     '<div class="se-graph-wrap">'
+        +       '<div class="se-graph" id="canvasFlow"></div>'
+        +       '<div class="se-zoom">'
+        +         '<button class="btn sm outline" id="zoomOut" title="缩小画布">−</button>'
+        +         '<span class="pct" id="zoomPct">100%</span>'
+        +         '<button class="btn sm outline" id="zoomIn" title="放大画布">＋</button>'
+        +         '<button class="btn sm" id="zoomReset" title="恢复 100%">1:1</button>'
+        +         '<button class="btn sm" id="zoomFit" title="缩放到完整显示流程">适应画布</button>'
+        +       '</div>'
+        +     '</div>'
+        +     '<div class="dag-pool" id="poolFlow"></div>'
+        +   '</div>'
+        + '</div>'
+        + '</div>',
+      onClose:function(){
+        if(playTimer){ clearInterval(playTimer); playTimer = null; }
+        panState = null;
+        document.removeEventListener('mousemove', onDocMove);
+        document.removeEventListener('mouseup', onDocUp);
+      }
+    });
+
+    var root = ov.querySelector('.m-body');
+
+    function formName(fid){ var t = MOCK.FORM_TEMPLATES.filter(function(x){ return x.id===fid; })[0]; return t?t.name:''; }
+    function roleNames(){
+      var list = (MOCK.ROLES || []).map(function(r){ return r.name; });
+      ['院应急指挥部', '信息科负责人', '信息科值班员', '网络安全管理员', '系统管理员', '医务科主任', '临床科室'].forEach(function(x){
+        if(list.indexOf(x) < 0) list.push(x);
+      });
+      return list;
+    }
+    function recvList(n){
+      return String((n&&n.receiver)||'').split(/[、,，;；]/).map(function(x){ return x.trim(); }).filter(Boolean);
+    }
+    function scoreTotal(){
+      return nodes.filter(function(x){ return x.type!=='end' && x.flowType!=='distractor'; })
+        .reduce(function(a,x){ return a + (Number(x.score)||0); },0);
+    }
+    function renderSum(){
+      var el = root.querySelector('#seSum');
+      if(!el) return;
+      var total = scoreTotal();
+      var dis = nodes.filter(function(x){ return x.type!=='end' && x.flowType==='distractor'; }).length;
+      el.innerHTML = '正确流程合计 <b>'+total+'</b> / 100 分 · 混淆流程 <b>'+dis+'</b> 条'
+        + (total>100?'<br><span style="color:var(--err)">已超出 '+(total-100)+' 分，请下调各节点分值</span>'
+                    :(total<100?'<br><span style="color:var(--warn)">未满 100 分，请分配剩余分值</span>'
+                               :'<br><span style="color:var(--ok)">分值已满 100 分</span>'));
+    }
+
+    /* ---------- 依赖图辅助 ---------- */
+    function correctNodes(){ return nodes.filter(function(x){ return x.flowType!=='distractor'; }); }
+    function nodeById(id){ return nodes.filter(function(x){ return String(x.id)===String(id); })[0] || null; }
+    function depOf(n){
+      if(!n || n.flowType==='distractor') return [];
+      return (Array.isArray(n.deps)?n.deps:[]).map(String).filter(function(id){
+        var d = nodeById(id);
+        return !!d && d.flowType!=='distractor' && d.type!=='end' && String(n.id)!==id;
+      });
+    }
+    function succOf(id){
+      return correctNodes().filter(function(x){ return depOf(x).indexOf(String(id))>=0; });
+    }
+    /* 沿后继方向判断可达（用于连线成环校验） */
+    function reachable(from, to, seen){
+      if(String(from)===String(to)) return true;
+      seen = seen || {};
+      if(seen[from]) return false;
+      seen[from] = true;
+      return succOf(from).some(function(x){ return reachable(x.id, to, seen); });
+    }
+    function topoOrder(){
+      var list = correctNodes();
+      var ids = list.map(function(n){ return String(n.id); });
+      var present = {};
+      ids.forEach(function(id){ present[id] = true; });
+      var indeg = {}, childs = {};
+      ids.forEach(function(id){ indeg[id] = 0; childs[id] = []; });
+      ids.forEach(function(id){
+        depOf(nodeById(id)).forEach(function(d){
+          if(!present[d]) return;
+          indeg[id]++; childs[d].push(id);
+        });
+      });
+      var q = ids.filter(function(id){ return !indeg[id]; }), out = [], guard = 0;
+      while(q.length && guard++ < 20000){
+        var id = q.shift(); out.push(id);
+        childs[id].forEach(function(c){ indeg[c]--; if(!indeg[c]) q.push(c); });
+      }
+      return out.length === ids.length ? out : null;
+    }
+
+    /* ---------- 自动布局：列=拓扑深度，行=责任角色泳道 ---------- */
+    function autoLayout(){
+      var list = correctNodes();
+      if(!list.length) return;
+      var order = topoOrder() || list.map(function(n){ return String(n.id); });
+      var depth = {};
+      order.forEach(function(id){
+        depth[id] = depOf(nodeById(id)).reduce(function(m, x){ return Math.max(m, (depth[x]||0)+1); }, 0);
+      });
+      var lanes = {}, laneIdx = 0;
+      roleNames().forEach(function(r){ lanes[r] = laneIdx++; });
+      var stack = {};
+      list.forEach(function(n){
+        var id = String(n.id);
+        if(lanes[n.target]===undefined) lanes[n.target] = laneIdx++;
+        var key = depth[id] + '-' + lanes[n.target];
+        var s = stack[key] || 0;
+        stack[key] = s + 1;
+        n.posX = 40 + depth[id]*Math.round(NODE_W*1.3);
+        n.posY = 40 + lanes[n.target]*168 + s*146;
+      });
+    }
+    function ensureLayout(){
+      if(correctNodes().some(function(n){ return n.posX===null || n.posX===undefined || n.posY===null || n.posY===undefined; })) autoLayout();
+    }
+
+    function cardHtml(n, i, inPool){
+      var t = TYPES[n.type]||TYPES.task;
+      var tags = [];
+      if(n.type!=='end'){
+        tags.push(n.flowType==='distractor'
+          ? '<span class="tag red">混淆流程 '+(Number(n.score)||0)+' 分</span>'
+          : '<span class="tag blue">正确流程 '+(Number(n.score)||0)+' 分</span>');
+        tags.push(n.required===false ? '<span class="tag gray">可选步骤</span>' : '<span class="tag green">必经</span>');
+      }
+      if(n.action) tags.push('<span class="tag blue">'+App.esc(n.action)+'</span>');
+      if(n.form) tags.push('<span class="tag purple">'+App.esc(formName(n.form))+'</span>');
+      if(n.type==='branch' && n.branches) tags.push('<span class="tag purple">是：'+App.esc(n.branches[0]||'条件成立')+'</span><span class="tag purple">否：'+App.esc(n.branches[1]||'条件不成立')+'</span>');
+      var body = '<div class="dag-body"><div class="dag-meta"><span class="mono">处置时长 '+(n.timeout?'<b>'+n.timeout+'</b> 分钟':'—')+'</span><span>接收：'+App.esc(n.target||'—')+'</span></div>'
+        + '<div class="dag-tags">'+tags.join('')+'<span class="tag gray">'+t.label+'</span></div>'
+        + '<div class="dag-ops"><button class="btn sm" data-edit="'+i+'">'+App.icon('edit')+'配置</button>'
+        + '<button class="btn sm danger" data-del="'+i+'" title="删除节点（演练模拟）">'+App.icon('x')+'</button></div></div>';
+      var cls = 'dag-node'+(n.type==='branch'?' is-branch':'');
+      var styleAttr = inPool ? '' : ' style="left:'+(Number(n.posX)||0)+'px;top:'+(Number(n.posY)||0)+'px"';
+      var ports = inPool ? '' : '<span class="dag-port in"></span><span class="dag-port out" data-src="'+App.esc(String(n.id))+'" title="按住拖拽到目标节点建立依赖"></span>';
+      return '<div class="'+cls+'" data-id="'+App.esc(String(n.id))+'" data-i="'+i+'"'+styleAttr+'>'+ports
+        + '<div class="dag-head"><span class="dag-ic" style="background:'+t.dim+';color:'+t.color+'">'+App.icon(t.icon)+'</span>'
+        + '<span class="dag-title">'+App.esc(n.title)+'</span></div>'+body+'</div>';
+    }
+
+    function drawEdges(){
+      var svg = root.querySelector('.dag-edges');
+      if(!svg) return;
+      Array.prototype.slice.call(svg.querySelectorAll('.dag-edge,.dag-edge-label')).forEach(function(x){ x.remove(); });
+      correctNodes().forEach(function(to){
+        var toEl = root.querySelector('.dag-node[data-id="'+String(to.id)+'"]');
+        if(!toEl) return;
+        depOf(to).forEach(function(depId){
+          var from = nodeById(depId);
+          var fromEl = root.querySelector('.dag-node[data-id="'+String(depId)+'"]');
+          if(!from || !fromEl) return;
+          var ax = (Number(from.posX)||0) + NODE_W;
+          var ay = (Number(from.posY)||0) + fromEl.offsetHeight/2;
+          var bx = Number(to.posX)||0;
+          var by = (Number(to.posY)||0) + toEl.offsetHeight/2;
+          var dx = Math.max(36, Math.abs(bx-ax)*0.45);
+          var path = document.createElementNS('http://www.w3.org/2000/svg','path');
+          path.setAttribute('class', 'dag-edge'+(from.type==='branch'?' branch':''));
+          path.setAttribute('d', 'M'+ax+','+ay+' C'+(ax+dx)+','+ay+' '+(bx-dx)+','+by+' '+bx+','+by);
+          path.setAttribute('marker-end', 'url(#dagArrow)');
+          path.setAttribute('data-from', String(from.id));
+          path.setAttribute('data-to', String(to.id));
+          svg.appendChild(path);
+          if(from.type==='branch'){
+            var succ = succOf(from.id);
+            var label = document.createElementNS('http://www.w3.org/2000/svg','text');
+            label.setAttribute('class','dag-edge-label');
+            label.setAttribute('x', (ax+bx)/2);
+            label.setAttribute('y', (ay+by)/2 - 8);
+            label.textContent = succ.indexOf(to)===1 ? '否' : '是';
+            svg.appendChild(label);
+          }
+        });
+      });
+      Array.prototype.slice.call(svg.querySelectorAll('.dag-edge')).forEach(function(p){
+        p.onclick = function(){
+          var from = nodeById(p.dataset.from), to = nodeById(p.dataset.to);
+          if(!from || !to) return;
+          App.confirmSim('删除依赖关系「'+App.esc(from.title)+' → '+App.esc(to.title)+'」？保存剧本后生效。', function(){
+            to.deps = depOf(to).filter(function(x){ return x !== String(from.id); });
+            render(); App.toast('依赖关系已删除（演练模拟）','ok');
+          });
+        };
+      });
+    }
+
+    function syncZoomLabel(){
+      var lbl = root.querySelector('#zoomPct');
+      if(lbl) lbl.textContent = Math.round(zoom*100)+'%';
+    }
+    function render(){
+      renderSum();
+      syncZoomLabel();
+      var c = root.querySelector('#canvasFlow');
+      var pool = root.querySelector('#poolFlow');
+      if(!nodes.length){
+        c.innerHTML = '<div class="dag-empty">'+App.icon('flow')+'<div>画布为空，从左侧类型面板添加节点</div></div>';
+        if(pool){ pool.style.display = 'none'; pool.innerHTML = ''; }
+        return;
+      }
+      ensureLayout();
+      var correct = correctNodes();
+      var dis = nodes.filter(function(x){ return x.flowType==='distractor'; });
+      var maxX = 640, maxY = 400;
+      correct.forEach(function(n){
+        maxX = Math.max(maxX, (Number(n.posX)||0) + NODE_W + 80);
+        maxY = Math.max(maxY, (Number(n.posY)||0) + 210 + 60);
+      });
+      c.innerHTML = '<div class="se-zoom-view" style="width:'+Math.round(maxX*zoom)+'px;height:'+Math.round(maxY*zoom)+'px">'
+        + '<div class="se-stage" style="width:'+maxX+'px;height:'+maxY+'px;transform:scale('+zoom+');transform-origin:0 0">'
+        + '<svg class="dag-edges" width="'+maxX+'" height="'+maxY+'">'
+        + '<defs><marker id="dagArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3f5b80"></path></marker></defs>'
+        + '</svg>'
+        + correct.map(function(n){ return cardHtml(n, nodes.indexOf(n), false); }).join('')
+        + '</div></div>';
+      if(dis.length){
+        pool.style.display = '';
+        pool.innerHTML = '<div class="dag-pool-head">'+App.icon('alert')+'<span>混淆流程池（仅实战版显示，不参与依赖流转；参选后按分值扣分）</span></div>'
+          + '<div class="dag-pool-grid">'+dis.map(function(n){ return cardHtml(n, nodes.indexOf(n), true); }).join('')+'</div>';
+      } else {
+        pool.style.display = 'none';
+        pool.innerHTML = '';
+      }
+
+      root.querySelectorAll('.dag-node').forEach(function(el){
+        if(el.closest('.dag-pool')) return;
+        var n = nodeById(el.dataset.id);
+        if(!n) return;
+        var head = el.querySelector('.dag-head');
+        head.addEventListener('mousedown', function(ev){
+          if(ev.target.closest('.dag-ops') || ev.target.closest('.dag-port')) return;
+          ev.preventDefault();
+          dragNode = { n:n, el:el, sx:ev.clientX, sy:ev.clientY, ox:Number(n.posX)||0, oy:Number(n.posY)||0 };
+          el.classList.add('dragging');
+        });
+      });
+      root.querySelectorAll('.dag-port.out').forEach(function(port){
+        port.addEventListener('mousedown', function(ev){
+          ev.preventDefault(); ev.stopPropagation();
+          var from = nodeById(port.dataset.src);
+          var svg = root.querySelector('.dag-edges');
+          if(!from || !svg) return;
+          var fromEl = root.querySelector('.dag-node[data-id="'+String(from.id)+'"]');
+          var ax = (Number(from.posX)||0) + NODE_W;
+          var ay = (Number(from.posY)||0) + (fromEl?fromEl.offsetHeight/2:60);
+          var temp = document.createElementNS('http://www.w3.org/2000/svg','path');
+          temp.setAttribute('class','dag-edge');
+          temp.setAttribute('d','M'+ax+','+ay+' L'+ax+','+ay);
+          svg.appendChild(temp);
+          linkDrag = { fromId:String(from.id), ax:ax, ay:ay, path:temp };
+        });
+      });
+      root.querySelectorAll('[data-edit]').forEach(function(b){ b.onclick = function(){ openDrawer(+b.dataset.edit); }; });
+      root.querySelectorAll('[data-del]').forEach(function(b){ b.onclick = function(){
+        var n = nodes[+b.dataset.del];
+        if(!n) return;
+        App.confirmSim('从画布移除节点「'+App.esc(n.title)+'」及其相关依赖（演练模拟，保存后生效）。', function(){
+          var id = String(n.id);
+          nodes.splice(+b.dataset.del, 1);
+          nodes.forEach(function(x){ if(Array.isArray(x.deps)) x.deps = x.deps.filter(function(d){ return String(d)!==id; }); });
+          render();
+          App.toast('节点已移除（演练模拟）','ok');
+        });
+      }; });
+      drawEdges();
+    }
+
+    /* 画布拖拽 / 连线（文档级监听，仅在编排弹窗打开期间生效） */
+    function svgPoint(svg, ev){
+      var rect = svg.getBoundingClientRect();
+      return { x:(ev.clientX - rect.left)/zoom, y:(ev.clientY - rect.top)/zoom };
+    }
+    function onDocMove(ev){
+      if(panState){
+        panState.el.scrollLeft = panState.sl - (ev.clientX - panState.sx);
+        panState.el.scrollTop  = panState.st - (ev.clientY - panState.sy);
+        return;
+      }
+      if(dragNode){
+        dragNode.n.posX = Math.max(0, dragNode.ox + (ev.clientX - dragNode.sx)/zoom);
+        dragNode.n.posY = Math.max(0, dragNode.oy + (ev.clientY - dragNode.sy)/zoom);
+        dragNode.el.style.left = dragNode.n.posX+'px';
+        dragNode.el.style.top = dragNode.n.posY+'px';
+        drawEdges();
+      } else if(linkDrag){
+        var svg = root.querySelector('.dag-edges');
+        if(!svg) return;
+        var pt = svgPoint(svg, ev);
+        linkDrag.path.setAttribute('d', 'M'+linkDrag.ax+','+linkDrag.ay+' L'+pt.x+','+pt.y);
+      }
+    }
+    function onDocUp(ev){
+      if(panState){
+        panState.el.classList.remove('panning');
+        panState = null;
+        return;
+      }
+      if(dragNode){
+        var moved = Math.abs(ev.clientX-dragNode.sx)>2 || Math.abs(ev.clientY-dragNode.sy)>2;
+        dragNode.el.classList.remove('dragging');
+        dragNode = null;
+        if(moved) render();
+        return;
+      }
+      if(!linkDrag) return;
+      var from = nodeById(linkDrag.fromId);
+      linkDrag.path.remove();
+      linkDrag = null;
+      var hit = document.elementFromPoint(ev.clientX, ev.clientY);
+      var targetEl = hit && hit.closest ? hit.closest('.dag-node') : null;
+      if(!targetEl || !from) return;
+      var to = nodeById(targetEl.dataset.id);
+      if(!to || to===from) return;
+      if(to.flowType==='distractor'){ App.toast('混淆流程不参与依赖图','warn'); return; }
+      if(from.flowType==='distractor'){ App.toast('混淆流程不能作为前置节点','warn'); return; }
+      if(depOf(to).indexOf(String(from.id))>=0){ App.toast('该依赖关系已存在','warn'); return; }
+      if(reachable(to.id, from.id)){ App.toast('不能形成循环依赖，请检查前置关系','err'); return; }
+      to.deps = depOf(to).concat(String(from.id));
+      render();
+      App.toast('已建立依赖：'+from.title+' → '+to.title+'（保存后生效）','ok');
+    }
+    document.addEventListener('mousemove', onDocMove);
+    document.addEventListener('mouseup', onDocUp);
+
+    function setZoom(next){
+      var c = root.querySelector('#canvasFlow');
+      if(!c) return;
+      var sx = c.scrollWidth>c.clientWidth ? c.scrollLeft/(c.scrollWidth-c.clientWidth) : 0;
+      var sy = c.scrollHeight>c.clientHeight ? c.scrollTop/(c.scrollHeight-c.clientHeight) : 0;
+      var z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(next*100)/100));
+      if(z === zoom){ syncZoomLabel(); return; }
+      zoom = z;
+      render();
+      c.scrollLeft = sx * Math.max(0, c.scrollWidth-c.clientWidth);
+      c.scrollTop = sy * Math.max(0, c.scrollHeight-c.clientHeight);
+    }
+    function fitZoom(){
+      var c = root.querySelector('#canvasFlow');
+      var stage = root.querySelector('#canvasFlow .se-stage');
+      if(!c || !stage) return;
+      var w = stage.offsetWidth, h = stage.offsetHeight;
+      if(!w || !h) return;
+      var z = Math.min(1, (c.clientWidth-80)/w, (c.clientHeight-48)/h);
+      if(!isFinite(z)) return;
+      setZoom(z);
+      c.scrollLeft = 0;
+      c.scrollTop = 0;
+    }
+    root.querySelector('#zoomOut').onclick = function(){ setZoom(zoom - ZOOM_STEP); };
+    root.querySelector('#zoomIn').onclick = function(){ setZoom(zoom + ZOOM_STEP); };
+    root.querySelector('#zoomReset').onclick = function(){ setZoom(1); };
+    root.querySelector('#zoomFit').onclick = fitZoom;
+
+    /* 画布自由拖动：画布内任意空白处/节点卡片主体左键拖动平移；节点标题栏拖动移动节点；右侧圆点拖出连线；中键任意位置也可平移 */
+    function bindPan(){
+      var c = root.querySelector('#canvasFlow');
+      if(!c) return;
+      c.addEventListener('mousedown', function(ev){
+        if(ev.button !== 0 && ev.button !== 1) return;             /* 仅左键/中键 */
+        var r = c.getBoundingClientRect();
+        /* 点在滚动条上时交给浏览器原生滚动，避免与平移抢占 */
+        if(ev.clientX - r.left > c.clientWidth || ev.clientY - r.top > c.clientHeight) return;
+        if(ev.target.closest('.se-zoom')) return;                    /* 排除缩放工具条 */
+        if(ev.button === 0 && ev.target.closest('.dag-port')) return;/* 左键在连线端口=建立依赖 */
+        if(ev.button === 0 && ev.target.closest('.dag-head')) return;/* 左键在节点标题栏=移动节点 */
+        ev.preventDefault();
+        panState = { sx:ev.clientX, sy:ev.clientY, sl:c.scrollLeft, st:c.scrollTop, el:c };
+        c.classList.add('panning');
+      });
+    }
+    bindPan();
+
+    function openDrawer(i){
+      var n = nodes[i];
+      var t = TYPES[n.type]||TYPES.task;
+      var targetOpts = MOCK.ROLES.map(function(r){ return '<option value="'+App.esc(r.name)+'"'+(n.target===r.name?' selected':'')+'>'+r.name+'</option>'; }).join('');
+      if(MOCK.ROLES.map(function(r){ return r.name; }).indexOf(n.target)<0){
+        targetOpts = '<option value="'+App.esc(n.target||'')+'" selected>'+App.esc(n.target||'（未指定）')+'</option>' + targetOpts;
+      }
+      var body =
+        '<div class="form-row"><label class="f-label">节点标题<span class="req">*</span></label><input class="input" id="ndTitle" value="'+App.esc(n.title||'')+'"></div>'
+        + '<div class="form-grid">'
+        + '<div class="form-row"><label class="f-label">节点类型</label><select class="select" id="ndType">'+Object.keys(TYPES).map(function(k){ return '<option value="'+k+'"'+(n.type===k?' selected':'')+'>'+TYPES[k].label+'节点</option>'; }).join('')+'</select></div>'
+        + '<div class="form-row"><label class="f-label">接收角色</label><select class="select" id="ndTarget">'+targetOpts+'</select></div>'
+        + '<div class="form-row"><label class="f-label">关联表单</label><select class="select" id="ndForm"><option value="">— 无 —</option>'+MOCK.FORM_TEMPLATES.map(function(ft){ return '<option value="'+ft.id+'"'+(n.form===ft.id?' selected':'')+'>'+ft.name+'</option>'; }).join('')+'</select></div>'
+        + '<div class="form-row"><label class="f-label">处置时长（分钟）</label><input class="input" id="ndTimeout" type="number" min="1" value="'+((n.type==='end')?(n.timeout||''):(n.timeout||15))+'" placeholder="终节点可留空"><div class="tiny dim" style="margin-top:4px">超时判定自上一节点完成时按真实时间起算；无前置节点时自演练开始计时。</div></div>'
+        + '</div>'
+        + '<div class="form-row"><label class="f-label">消息内容 / 处置说明</label><textarea class="textarea" id="ndDesc">'+App.esc(n.desc||'')+'</textarea></div>'
+        + '<div class="divider"></div><div class="section-title">流程属性与分值（基础版按正确流程顺序执行 / 实战版额外加入混淆流程）</div>'
+        + '<div class="form-grid">'
+        + '<div class="form-row"><label class="f-label">流程属性</label><select class="select" id="ndFlow"><option value="correct"'+(n.flowType==='distractor'?'':' selected')+'>正确流程（基础版显示）</option><option value="distractor"'+(n.flowType==='distractor'?' selected':'')+'>混淆流程（仅实战版显示）</option></select></div>'
+        + '<div class="form-row"><label class="f-label">本步骤分值（0-100）</label><input class="input" id="ndScore" type="number" min="0" max="100" step="1" value="'+(Number(n.score)||0)+'"></div>'
+        + '<div class="form-row span2"><label class="f-label">下一节点接收人 <span class="tiny dim">（可多选）</span></label>'
+        +   '<div class="flex gap3 wrap" id="ndReceiverBox">'
+        +   roleNames().map(function(x){ return '<label class="check"><input type="checkbox" value="'+App.esc(x)+'"'+(recvList(n).indexOf(x)>=0?' checked':'')+'>'+App.esc(x)+'</label>'; }).join('')
+        +   '</div><div class="tiny dim" style="margin-top:4px">本流程完成后的流转对象，可多选；未勾选时按依赖关系自动取后继流程的责任角色（无后继时流转至院应急指挥部）。基础版按预设接收人自动流转；实战版由参演人员在处置表单中自行选择，所选接收人与预设集合完全一致才正确，多选、漏选均扣本流程 10% 分值。</div></div>'
+        + '</div>'
+        + '<div class="form-row"><label class="f-label">前置节点 <span class="tiny dim">（可多选，全部完成后本流程才可处置）</span></label>'
+        +   '<div class="flex gap3 wrap" id="ndDepsBox">'
+        +   (correctNodes().filter(function(x){ return x!==n && x.type!=='end'; }).map(function(x){
+              return '<label class="check"><input type="checkbox" value="'+App.esc(String(x.id))+'"'+(depOf(n).indexOf(String(x.id))>=0?' checked':'')+'>'+App.esc(x.title)+'</label>';
+            }).join('') || '<span class="tiny dim">暂无可选前置节点</span>')
+        +   '</div><div class="tiny dim" style="margin-top:4px">也可在画布上按住节点右侧圆点拖拽连线到本节点建立依赖；混淆流程不参与依赖图，多个前置需全部完成后本流程才开放。</div></div>'
+        + '<div class="form-row"><label class="f-label">后继节点 <span class="tiny dim">（由依赖关系自动推导，无需手工填写）</span></label>'
+        +   '<div class="tiny dim">'+(succOf(n.id).map(function(x){ return App.esc(x.title); }).join('、') || '无（本流程为末端流程）')+'</div></div>'
+        + '<div id="ndScoreTip" class="tiny dim mb2">正确流程完成按本分值得分（超时完成按 90% 计）；混淆流程被选中按本分值直接扣分，不计入满分。</div>'
+        + '<div class="form-grid">'
+        + '<div class="form-row"><label class="f-label">动作类型</label><select class="select" id="ndAction"><option value="">— 未分类 —</option>'+ACTION_TYPES.map(function(a){ return '<option value="'+a+'"'+(n.action===a?' selected':'')+'>'+a+'</option>'; }).join('')+'</select></div>'
+        + '<div class="form-row"><label class="f-label">必经步骤</label><div class="flex gap2" style="align-items:center;min-height:34px"><label class="check"><input type="checkbox" id="ndRequired"'+(n.required===false?'':' checked')+'>实战版遗漏判定必查</label></div></div>'
+        + '</div>'
+        + '<div class="form-row"><label class="f-label">判定关键词（逗号分隔，实战版匹配用）</label><input class="input" id="ndKeywords" value="'+App.esc(kwText(n))+'" placeholder="如：隔离,断网,封堵"></div>'
+        + '<div class="form-row"><label class="f-label">引导提示（基础版在工作台展示的正确流程）</label><textarea class="textarea" id="ndGuide" placeholder="如：隔离前记录主机IP与MAC，隔离后确认无新增加密告警。">'+App.esc(n.guide||'')+'</textarea></div>'
+        + '<div class="divider"></div><div class="section-title">需取证材料（每行一项，格式：类型|材料名称|取证说明）</div>'
+        + '<div class="tiny dim mb2">演练时会在「取证与材料归档」中逐项提醒参演人员取证；点击「按剧本自动生成」可根据本节点动作自动生成相符的模拟取证材料，参演人员可一键导入后再核对修改。</div>'
+        + '<div class="flex gap2 mb2"><button class="btn sm outline" id="ndEvAuto" type="button">'+App.icon('file')+'按剧本自动生成</button><span class="tiny dim">类型可选：附件截图 / 操作日志 / 处置记录 / 样本摘要 / 表单文书</span></div>'
+        + '<div class="form-row"><textarea class="textarea" id="ndEv" rows="4" placeholder="处置记录|处置记录-隔离感染终端.md|责任角色：网络安全管理员；记录隔离终端IP与时间&#10;附件截图|告警界面截图.svg|告警时刻与受影响终端">'+App.esc(evText(n))+'</textarea></div>'
+        + '<div id="ndBranchRow"'+(n.type==='branch'?'':' style="display:none"')+'>'
+        + '<div class="divider"></div><div class="section-title">分支判断条件</div>'
+        + '<div class="form-grid"><div class="form-row"><label class="f-label">条件「是」去向描述</label><input class="input" id="ndB0" value="'+App.esc((n.branches&&n.branches[0])||'')+'" placeholder="如：一般事件 → 科内处置"></div>'
+        + '<div class="form-row"><label class="f-label">条件「否」去向描述</label><input class="input" id="ndB1" value="'+App.esc((n.branches&&n.branches[1])||'')+'" placeholder="如：较大及以上 → 上报指挥部"></div></div></div>'
+        + '<div class="tiny dim">处置时长：'+(n.timeout?App.esc(n.timeout)+' 分钟':'未设置')+'（在画布中拖动卡片可调整布局，保存后写回坐标）</div>';
+      App.drawer({ title:'节点配置 · '+App.esc(n.title), body:body, onOpen:function(dv){
+        dv.querySelector('#ndType').onchange = function(){ dv.querySelector('#ndBranchRow').style.display = this.value==='branch'?'':'none'; };
+        /* 实时统计正确流程总分，超过 100 分给出超分提醒 */
+        function refreshScoreTip(){
+          var isDis = dv.querySelector('#ndFlow').value==='distractor';
+          var v = parseInt(dv.querySelector('#ndScore').value,10);
+          if(isNaN(v) || v<0) v = 0;
+          if(v>100) v = 100;
+          var others = nodes.reduce(function(a,x,xi){
+            if(xi===i || x.type==='end' || x.flowType==='distractor') return a;
+            return a + (Number(x.score)||0);
+          },0);
+          var all = others + (isDis ? 0 : v);
+          var tip = dv.querySelector('#ndScoreTip');
+          if(isDis){
+            tip.innerHTML = '混淆流程不计入满分：被参演人员选中时按 <b>'+v+'</b> 分直接扣分；当前正确流程合计 <b>'+others+'</b> / 100 分。';
+          } else {
+            tip.innerHTML = '本步骤完成可得 <b>'+v+'</b> 分（超时按 '+(Math.round(v*0.9*10)/10)+' 分计），设置后正确流程合计 <b>'+all+'</b> / 100 分'
+              + (all>100?'，<span style="color:var(--err)">已超出 '+(all-100)+' 分，请下调分值</span>'
+                        :(all<100?'，<span style="color:var(--warn)">未满 100 分</span>':'，<span style="color:var(--ok)">分值已满</span>'));
+          }
+        }
+        dv.querySelector('#ndFlow').onchange = refreshScoreTip;
+        dv.querySelector('#ndScore').oninput = refreshScoreTip;
+        refreshScoreTip();
+        dv.querySelector('#ndEvAuto').onclick = function(){
+          var draft = {
+            title: dv.querySelector('#ndTitle').value.trim() || n.title,
+            target: dv.querySelector('#ndTarget').value,
+            action: dv.querySelector('#ndAction').value,
+            guide: dv.querySelector('#ndGuide').value.trim(),
+            desc: dv.querySelector('#ndDesc').value.trim(),
+            form: dv.querySelector('#ndForm').value
+          };
+          dv.querySelector('#ndEv').value = autoEv(draft).map(function(x){
+            return [x.type, x.name, x.note].join('|');
+          }).join('\n');
+          App.toast('已按剧本节点自动生成需取证材料，可逐项修改后保存','ok');
+        };
+        dv.querySelector('.d-body').insertAdjacentHTML('beforeend','<div class="mt4 flex gap2"><button class="btn grow" id="ndCancel">取消</button><button class="btn primary grow" id="ndSave">保存节点</button></div>');
+        dv.querySelector('#ndCancel').onclick = dv.close;
+        dv.querySelector('#ndSave').onclick = function(){
+          var title = dv.querySelector('#ndTitle').value.trim();
+          if(!title){ App.toast('节点标题不能为空','err'); return; }
+          var ty = dv.querySelector('#ndType').value;
+          n.title = title; n.type = ty;
+          n.target = dv.querySelector('#ndTarget').value;
+          n.form = dv.querySelector('#ndForm').value || undefined;
+          var tm = parseInt(dv.querySelector('#ndTimeout').value,10);
+          if(ty!=='end' && !(tm>0)){ App.toast('请填写本节点的处置时长（大于 0 的整数分钟）','err'); return; }
+          if(tm>0){ n.timeout = tm; } else { delete n.timeout; }
+          delete n.time;
+          n.desc = dv.querySelector('#ndDesc').value.trim();
+          n.action = dv.querySelector('#ndAction').value;
+          n.required = dv.querySelector('#ndRequired').checked;
+          n.guide = dv.querySelector('#ndGuide').value.trim();
+          n.flowType = dv.querySelector('#ndFlow').value === 'distractor' ? 'distractor' : 'correct';
+          var scv = parseInt(dv.querySelector('#ndScore').value,10);
+          n.score = isNaN(scv) ? 0 : Math.max(0, Math.min(100, scv));
+          n.receiver = Array.prototype.slice.call(dv.querySelectorAll('#ndReceiverBox input:checked')).map(function(c){ return c.value; }).join('、');
+          n.deps = n.flowType==='distractor' ? [] : Array.prototype.slice.call(dv.querySelectorAll('#ndDepsBox input:checked')).map(function(c){ return c.value; });
+          n.evidenceReq = parseEvText(dv.querySelector('#ndEv').value);
+          n.keywords = dv.querySelector('#ndKeywords').value.split(/[,，、;；\s]+/).filter(function(x){ return !!x; });
+          if(ty==='branch'){ n.branches = [ dv.querySelector('#ndB0').value.trim()||'条件成立', dv.querySelector('#ndB1').value.trim()||'条件不成立' ]; }
+          else { delete n.branches; }
+          dv.close(); render();
+          var tot = scoreTotal();
+          App.toast(tot>100
+            ? '节点配置已更新，但正确流程合计 '+tot+' 分已超出 100 分，请下调各节点分值'
+            : '节点配置已更新（演练模拟），保存剧本后生效为新版本', tot>100?'warn':'ok');
+        };
+      } });
+    }
+
+    function addNode(type){
+      var isDis = type === '__distractor';
+      var t = isDis ? { label:'混淆流程', icon:'alert' } : (TYPES[type]||TYPES.task);
+      var id = 'N' + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
+      var n = { id:id, type:isDis?'task':type, title:'新'+t.label+'节点', target:'信息科值班员', desc:'',
+        flowType:isDis?'distractor':'correct', score:isDis?10:0, receiver:'', deps:[] };
+      if(type!=='end') n.timeout = isDis ? 10 : 15;
+      if(type==='branch'){ n.branches = ['条件成立','条件不成立']; }
+      nodes.push(n);
+      if(!isDis){
+        var lastX = 0, lastY = 0;
+        correctNodes().forEach(function(x){
+          lastX = Math.max(lastX, Number(x.posX)||0);
+          if(Number(x.posX)===lastX) lastY = Number(x.posY)||0;
+        });
+        n.posX = lastX + Math.round(NODE_W*1.3);
+        n.posY = lastY;
+      }
+      render();
+      openDrawer(nodes.length-1);
+    }
+
+    root.querySelectorAll('.pal-item').forEach(function(p){ p.onclick = function(){ addNode(p.dataset.type); }; });
+    root.querySelector('#btnAdd').onclick = function(){ addNode('task'); };
+    root.querySelector('#btnAuto').onclick = function(){
+      autoLayout();
+      render();
+      App.toast('已按依赖深度与责任角色泳道自动布局（保存后写回坐标）','ok');
+    };
+
+    root.querySelector('#seSel').onchange = function(){
+      curId = this.value;
+      nodes = loadNodes(curId);
+      var s = scenarioById(curId);
+      var alertBox = root.querySelector('#seAlert');
+      if(alertBox) alertBox.value = s.alert || '';
+      var nameBox = root.querySelector('#seName');
+      if(nameBox) nameBox.value = s.name || '';
+      var head = ov.querySelector('.m-head');
+      if(head && head.firstChild) head.firstChild.nodeValue = '剧本并行编排 · '+s.id+' '+s.name;
+      render();
+      App.toast('已切换至场景 '+curId+(curId==='S01'?'（完整节点数据）':'（示例节点结构，演练模拟）'),'ok');
+    };
+
+    root.querySelector('#btnSave').onclick = function(){
+      var name = String((root.querySelector('#seName')||{}).value||'').trim();
+      if(!name){ App.toast('请先填写剧本名称','err'); return; }
+      if(name.length>60){ App.toast('剧本名称不能超过 60 个字','err'); return; }
+      if(!topoOrder()){ App.toast('剧本存在循环依赖，请检查节点前置关系后再保存','err'); return; }
+      var miss = correctNodes().filter(function(n){ return n.type!=='end' && !(Number(n.timeout)>0); });
+      if(miss.length){ App.toast('以下节点未设置处置时长：'+miss.map(function(n){ return n.title; }).join('、'),'err'); return; }
+      if(correctNodes().some(function(n){ return n.type!=='end' && (n.posX===null || n.posX===undefined); })) autoLayout();
+      nodes.forEach(function(x){ x.time=''; });
+      var alertText = String((root.querySelector('#seAlert')||{}).value||'').trim();
+      var tot = scoreTotal();
+      var dis = nodes.filter(function(x){ return x.type!=='end' && x.flowType==='distractor'; }).length;
+      var correctN = correctNodes().length;
+      App.confirmSim('保存《'+App.esc(name)+'》当前编排（共 '+correctN+' 个正确流程节点，混淆流程 '+dis+' 条，正确流程合计 '+tot+' 分，含初始故障通报）为新版本。'
+        + (tot>100?' 注意：正确流程分值已超出 100 分，请下调后再开展正式演练。':''), function(){
+        API.saveScriptNodes(curId, nodes, alertText, name).then(function(r){
+          var s = scenarioById(curId);
+          if(s) s.name = r.name || name;
+          var head = ov.querySelector('.m-head');
+          if(head && head.firstChild) head.firstChild.nodeValue = '剧本并行编排 · '+curId+' '+(r.name||name);
+          var sel = root.querySelector('#seSel');
+          if(sel && sel.options[sel.selectedIndex]) sel.options[sel.selectedIndex].text = curId+' · '+(r.name||name);
+          App.toast('剧本《'+(r.name||name)+'》已保存，场景剧本库版本更新为 '+r.version+'（共 '+r.count+' 个节点）','ok');
+          render();
+        }).catch(function(err){
+          App.toast((err && err.message) || '剧本保存失败，请稍后重试','err');
+        });
+      });
+    };
+
+    /* 预览推演：按依赖层次播放，同层节点并行高亮 */
+    function layers(){
+      var order = topoOrder() || correctNodes().map(function(n){ return String(n.id); });
+      var depth = {};
+      order.forEach(function(id){
+        depth[id] = depOf(nodeById(id)).reduce(function(m, x){ return Math.max(m, (depth[x]||0)+1); }, 0);
+      });
+      var out = [];
+      order.forEach(function(id){
+        var d = depth[id];
+        (out[d] = out[d] || []).push(id);
+      });
+      return out.filter(function(x){ return !!x; });
+    }
+    var btnPlay = root.querySelector('#btnPlay');
+    btnPlay.onclick = function(){
+      if(playTimer){ stopPlay('预览已停止'); return; }
+      var ls = layers();
+      if(!ls.length){ App.toast('画布为空，无法预览','warn'); return; }
+      var i = 0;
+      btnPlay.innerHTML = App.icon('pause')+'停止预览';
+      btnPlay.classList.add('danger');
+      playTimer = setInterval(function(){
+        root.querySelectorAll('.dag-node').forEach(function(el){ el.classList.remove('active'); });
+        if(i<ls.length){
+          ls[i].forEach(function(id){
+            var el = root.querySelector('.dag-node[data-id="'+id+'"]');
+            if(el) el.classList.add('active');
+          });
+          i++;
+        } else {
+          stopPlay('演练模拟：推演预览播放完成（共 '+ls.length+' 层 / '+correctNodes().length+' 个节点，同层并行）');
+        }
+      }, 900);
+    };
+    function stopPlay(msg){
+      if(playTimer){ clearInterval(playTimer); playTimer = null; }
+      root.querySelectorAll('.dag-node').forEach(function(el){ el.classList.remove('active'); });
+      var b = root.querySelector('#btnPlay');
+      if(b){ b.innerHTML = App.icon('play')+'预览推演'; b.classList.remove('danger'); }
+      if(msg) App.toast(msg,'ok');
+    }
+
+    render();
+    return ov;
+  }
+
   render();
+
+  /* 深链：?edit=1 或 ?scenario=Sxx 直接打开编排弹窗（兼容看板/项目页与旧书签） */
+  var qs = new URLSearchParams(location.search);
+  var deepId = qs.get('scenario');
+  if(qs.get('edit')==='1' || (deepId && scenarioById(deepId))){
+    openEditor((deepId && scenarioById(deepId)) ? deepId : 'S01');
+  }
 });
 App.boot('scenarios');
 </script>

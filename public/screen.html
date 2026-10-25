@@ -295,6 +295,7 @@ body::before{
     $('clkTime').textContent = p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());
     var wk = ['日','一','二','三','四','五','六'][d.getDay()];
     $('clkDate').textContent = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' 星期'+wk;
+    tickElapsed();
   }
   clock(); setInterval(clock, 1000);
 
@@ -350,13 +351,30 @@ body::before{
   }
 
   /* ---------- KPI ---------- */
+  /* 真实计时：按服务端记录的启动/暂停/结束时刻本地每秒推算 */
+  function localElapsed(){
+    var p = DATA && DATA.project;
+    if(!p || !p.startedAt) return null;
+    var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(p.startedAt));
+    if(!m) return null;
+    var start = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0)).getTime();
+    var end = Date.now();
+    var q = p.endedAt || p.pausedAt;
+    if(q){
+      var n = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(q));
+      if(n) end = new Date(+n[1], +n[2]-1, +n[3], +n[4], +n[5], +(n[6]||0)).getTime();
+    }
+    var sec = Math.floor((end - start)/1000 - (Number(p.pausedSec)||0));
+    return sec > 0 ? sec : 0;
+  }
   function elapsedText(){
     var p = DATA && DATA.project;
-    if(!p) return { v:'--:--', f:'未选择演练项目' };
-    if(p.status !== '演练中') return { v:'已完成', f:'项目状态：'+p.status };
-    var start = new Date(String(p.date).replace(/-/g,'/'));
-    var mins = Math.max(0, Math.round((Date.now()-start.getTime())/60000));
-    return { v:'T+'+p2(Math.floor(mins/60))+':'+p2(mins%60), f:'启动于 '+String(p.date).slice(11) };
+    if(!p) return { v:'--:--:--', f:'未选择演练项目' };
+    var sec = localElapsed();
+    if(sec === null) return { v:'未开始', f:'项目状态：'+p.status };
+    var h = Math.floor(sec/3600), mm = Math.floor(sec%3600/60), ss = sec%60;
+    var tail = p.status==='暂停' ? ' · 已暂停' : ((p.status==='已结束'||p.status==='已归档') ? ' · 计时已冻结' : '');
+    return { v:'T+'+p2(h)+':'+p2(mm)+':'+p2(ss), f:'启动于 '+String(p.startedAt).slice(0,16)+tail };
   }
   function renderKpis(){
     var p = DATA.project || {};
@@ -365,13 +383,24 @@ body::before{
     var el = elapsedText();
     var items = [
       { l:'当前事件等级', v:(p.level||'—'), cls:'er', f:'事件编号 '+(p.id||'—')+' · '+(p.mode||'') },
-      { l:'演练已进行', v:el.v, cls:'ok', f:el.f },
+      { l:'演练已进行', v:el.v, cls:'ok', f:el.f, id:'kpiElapsed' },
       { l:'任务完成率', v:rate+'%', cls:rate>=100?'ok':rate>=60?'wn':'er', f:'已完成 '+s.done+' / 共 '+s.total+' 项' },
       { l:'超时 / 待办', v:(s.overdue||0)+' / '+(s.pending||0), cls:(s.overdue?'er':(s.pending?'wn':'ok')), f:'处理中 '+s.doing+' 项' }
     ];
     $('kpis').innerHTML = items.map(function(x){
-      return '<div class="kpi"><div class="k-l">'+x.l+'</div><div class="k-v '+x.cls+'">'+esc(x.v)+'</div><div class="k-f">'+esc(x.f)+'</div></div>';
+      return '<div class="kpi"'+(x.id?' data-kpi="'+x.id+'"':'')+'><div class="k-l">'+x.l+'</div><div class="k-v '+x.cls+'">'+esc(x.v)+'</div><div class="k-f">'+esc(x.f)+'</div></div>';
     }).join('');
+    $('chainBadge').textContent = el.v;
+  }
+  /* 每秒刷新计时 KPI 与链路徽标，不触发整屏重绘 */
+  function tickElapsed(){
+    if(!DATA || !DATA.project) return;
+    var el = elapsedText();
+    var kp = document.querySelector('[data-kpi="kpiElapsed"]');
+    if(kp){
+      kp.querySelector('.k-v').textContent = el.v;
+      kp.querySelector('.k-f').textContent = el.f;
+    }
     $('chainBadge').textContent = el.v;
   }
 

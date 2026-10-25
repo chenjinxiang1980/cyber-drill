@@ -49,12 +49,12 @@
 (function(){
   DRILL.loadBrand().then(function(b){ if(b) DRILL.applyBrand(b); });
   document.getElementById('screenEntryIcon').innerHTML = App.icon('screen');
-  var feats = [['net','8类内置医疗高频安全事件场景库'],['flow','可视化剧本编排 · 难度分级 · 版本管理'],['dashboard','态势总看板 · 多角色协同推演'],['replay','时序回放 · 系统自动考评 · 演练报告导出']];
+  var feats = [['net','8类内置医疗高频安全事件场景库'],['flow','场景剧本库与可视化编排 · 版本管理'],['dashboard','态势总看板 · 多角色协同推演'],['replay','时序回放 · 系统自动考评 · 演练报告导出']];
   document.getElementById('featList').innerHTML = feats.map(function(f){ return '<div class="f-item">'+App.icon(f[0])+'<span>'+f[1]+'</span></div>'; }).join('');
 
   var ROLE_ICON = { commander:'shield', duty:'bell', netsec:'net', sysadmin:'db', itlead:'user', medlead:'hospital', clinical:'building', healthbureau:'hospital', cac:'opinion', cyberpolice:'evidence', platformadmin:'admin' };
   var HREF = { dashboard:'dashboard.html', screen:'screen.html', workbench:'workbench.html', collab:'collab.html',
-    scenarios:'scenarios.html', 'script-editor':'script-editor.html', projects:'projects.html', evidence:'evidence.html',
+    scenarios:'scenarios.html', projects:'projects.html', evidence:'evidence.html',
     knowledge:'knowledge.html', opinion:'opinion.html', replay:'replay.html', evaluation:'evaluation.html',
     report:'report.html', ledger:'ledger.html', admin:'admin.html' };
 

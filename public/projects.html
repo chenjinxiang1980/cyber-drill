@@ -23,6 +23,8 @@ document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
   var canOp = !role.external && ['commander','itlead','platformadmin'].indexOf(role.id)>=0;
+  /* 删除演练项目：仅平台管理员 */
+  var canDel = role.id === 'platformadmin';
 
   function projById(id){ return MOCK.PROJECTS.filter(function(p){ return p.id===id; })[0]; }
   function scenarioName(sid){ var s = MOCK.SCENARIOS.filter(function(x){ return x.id===sid; })[0]; return s?s.name:sid; }
@@ -47,16 +49,17 @@ document.addEventListener('app:ready', function(e){
     + '<div class="tiny dim mt3">进度依据项目任务完成情况自动计算 · 已归档项目为只读台账，不可再变更状态。</div>';
 
   function opsHtml(p){
+    var del = canDel ? '<button class="btn sm danger" data-act="del" data-id="'+p.id+'">'+App.icon('trash')+'删除</button>' : '';
     if(!canOp || p.status==='已归档'){
       return '<button class="btn sm" data-act="grp" data-id="'+p.id+'">'+App.icon('user')+'编组</button>'
-      + (p.status==='已归档'?'<span class="tag gray">只读</span>':'');
+      + (p.status==='已归档'?'<span class="tag gray">只读</span>':'') + del;
     }
     var b = '<button class="btn sm" data-act="grp" data-id="'+p.id+'">'+App.icon('user')+'编组</button>';
     if(p.status==='未开始') b += '<button class="btn sm" data-act="rehearse" data-id="'+p.id+'">'+App.icon('eye')+'预演</button><button class="btn sm primary" data-act="start" data-id="'+p.id+'">'+App.icon('play')+'启动演练</button>';
     else if(p.status==='演练中') b += '<button class="btn sm" data-act="pause" data-id="'+p.id+'">'+App.icon('pause')+'暂停</button><button class="btn sm ok" data-act="end" data-id="'+p.id+'">'+App.icon('power')+'结束</button>';
     else if(p.status==='暂停') b += '<button class="btn sm primary" data-act="resume" data-id="'+p.id+'">'+App.icon('play')+'继续</button><button class="btn sm ok" data-act="end" data-id="'+p.id+'">'+App.icon('power')+'结束</button>';
     else if(p.status==='已结束') b += '<button class="btn sm" data-act="archive" data-id="'+p.id+'">'+App.icon('archive')+'归档</button>';
-    return b;
+    return b + del;
   }
 
   function render(){
@@ -79,9 +82,10 @@ document.addEventListener('app:ready', function(e){
     page.querySelectorAll('[data-act]').forEach(function(b){
       b.onclick = function(){
         var id = b.dataset.id;
-        if(b.dataset.act==='script'){ location.href='script-editor.html?scenario='+id; return; }
+        if(b.dataset.act==='script'){ location.href='scenarios.html?edit=1&scenario='+id; return; }
         if(b.dataset.act==='grp'){ openGroup(projById(id)); return; }
         var p = projById(id);
+        if(b.dataset.act==='del'){ confirmDelete(p); return; }
         if(b.dataset.act==='rehearse'){ App.toast('演练模拟：预演推演已发起，按剧本时序校验节点可达性','ok'); return; }
         if(b.dataset.act==='start') changeStatus(p,'演练中','启动演练项目《'+p.name+'》。系统将按剧本推送首个节点并自动下发参演任务（演练模拟）。');
         if(b.dataset.act==='pause') changeStatus(p,'暂停','暂停演练《'+p.name+'》。计时与节点推送挂起，参演任务保留（演练模拟）。');
@@ -92,11 +96,31 @@ document.addEventListener('app:ready', function(e){
     });
   }
 
-  function syncTopbar(p){
-    var live = document.getElementById('topLive');
-    if(!live) return;
-    if(p.status==='演练中'){ live.innerHTML = '<span class="live-chip"><span class="dot"></span>演练进行中 · '+p.level+'级事件 · T+'+API.drillElapsed()+'</span>'; }
-    else { live.innerHTML = '<span class="live-chip none"><span class="dot"></span>'+p.status+'</span>'; }
+  function syncTopbar(){
+    /* 顶栏演练计时由 App 全局每秒按真实起止时刻刷新 */
+    App.renderLiveChip();
+  }
+
+  /* 删除演练项目（平台管理员）：清除项目及其全部关联数据，不可恢复 */
+  function confirmDelete(p){
+    App.modal({ title:'删除演练项目 · '+App.esc(p.name), body:
+      '<div class="sim-banner">'+App.icon('alert')+'<span>删除后不可恢复：该项目的任务、表单提交、附件、取证材料、实战处置记录、时序台账、评分与快照将一并清除。</span></div>'
+      + '<p style="font-size:13.5px">确认删除演练项目「'+App.esc(p.name)+'」（'+p.id+'）？</p>',
+      foot:'<button class="btn" id="pjDelNo">取消</button><button class="btn danger" id="pjDelYes">确认删除</button>',
+      onOpen:function(ov){
+        ov.querySelector('#pjDelNo').onclick = ov.close;
+        ov.querySelector('#pjDelYes').onclick = function(){
+          var btn = ov.querySelector('#pjDelYes');
+          btn.disabled = true; btn.textContent = '删除中…';
+          API.deleteProject(p.id).then(function(){
+            ov.close(); render(); syncTopbar(); App.refreshShell();
+            App.toast('演练项目「'+p.name+'」及其关联数据已删除','ok');
+          }).catch(function(err){
+            btn.disabled = false; btn.textContent = '确认删除';
+            App.toast((err && err.message) ? err.message : '删除失败，请稍后重试','err');
+          });
+        };
+      } });
   }
 
   function changeStatus(p, to, msg){
