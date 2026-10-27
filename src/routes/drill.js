@@ -12,6 +12,7 @@ const { now, hhmm, nowSec } = require('../util');
 const { canHandle } = require('../drill_plan');
 const notify = require('../notify');
 const clock = require('../drill_clock');
+const drillDict = require('../drill_dict');
 
 const router = express.Router();
 
@@ -76,10 +77,19 @@ function nodesOf(scenarioId) {
   });
 }
 
-/* 可选接收角色（剧本责任角色 + 全部系统角色名称，供实战版参演人员选择） */
+/* 可选接收角色（剧本责任角色 + target_role_aliases 所有 key，供实战版参演人员选择） */
 function receiverOptions() {
   const names = db.prepare('SELECT name FROM roles ORDER BY seq').all().map(function (r) { return r.name; });
-  ['院应急指挥部', '信息科负责人', '信息科值班员', '网络安全管理员', '系统管理员', '医务科主任', '临床科室'].forEach(function (x) {
+  const aliases = drillDict.get(db, 'target_role_aliases', {
+    '院应急指挥部': 'commander', '信息科值班员': 'duty', '网络安全管理员': 'netsec',
+    '系统管理员': 'sysadmin', '信息科负责人': 'itlead',
+    '医务科主任': 'medlead', '医务部主任': 'medlead', '门诊部主任': 'medlead', '医务部/门诊部负责人': 'medlead',
+    '临床科室': 'clinical', '收费窗口': 'clinical', '临床科室/收费窗口': 'clinical',
+    '市卫生健康局': 'healthbureau', '卫健委': 'healthbureau',
+    '市委网信办': 'cac', '市网信办': 'cac',
+    '市网安大队': 'cyberpolice', '公安网安': 'cyberpolice'
+  });
+  Object.keys(aliases).forEach(function (x) {
     if (names.indexOf(x) < 0) names.push(x);
   });
   return names;

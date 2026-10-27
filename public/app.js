@@ -18,7 +18,6 @@ var ICONS = {
   replay:'<circle cx="12" cy="12" r="9" '+P+'/><path d="M12 7v5l3.5 2" '+P+'/>',
   score:'<path d="M12 3l2.6 5.6 6 .8-4.4 4.2 1.1 6-5.3-2.9L6.7 19.6l1.1-6L3.4 9.4l6-.8z" '+P+'/>',
   ledger:'<path d="M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" '+P+'/><path d="M7 8h10M7 12h10M7 16h6" '+P+'/>',
-  opinion:'<path d="M3 11l18-5v12L3 13v-2z" '+P+'/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.5" '+P+'/>',
   knowledge:'<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13z" '+P+'/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" '+P+'/>',
   admin:'<circle cx="12" cy="12" r="3" '+P+'/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" '+P+'/>',
   bell:'<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" '+P+'/><path d="M13.7 21a2 2 0 0 1-3.4 0" '+P+'/>',
@@ -53,7 +52,28 @@ var ICONS = {
   filter:'<path d="M3 5h18l-7 8v5l-4 2v-7z" '+P+'/>',
   building:'<rect x="5" y="3" width="14" height="18" rx="1" '+P+'/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3" '+P+'/>',
   github:'<path d="M12 2C6.48 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.5.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.93 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 2.5-.34c.85 0 1.7.12 2.5.34 1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.83-2.34 4.68-4.57 4.92.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 22 12c0-5.52-4.48-10-10-10z" fill="currentColor" stroke="none"/>',
-  gitee:'<circle cx="12" cy="12" r="9.2" fill="currentColor" stroke="none"/><path d="M16.2 9.1h-5.6a2.5 2.5 0 0 0 0 5h2.7v2.3H9.2" fill="none" stroke="#0b1220" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>'
+  gitee:'<circle cx="12" cy="12" r="9.2" fill="currentColor" stroke="none"/><path d="M16.2 9.1h-5.6a2.5 2.5 0 0 0 0 5h2.7v2.3H9.2" fill="none" stroke="#0b1220" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
+  'arrow-right':'<path d="M5 12h14M13 5l7 7-7 7" '+P+'/>',
+  'arrow-up':'<path d="M12 19V5M5 12l7-7 7 7" '+P+'/>',
+  'arrow-down':'<path d="M12 5v14M5 12l7 7 7-7" '+P+'/>',
+  'arrow-left':'<path d="M19 12H5M12 5l-7 7 7 7" '+P+'/>',
+  'center-h':'<path d="M3 12h18M8 7v10M16 7v10" '+P+'/>',
+  'center-v':'<path d="M12 3v18M7 8h10M7 16h10" '+P+'/>',
+  'dist-v':'<path d="M12 3v4M12 10v4M12 17v4M5 5h14M5 12h14M5 19h14" '+P+'/>',
+  'dist-h':'<path d="M3 12h4M10 12h4M17 12h4M5 5v14M12 5v14M19 5v14" '+P+'/>',
+  'grid':'<rect x="3" y="3" width="18" height="18" rx="2" '+P+'/><path d="M3 9h18M3 15h15M9 3v18M15 3v18" '+P+'/>',
+  'flow':'<path d="M3 7h13a3 3 0 0 1 3 3v1" '+P+'/><path d="M21 13a3 3 0 0 1-3 3H3" '+P+'/><circle cx="16" cy="10" r="1.5" '+P+' fill="currentColor"/><circle cx="8" cy="16" r="1.5" '+P+' fill="currentColor"/>',
+  'score':'<path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z" '+P+'/>',
+  'scenarios':'<rect x="3" y="5" width="18" height="14" rx="2" '+P+'/><path d="M3 9h18M9 5v14M15 5v14" '+P+'/>',
+  'workbench':'<path d="M3 10h18M5 10v8M19 10v8M7 14h10" '+P+'/><rect x="8" y="4" width="8" height="6" rx="1" '+P+'/>',
+  'collab':'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" '+P+'/>',
+  'dashboard':'<rect x="3" y="3" width="7" height="9" rx="1" '+P+'/><rect x="14" y="3" width="7" height="5" rx="1" '+P+'/><rect x="14" y="12" width="7" height="9" rx="1" '+P+'/><rect x="3" y="16" width="7" height="5" rx="1" '+P+'/>',
+  'screen':'<rect x="3" y="4" width="18" height="13" rx="2" '+P+'/><path d="M8 21h8M12 17v4" '+P+'/>',
+  'evidence':'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" '+P+'/><path d="M14 2v6h6M9 13h6M9 17h4" '+P+'/>',
+  'replay':'<circle cx="12" cy="12" r="9" '+P+'/><path d="M12 7v5l3 3" '+P+'/>',
+  'evaluation':'<path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z" '+P+'/>',
+  'projects':'<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" '+P+'/>',
+  'chat':'<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" '+P+'/>'
 };
 function icon(name, cls){ return '<svg viewBox="0 0 24 24" class="'+(cls||'')+'">'+(ICONS[name]||ICONS.file)+'</svg>'; }
 
@@ -69,8 +89,7 @@ var NAV_GROUPS = [
     {key:'scenarios', icon:'scenarios', label:'场景剧本库与编排', href:'scenarios.html'},
     {key:'projects', icon:'projects', label:'演练项目管理', href:'projects.html'},
     {key:'evidence', icon:'evidence', label:'取证与材料归档', href:'evidence.html'},
-    {key:'knowledge', icon:'knowledge', label:'预案知识库', href:'knowledge.html'},
-    {key:'opinion', icon:'opinion', label:'公告与舆情模拟', href:'opinion.html'}
+    {key:'knowledge', icon:'knowledge', label:'预案知识库', href:'knowledge.html'}
   ]},
   { title:'复盘与报送', items:[
     {key:'replay', icon:'replay', label:'演练时序回放', href:'replay.html'},
@@ -79,7 +98,8 @@ var NAV_GROUPS = [
     {key:'ledger', icon:'ledger', label:'台账与统计', href:'ledger.html'}
   ]},
   { title:'系统管理', items:[
-    {key:'admin', icon:'admin', label:'系统基础管理', href:'admin.html'}
+    {key:'admin', icon:'admin', label:'系统设置', href:'admin.html'},
+    {key:'dictionary', icon:'db', label:'流程字典', href:'dictionary.html'}
   ]}
 ];
 
@@ -302,7 +322,7 @@ function modal(opts){
   document.body.appendChild(ov);
   function close(){ if(opts.onClose) opts.onClose(); ov.remove(); }
   ov.querySelector('.x').onclick=close;
-  ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
+  if(!opts.persist) ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
   ov.close = close;
   if(opts.onOpen) opts.onOpen(ov);
   return ov;
@@ -313,7 +333,7 @@ function drawer(opts){
   document.body.appendChild(ov);
   function close(){ ov.remove(); }
   ov.querySelector('.x').onclick=close;
-  ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
+  if(!opts.persist) ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
   ov.close = close;
   if(opts.onOpen) opts.onOpen(ov);
   return ov;

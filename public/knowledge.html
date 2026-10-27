@@ -124,7 +124,10 @@ document.addEventListener('app:ready', function(e){
     } else {
       c.steps.forEach(function(s,i){ lines.push((i+1)+'. '+s); });
     }
-    lines.push('—— 盘州市人民医院网络安全应急演练系统（演练用虚拟文档）');
+    var _b = DRILL.brand() || {};
+    var _unit = _b.unitName || '盘州市人民医院';
+    var _sys = _b.systemName || '网络安全应急演练系统';
+    lines.push('—— '+_unit+' '+_sys+'（演练用虚拟文档）');
     return lines.join('\r\n');
   }
   function downloadDoc(d){
@@ -191,12 +194,16 @@ document.addEventListener('app:ready', function(e){
         + '<td class="small dim">'+d.size+'</td>'
         + '<td class="small dim">'+d.pages+'</td>'
         + '<td><button class="btn sm" data-act="preview" data-id="'+d.id+'">'+App.icon('eye')+'预览</button> '
+        + (canEdit ? '<button class="btn sm primary" data-act="edit" data-id="'+d.id+'">'+App.icon('edit')+'编辑</button> ' : '')
         + '<button class="btn sm outline" data-act="download" data-id="'+d.id+'">'+App.icon('download')+'下载</button>'
         + (canEdit ? ' <button class="btn sm danger" data-act="del" data-id="'+d.id+'">删除</button>' : '')
         + '</td></tr>';
     }).join('');
     tb.querySelectorAll('[data-act="preview"], .t-link').forEach(function(el){
       el.onclick = function(){ openPreview(el.dataset.id); };
+    });
+    tb.querySelectorAll('[data-act="edit"]').forEach(function(el){
+      el.onclick = function(ev){ ev.stopPropagation(); openEdit(el.dataset.id); };
     });
     tb.querySelectorAll('[data-act="download"]').forEach(function(el){
       el.onclick = function(){
@@ -316,9 +323,343 @@ document.addEventListener('app:ready', function(e){
       } });
   }
 
+  /* ---------- 编辑文档（元数据 + 结构化正文） ---------- */
+  /* 深拷贝结构化对象（避免编辑时直接修改 docs 中的原始对象） */
+  function cloneJson(v){
+    try { return JSON.parse(JSON.stringify(v)); } catch(e){ return v; }
+  }
+  function openEdit(id){
+    var d = docs.filter(function(x){ return x.id===id; })[0];
+    if(!d) return;
+    var isUploaded = !!d.filePath;
+    var st = isUploaded ? null : parseStructured(d);
+
+    /* 编辑中状态 */
+    var edit = {
+      name: d.name, cat: d.cat, size: d.size, pages: d.pages || 0,
+      contentMode: 'visual', /* visual=可视化章节编辑, json=JSON原文编辑 */
+      structured: st ? cloneJson(st) : { ver:'', base:'', scope:'', sections:[] },
+      rawContent: st ? JSON.stringify(cloneJson(st), null, 2) : (d.content || ''),
+      isStructured: !!st
+    };
+
+    var catOptions = cats.filter(function(c){ return c!=='全部'; })
+      .map(function(c){ return '<option value="'+App.esc(c)+'"'+(c===d.cat?' selected':'')+'>'+App.esc(c)+'</option>'; }).join('');
+
+    function renderSections(){
+      var secs = edit.structured.sections || [];
+      return secs.map(function(sec, si){
+        var itemsHtml = (sec.items||[]).map(function(it, ii){
+          return '<div class="kb-edit-item" data-si="'+si+'" data-ii="'+ii+'">'
+            + '<textarea class="kb-item-input" rows="2" placeholder="条目内容">'+App.esc(it)+'</textarea>'
+            + '<div class="kb-item-acts">'
+            + '<button class="btn sm outline" data-act="up" title="上移">↑</button>'
+            + '<button class="btn sm outline" data-act="down" title="下移">↓</button>'
+            + '<button class="btn sm danger" data-act="del" title="删除">×</button>'
+            + '</div></div>';
+        }).join('');
+        return '<div class="kb-edit-sec" data-si="'+si+'">'
+          + '<div class="kb-edit-sec-head">'
+          + '<input class="kb-sec-title" placeholder="章节标题，如：一、总则" value="'+App.esc(sec.t||'')+'">'
+          + '<div class="kb-sec-acts">'
+          + '<button class="btn sm outline" data-act="add-item">+ 条目</button>'
+          + '<button class="btn sm outline" data-act="dup">复制章节</button>'
+          + '<button class="btn sm outline" data-act="up-sec">↑</button>'
+          + '<button class="btn sm outline" data-act="down-sec">↓</button>'
+          + '<button class="btn sm danger" data-act="del-sec">删除章节</button>'
+          + '</div></div>'
+          + '<div class="kb-edit-items">'+itemsHtml+'</div>'
+          + '</div>';
+      }).join('');
+    }
+
+    function buildBody(){
+      var metaHtml =
+        '<div class="kb-meta-row">'
+        + '<div class="form-row"><label class="f-label">文档名称<span style="color:var(--err)"> *</span></label>'
+        + '<input class="input" id="ebName" maxlength="100" value="'+App.esc(edit.name)+'"></div>'
+        + '<div class="form-row" style="max-width:180px"><label class="f-label">分类</label>'
+        + '<select class="select" id="ebCat">'+catOptions+'<option value="上传文档"'+(d.cat==='上传文档'?' selected':'')+'>上传文档</option></select></div>'
+        + '</div>'
+        + '<div class="kb-meta-row-3">'
+        + '<div class="form-row"><label class="f-label">页数</label><input class="input" id="ebPages" type="number" min="0" max="9999" value="'+edit.pages+'"></div>'
+        + '<div class="form-row"><label class="f-label">大小</label><input class="input" id="ebSize" placeholder="如：1.2 MB" value="'+App.esc(edit.size)+'"></div>'
+        + '</div>'
+        + (isUploaded ? '<div class="tiny dim">本记录已关联上传原件，如需替换原文件请使用删除后重新上传。</div>' : '');
+
+      if(isUploaded){
+        /* 上传文档只允许编辑元数据 */
+        return metaHtml + '<div class="divider"></div>'
+          + '<div class="tiny dim">已上传文档的原文件由上传者负责维护，此处仅修改知识库元数据。</div>';
+      }
+
+      /* 结构化正文编辑 */
+      var st = edit.structured;
+      var visualMode = edit.contentMode === 'visual';
+
+      var contentMeta =
+        '<div class="kb-meta-row-3">'
+        + '<div class="form-row"><label class="f-label">版本标注</label>'
+        + '<input class="input" id="ebVer" placeholder="如：2025版 · L2-016" value="'+App.esc(st.ver||'')+'"></div>'
+        + '<div class="form-row"><label class="f-label">依据文件</label>'
+        + '<input class="input" id="ebBase" placeholder="如：《盘州市人民医院网络安全事件应急预案》" value="'+App.esc(st.base||'')+'"></div>'
+        + '<div class="form-row"><label class="f-label">适用范围</label>'
+        + '<input class="input" id="ebScope" placeholder="如：全院各科室" value="'+App.esc(st.scope||'')+'"></div>'
+        + '</div>';
+
+      var sectionsHtml =
+        '<div class="kb-edit-sections">'
+        + renderSections()
+        + '<div class="flex gap2 mt2">'
+        + '<button class="btn outline" id="ebAddSec">+ 新增章节</button>'
+        + '<span class="tiny dim" id="ebSecHint"></span>'
+        + '</div>'
+        + '</div>';
+
+      var jsonEditor =
+        '<textarea id="ebJson" spellcheck="false" style="width:100%;min-height:320px;font-family:monospace;font-size:12.5px;border:1px solid var(--border);border-radius:6px;padding:10px">'+App.esc(edit.rawContent)+'</textarea>'
+        + '<div class="tiny dim mt1">直接编辑 JSON 原文（{ver, base, scope, sections:[{t, items:[]}]}），保存前会做格式校验。</div>';
+
+      return metaHtml
+        + '<div class="divider mt3"></div>'
+        + '<div class="section-title">'+App.icon('file',14)+' 文档正文</div>'
+        + '<div class="form-row" style="flex-direction:row;align-items:center;gap:16px">'
+        + '<label class="f-label" style="margin-bottom:0">编辑模式</label>'
+        + '<label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="radio" name="ebMode" value="visual"'+(visualMode?' checked':'')+' style="accent-color:var(--accent)">分章节可视化</label>'
+        + '<label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="radio" name="ebMode" value="json"'+(!visualMode?' checked':'')+' style="accent-color:var(--accent)">JSON 原文</label>'
+        + '</div>'
+        + (visualMode
+            ? contentMeta + '<div class="divider mt2"></div>' + sectionsHtml
+            : jsonEditor);
+    }
+
+    function bindEvents(ov){
+      ov.querySelector('#ebName').value = edit.name;
+      ov.querySelector('#ebCat').value = edit.cat;
+      ov.querySelector('#ebPages').value = edit.pages;
+      ov.querySelector('#ebSize').value = edit.size;
+      if(!isUploaded){
+        ov.querySelector('#ebVer').value = edit.structured.ver || '';
+        ov.querySelector('#ebBase').value = edit.structured.base || '';
+        ov.querySelector('#ebScope').value = edit.structured.scope || '';
+        bindSectionEvents(ov);
+        /* 编辑模式切换 */
+        ov.querySelectorAll('input[name="ebMode"]').forEach(function(radio){
+          radio.onchange = function(){
+            edit.contentMode = radio.value;
+            var body = buildBody();
+            ov.querySelector('.m-body').innerHTML = body;
+            bindEvents(ov);
+          };
+        });
+        /* 章节/条目输入时实时同步 */
+        ov.querySelector('.kb-edit-sections').addEventListener('input', function(ev){
+          var tr = ev.target;
+          if(tr.classList.contains('kb-sec-title')){
+            var si = Number(tr.closest('.kb-edit-sec').dataset.si);
+            edit.structured.sections[si].t = tr.value;
+          } else if(tr.classList.contains('kb-item-input')){
+            var kbItem = tr.closest('.kb-edit-item');
+            var si = Number(kbItem.dataset.si);
+            var ii = Number(kbItem.dataset.ii);
+            edit.structured.sections[si].items[ii] = tr.value;
+          }
+        });
+      }
+    }
+
+    function bindSectionEvents(ov){
+      /* 章节条目操作 */
+      ov.querySelectorAll('.kb-edit-item').forEach(function(el){
+        var si = Number(el.dataset.si), ii = Number(el.dataset.ii);
+        el.querySelectorAll('[data-act]').forEach(function(btn){
+          btn.onclick = function(){
+            var act = btn.dataset.act;
+            var sec = edit.structured.sections[si];
+            if(!sec) return;
+            if(act==='del'){
+              sec.items.splice(ii, 1);
+            } else if(act==='up' && ii>0){
+              var tmp = sec.items[ii]; sec.items[ii] = sec.items[ii-1]; sec.items[ii-1] = tmp;
+            } else if(act==='down' && ii<sec.items.length-1){
+              var tmp = sec.items[ii]; sec.items[ii] = sec.items[ii+1]; sec.items[ii+1] = tmp;
+            }
+            rerender();
+          };
+        });
+      });
+      /* 章节级操作 */
+      ov.querySelectorAll('.kb-edit-sec-head').forEach(function(head){
+        var secEl = head.closest('.kb-edit-sec');
+        var si = Number(secEl.dataset.si);
+        head.querySelectorAll('[data-act]').forEach(function(btn){
+          btn.onclick = function(){
+            var act = btn.dataset.act;
+            var secs = edit.structured.sections;
+            if(act==='add-item'){
+              secs[si].items = secs[si].items || [];
+              secs[si].items.push('');
+            } else if(act==='dup'){
+              var copy = cloneJson(secs[si]);
+              secs.splice(si+1, 0, copy);
+            } else if(act==='del-sec'){
+              secs.splice(si, 1);
+            } else if(act==='up-sec' && si>0){
+              var tmp = secs[si]; secs[si] = secs[si-1]; secs[si-1] = tmp;
+            } else if(act==='down-sec' && si<secs.length-1){
+              var tmp = secs[si]; secs[si] = secs[si+1]; secs[si+1] = tmp;
+            }
+            rerender();
+          };
+        });
+      });
+      /* 新增章节 */
+      var addSecBtn = ov.querySelector('#ebAddSec');
+      if(addSecBtn) addSecBtn.onclick = function(){
+        edit.structured.sections.push({ t:'', items:[''] });
+        rerender();
+      };
+      updateSecHint(ov);
+    }
+
+    function updateSecHint(ov){
+      var secs = edit.structured.sections;
+      var hint = ov.querySelector('#ebSecHint');
+      if(hint) hint.textContent = secs.length + ' 个章节，共 ' + secs.reduce(function(s, x){ return s + (x.items||[]).length; }, 0) + ' 条';
+    }
+
+    /* rerender 仅更新章节容器，不重建整个 body，避免丢失焦点 */
+    function rerender(){
+      /* 收集当前输入框的值回写到 edit 对象（只收集不重建的那几个） */
+      var modal = document.querySelector('.modal');
+      if(!modal) return;
+      var body = modal.querySelector('.m-body');
+      if(!body) return;
+
+      var modeRadio = modal.querySelector('input[name="ebMode"]:checked');
+      var currentMode = modeRadio ? modeRadio.value : 'visual';
+      if(currentMode !== edit.contentMode){ edit.contentMode = currentMode; }
+
+      edit.pages = Number(body.querySelector('#ebPages').value) || 0;
+      edit.size = body.querySelector('#ebSize').value;
+      if(!isUploaded && edit.contentMode === 'visual'){
+        edit.structured.ver = body.querySelector('#ebVer').value;
+        edit.structured.base = body.querySelector('#ebBase').value;
+        edit.structured.scope = body.querySelector('#ebScope').value;
+      }
+
+      /* 仅替换章节容器 innerHTML */
+      var secsEl = body.querySelector('.kb-edit-sections');
+      if(secsEl){
+        secsEl.innerHTML = renderSections();
+        bindSectionEvents(modal);
+        updateSecHint(modal);
+      }
+    }
+
+    App.modal({
+      title:'编辑知识库文档 · '+App.esc(d.id), full:true,
+      body: buildBody(),
+      foot:
+        '<button class="btn" id="ebCancel">取消</button>'
+        + '<button class="btn primary" id="ebSave">'+App.icon('check')+'保存修改</button>',
+      onOpen: function(ov){
+        bindEvents(ov);
+        ov.querySelector('#ebName').oninput = function(){ edit.name = this.value; };
+        ov.querySelector('#ebCat').onchange = function(){ edit.cat = this.value; };
+        ov.querySelector('#ebPages').oninput = function(){ edit.pages = Number(this.value)||0; };
+        ov.querySelector('#ebSize').oninput = function(){ edit.size = this.value; };
+
+        ov.querySelector('#ebCancel').onclick = function(){ ov.close(); };
+
+        ov.querySelector('#ebSave').onclick = function(){
+          /* 收集最新值 */
+          edit.name = ov.querySelector('#ebName').value.trim();
+          edit.cat = ov.querySelector('#ebCat').value.trim();
+          edit.pages = Number(ov.querySelector('#ebPages').value) || 0;
+          edit.size = ov.querySelector('#ebSize').value.trim();
+          if(!isUploaded){
+            if(edit.contentMode === 'visual'){
+              edit.structured.ver = ov.querySelector('#ebVer').value.trim();
+              edit.structured.base = ov.querySelector('#ebBase').value.trim();
+              edit.structured.scope = ov.querySelector('#ebScope').value.trim();
+              /* 去空章节 */
+              edit.structured.sections = (edit.structured.sections||[])
+                .map(function(s){
+                  return { t:(s.t||'').trim(), items:(s.items||[]).map(function(it){ return String(it||'').trim(); }).filter(Boolean) };
+                })
+                .filter(function(s){ return s.t || s.items.length; });
+            } else {
+              var raw = ov.querySelector('#ebJson').value;
+              try { edit.structured = JSON.parse(raw); }
+              catch(e){ App.toast('JSON 格式错误，请检查语法','err'); return; }
+              if(!edit.structured.sections){ App.toast('缺少 sections 字段','err'); return; }
+            }
+          }
+
+          /* 构建 patch */
+          var patch = {
+            name: edit.name, cat: edit.cat,
+            pages: edit.pages, size: edit.size
+          };
+          if(!isUploaded){
+            patch.content = JSON.stringify(edit.structured);
+          }
+          if(!patch.name){ App.toast('文档名称不能为空','err'); return; }
+          if(!patch.cat){ App.toast('分类不能为空','err'); return; }
+
+          var btn = this; btn.disabled = true; btn.textContent = '保存中…';
+          API.updateKnowledge(d.id, patch).then(function(r){
+            ov.close();
+            docs = MOCK.KNOWLEDGE;
+            refreshCats(); renderTabs(); renderTable();
+            App.toast('文档 '+d.id+' 已更新','ok');
+          }).catch(function(err){
+            btn.disabled = false; btn.innerHTML = App.icon('save')+'保存修改';
+            App.toast((err&&err.message)||'保存失败，请稍后重试','err');
+          });
+        };
+      }
+    });
+  }
+
   renderTabs(); renderTable();
 });
 App.boot('knowledge');
 </script>
+<style>
+  /* ===== 知识库文档编辑器样式（适配 full modal flex 布局） ===== */
+  /* 整体策略：m-body 无 gap，各区块自己用 margin 控制间距；sections 拿满剩余高度 */
+  .modal.full .m-body { display:flex; flex-direction:column; }
+  .kb-edit-sections { flex:1 1 auto; min-height:240px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:6px; margin-top:8px; }
+  .kb-edit-sec { border:1px solid var(--border); border-radius:8px; background:var(--panel); }
+  .kb-edit-sec-head { display:flex; align-items:center; gap:6px; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--border); }
+  .kb-sec-title { flex:1; font-size:13.5px; font-weight:600; padding:5px 10px; border:1px solid transparent; border-radius:5px; background:transparent; transition:border-color .15s; font-family:inherit; color:var(--text); }
+  .kb-sec-title:hover, .kb-sec-title:focus { border-color:var(--accent); background:var(--bg); outline:none; }
+  .kb-sec-acts { display:flex; gap:4px; flex-wrap:wrap; }
+  .kb-edit-items { padding:6px 10px; display:flex; flex-direction:column; gap:5px; }
+  .kb-edit-item { display:flex; gap:8px; align-items:flex-start; padding:4px 8px; background:var(--bg); border:1px solid var(--border); border-radius:5px; }
+  .kb-item-input { flex:1; font-size:12.5px; line-height:1.5; padding:5px 7px; border:1px solid var(--border); border-radius:4px; background:var(--bg); color:var(--text); resize:vertical; font-family:inherit; min-height:30px; }
+  .kb-item-input:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 2px rgba(0,120,255,.15); }
+  .kb-item-acts { display:flex; flex-direction:column; gap:2px; flex-shrink:0; }
+  .kb-edit-items .btn.sm { padding:2px 7px; font-size:10.5px; }
+  .kb-edit-sec-head .btn.sm { padding:3px 7px; font-size:10.5px; }
+  .divider { height:1px; background:var(--border); margin:8px 0; flex:none; }
+  .section-title { font-size:13.5px; font-weight:700; margin:6px 0 4px; display:flex; align-items:center; gap:6px; color:var(--text); flex:none; }
+  .form-row { display:flex; flex-direction:column; gap:2px; margin-bottom:6px; flex:none; }
+  .form-row .f-label { font-size:11.5px; font-weight:600; color:var(--muted); }
+  .input, .select { font-size:12.5px; padding:6px 8px; border:1px solid var(--border); border-radius:5px; background:var(--bg); color:var(--text); font-family:inherit; }
+  .input:focus, .select:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 2px rgba(0,120,255,.15); }
+  .mt1 { margin-top:4px; } .mt2 { margin-top:8px; } .mt3 { margin-top:12px; }
+  .dim { opacity:.7; }
+  .tiny { font-size:11.5px; line-height:1.4; }
+  .flex { display:flex; } .gap2 { gap:8px; }
+  #ebJson { flex:1 1 auto; min-height:320px; font-family:'Consolas','Menlo',monospace; font-size:12px; line-height:1.5; tab-size:2; resize:none; }
+  /* 压缩 meta 表单区域高度，让 sections 拿到更多空间 */
+  .kb-meta-row { display:flex; gap:10px; flex:none; margin-bottom:4px; }
+  .kb-meta-row .form-row { flex:1; min-width:0; margin-bottom:0; }
+  .kb-meta-row-3 { display:flex; gap:10px; flex:none; margin-bottom:4px; }
+  .kb-meta-row-3 .form-row { flex:1; min-width:0; margin-bottom:0; }
+</style>
 </body>
 </html>

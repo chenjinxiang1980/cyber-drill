@@ -20,11 +20,13 @@ document.addEventListener('app:ready', function(e){
   var isPractical = proj.mode === '实战版';
 
   /* 各角色关注态势（工作台统一承载待办任务与处置执行） */
-  var FEED = {
+  /* DEFAULT_FEED 与 src/seed_data.js DICT.role_feed_mapping 保持一致 */
+  var DEFAULT_FEED = {
     commander:'messages', duty:'messages', netsec:'evidence', sysadmin:'impact', itlead:'messages',
-    medlead:'impact', clinical:'impact', healthbureau:'docs', cac:'docs_opinion',
+    medlead:'impact', clinical:'impact', healthbureau:'docs', cac:'docs',
     cyberpolice:'docs', platformadmin:'audit'
   };
+  var FEED = (MOCK.DICT.role_feed_mapping && typeof MOCK.DICT.role_feed_mapping === 'object') ? MOCK.DICT.role_feed_mapping : DEFAULT_FEED;
   var feed = FEED[role.id] || 'messages';
 
   /* 演练事件模拟数据：按当前项目场景取 SIM_DATA，供表单自动预填与自动取证截图（全部虚拟数据） */
@@ -177,7 +179,7 @@ document.addEventListener('app:ready', function(e){
     if(/风险等级/.test(fd)) return '低';
     if(/等级/.test(fd)) return (SCEN&&SCEN.level)||t.level||'较大';
     if(/类型/.test(fd)) return SCEN?SCEN.type:'模拟事件';
-    if(/单位/.test(fd)) return (proj.units&&proj.units[0])||'盘州市人民医院';
+    if(/单位/.test(fd)) return (proj.units&&proj.units[0]) || ((DRILL.brand()||{}).unitName) || '盘州市人民医院';
     if(/摘要|依据/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'（系统自动填充，请核对修改）';
     if(/患者数/.test(fd)) return '0（虚拟数据，无真实患者）';
     if(/损失/.test(fd)) return FACTS.impact;
@@ -1069,16 +1071,16 @@ document.addEventListener('app:ready', function(e){
 
   function renderFeed(){
     var box = document.getElementById('wbFeed');
-    if(feed==='docs' || feed==='docs_opinion'){
+    if(feed==='docs' || feed==='docs'){
       var docs = docList();
       box.innerHTML = '<div class="small muted mb3">医院已上报文书/公告材料（外部单位可见范围）</div>'
         + docs.map(function(d){
             return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('file')+'<span class="grow ellip">'+App.esc(d.name)+'</span><span class="fc-size">'+fmtTime(d.time)+' · '+App.esc(d.uploader)+'</span></div>';
           }).join('')
-        + (feed==='docs_opinion'
-            ? '<div class="section-title mt3">'+App.icon('opinion')+'院方公告文稿</div>'
-              + MOCK.OPINION.filter(function(o){ return o.source==='院办提交'; }).map(function(o){
-                  return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('opinion')+'<span class="grow ellip">'+App.esc(o.title)+'</span><span class="fc-size">'+fmtTime(o.time)+' · '+App.esc(o.status)+'</span></div>';
+        + (feed==='docs'
+            ? '<div class="section-title mt3">'+App.icon('bell')+'院方公告文稿</div>'
+              + [].filter(function(o){ return o.source==='院办提交'; }).map(function(o){
+                  return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('bell')+'<span class="grow ellip">'+App.esc(o.title)+'</span><span class="fc-size">'+fmtTime(o.time)+' · '+App.esc(o.status)+'</span></div>';
                 }).join('')
             : '')
         + '<div class="tiny dim mt2">内网原始告警、操作日志、会商内部讨论不在外部单位权限范围内（演练模拟权限隔离）</div>';

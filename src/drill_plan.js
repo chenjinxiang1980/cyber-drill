@@ -1,117 +1,18 @@
-/* 演练模式支撑：实战版处置决策选项、基础版任务生成 */
+/* 演练模式支撑：实战版处置决策选项、基础版任务生成
+ * 字典数据（角色映射/表单映射/等级映射/决策干扰项）已迁移至 dict 表：
+ *   key=drill_role_by_target / drill_form_by_action / drill_level_by_scenario / drill_action_meta
+ *  运行时从 src/drill_dict.js 读取（30s 缓存 + seed_data.js 兜底）
+ * admin 系统设置 → 处置流程字典 区块可编辑，修改后即时生效（drillDict.invalidate 清缓存）
+ */
 'use strict';
 
+const drillDict = require('./drill_dict');
+const S = require('./seed_data');
 
-/* 剧本责任角色 → 系统角色 ID */
-const ROLE_BY_TARGET = {
-  '院应急指挥部': 'commander',
-  '信息科负责人': 'itlead',
-  '信息科值班员': 'duty',
-  '网络安全管理员': 'netsec',
-  '系统管理员': 'sysadmin',
-  '医务科主任': 'medlead',
-  '临床科室': 'clinical',
-  '市委网信办': 'cac'
-};
-
-/* 基础版按动作类型（及责任角色）自动匹配的表单 */
-const FORM_BY_ACTION = {
-  '告警核实': 'F1',
-  '隔离处置': 'F2',
-  '上报审批': 'F8',
-  '业务兜底': 'F3',
-  '取证留痕': 'F5',
-  '处置恢复': 'F7'
-};
-
-/* 场景等级 → 任务等级 */
-const LEVEL_BY_SCENARIO = { '重大': 'P0', '较大': 'P1', '一般': 'P2' };
-
-/* 每个动作类型的决策问题与干扰项（干扰项均为不符合预案的处置） */
-const ACTION_META = {
-  '告警核实': {
-    alert: '监控平台推送异常告警，值班人员首先应采取哪项处置？',
-    q: '为确认事件性质与影响范围，当前应采取哪项处置？',
-    wrong: [
-      '先等待10分钟，观察告警是否自动恢复',
-      '直接在防火墙上封禁全部外网访问',
-      '告知来电人员稍后再联系，暂不记录',
-      '仅记录告警截图，不通知任何人员',
-      '立即重启核心业务服务器尝试恢复'
-    ]
-  },
-  '隔离处置': {
-    q: '为防止事态扩大，当前应采取哪项处置？',
-    wrong: [
-      '继续观察，待业务科室反馈后再处置',
-      '直接关闭全院网络交换机电源',
-      '仅在本机删除可疑文件，不做网络隔离',
-      '等待厂商到场后再决定是否隔离',
-      '先恢复业务系统，再排查异常主机'
-    ]
-  },
-  '取证留痕': {
-    q: '在处置的同时，取证与留痕方面应如何做？',
-    wrong: [
-      '格式化受影响主机后再排查',
-      '仅口头记录，事后补写处置经过',
-      '先删除可疑文件，避免病毒扩散',
-      '关闭审计日志服务以释放磁盘空间',
-      '将可疑样本直接转发到互联网网盘'
-    ]
-  },
-  '上报审批': {
-    report: '当前事态下，报告与决策方面应如何处理？',
-    q: '该环节在上报与协同方面应如何处置？',
-    wrong: [
-      '先自行处置完毕，事后视情况再上报',
-      '仅在科室内部口头告知，不形成书面记录',
-      '越级直接向市委网信办报告，不经过院应急指挥部',
-      '等待业务完全中断后再上报',
-      '只上报业务科室，不通知信息科负责人'
-    ]
-  },
-  '协同沟通': {
-    q: '跨部门协同方面，当前应如何处置？',
-    wrong: [
-      '让业务科室自行处理，信息科不介入',
-      '在未确认范围前通知全院停诊',
-      '仅通过私人微信通知个别人员',
-      '等待上级电话询问后再组织协同',
-      '暂不沟通，避免引起恐慌'
-    ]
-  },
-  '业务兜底': {
-    q: '业务连续性受影响时，当前应采取哪项处置？',
-    wrong: [
-      '继续依赖故障系统，等待其自行恢复',
-      '直接宣布全院停诊，不做任何兜底',
-      '让临床科室手工记录后不再补录',
-      '仅恢复挂号系统，其他业务不处理',
-      '关闭所有业务系统以统一恢复'
-    ]
-  },
-  '处置恢复': {
-    q: '事件受控后，恢复与验证方面应如何处置？',
-    wrong: [
-      '未做验证即全面恢复对外服务',
-      '直接恢复上线，不再检查日志',
-      '仅恢复一台终端即认为业务恢复',
-      '恢复后立即删除全部取证材料',
-      '跳过审批直接恢复核心数据库'
-    ]
-  },
-  '其他': {
-    q: '针对当前异常，应采取哪项处置？',
-    wrong: [
-      '暂不处置，继续观察',
-      '仅口头报告，不形成记录',
-      '未经研判直接重启全部系统',
-      '等待他人处理，自己不介入',
-      '删除异常日志后再上报'
-    ]
-  }
-};
+/* 从 dict 表或 seed_data 兜底获取字典（带 30s 缓存） */
+function dict(db, key, fallback) {
+  return drillDict.get(db || require('./db').db, key, fallback);
+}
 
 function hash(str) {
   /* FNV-1a + 末位混合：避免连续节点 ID 得到相同的取模结果，保证选项位置真正打乱 */
@@ -129,10 +30,12 @@ function hash(str) {
 
 /* 生成固定的三项选项（1项正确 + 2项干扰），选项顺序按节点 ID 稳定打乱
  * 干扰项优先使用剧本编辑中按节点配置的 wrong，未配置时按动作类型自动生成 */
-function buildDecision(node) {
-  const meta = ACTION_META[node.action] || ACTION_META['其他'];
+function buildDecision(node, _db) {
+  const db = _db || require('./db').db;
+  const actionMeta = dict(db, 'drill_action_meta', S.DICT.drill_action_meta);
+  const meta = actionMeta[node.action] || actionMeta['其他'];
   const question = (node.type === 'alert' ? (meta.alert || meta.q) : (meta.report || meta.q)) || meta.q;
-  const pool = meta.wrong || ACTION_META['其他'].wrong;
+  const pool = meta.wrong || (actionMeta['其他'] && actionMeta['其他'].wrong) || [];
   const h = hash(node.id);
   const title = String(node.title || '按预案处置');
   const distractors = [];
@@ -161,10 +64,12 @@ function buildDecision(node) {
 }
 
 /* 判断当前角色是否可处置该剧本节点 */
-function canHandle(role, target) {
+function canHandle(role, target, _db) {
   if (!role) return false;
   if (role.id === 'platformadmin' || role.id === 'commander') return true;
-  const mapped = ROLE_BY_TARGET[target] || null;
+  const db = _db || require('./db').db;
+  const roleByTarget = dict(db, 'drill_role_by_target', S.DICT.drill_role_by_target);
+  const mapped = roleByTarget[target] || null;
   if (role.id === 'itlead') return ['itlead', 'duty', 'netsec', 'sysadmin'].indexOf(mapped) >= 0;
   return target === role.name || target === role.short || mapped === role.id;
 }
@@ -179,14 +84,17 @@ function ensureBasicTasks(db, project) {
     .filter(function (n) { return n.type !== 'end' && n.flow_type !== 'distractor'; });
   if (!nodes.length) return 0;
   const sc = db.prepare('SELECT * FROM scenarios WHERE id=?').get(project.scenario_id);
-  const level = LEVEL_BY_SCENARIO[(sc && sc.level) || ''] || 'P2';
+  const levelByScenario = dict(db, 'drill_level_by_scenario', S.DICT.drill_level_by_scenario);
+  const roleByTarget = dict(db, 'drill_role_by_target', S.DICT.drill_role_by_target);
+  const formByAction = dict(db, 'drill_form_by_action', S.DICT.drill_form_by_action);
+  const level = levelByScenario[(sc && sc.level) || ''] || 'P2';
   const prefix = 'T' + String(project.id).replace(/[^0-9]/g, '') + '-';
   const insert = db.prepare('INSERT INTO tasks (id,project_id,role_id,title,descr,deadline,status,level,forms,node_id,seq) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
   let count = 0;
   nodes.forEach(function (n, i) {
-    const roleId = ROLE_BY_TARGET[n.target] || 'duty';
+    const roleId = roleByTarget[n.target] || 'duty';
     /* 上报审批：指挥部决策环节使用《应急启动审批单》，信息科负责人环节使用《网络和数据安全事件反馈单》 */
-    let formId = FORM_BY_ACTION[n.action] || '';
+    let formId = formByAction[n.action] || '';
     if (n.action === '上报审批' && n.target === '院应急指挥部') formId = 'F4';
     const forms = formId ? [formId] : [];
     insert.run(prefix + String(i + 1).padStart(2, '0'), project.id, roleId, n.title, n.descr || '',
@@ -232,6 +140,8 @@ function defaultScores(db, scenarioId) {
  * 基础版不显示混淆流程（工作台按 flow_type 过滤），因此共用同一份剧本 */
 function ensureDistractors(db) {
   const scenarios = db.prepare('SELECT id FROM scenarios').all();
+  const roleByTarget = dict(db, 'drill_role_by_target', S.DICT.drill_role_by_target);
+  const actionMeta = dict(db, 'drill_action_meta', S.DICT.drill_action_meta);
   let count = 0;
   scenarios.forEach(function (sc) {
     const exists = db.prepare("SELECT COUNT(*) AS c FROM script_nodes WHERE scenario_id=? AND flow_type='distractor'").get(sc.id);
@@ -242,7 +152,7 @@ function ensureDistractors(db) {
     const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,deps,pos_x,pos_y) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
     const byRole = {};
     nodes.forEach(function (n) {
-      const roleId = ROLE_BY_TARGET[n.target] || 'duty';
+      const roleId = roleByTarget[n.target] || 'duty';
       if (!byRole[roleId]) byRole[roleId] = [];
       byRole[roleId].push(n);
     });
@@ -250,7 +160,7 @@ function ensureDistractors(db) {
     Object.keys(byRole).forEach(function (roleId) {
       const group = byRole[roleId];
       const first = group[0];
-      const meta = ACTION_META[first.action] || ACTION_META['其他'];
+      const meta = actionMeta[first.action] || actionMeta['其他'];
       const titles = group.map(function (n) { return n.title; });
       const picked = [];
       meta.wrong.forEach(function (w) {
@@ -361,8 +271,19 @@ function backfillFeedbackForm(db) {
   return { nodes: nodes, tasks: tasks };
 }
 
+/* 导出的字典快照（外部 require drill_plan.ROLE_BY_TARGET 等的兼容层，只读）
+ * 注意：这个是运行时快照，缓存 30s。如需写操作请走 dict 表 + drillDict.invalidate() */
+function ROLE_BY_TARGET(_db) { return dict(_db || require('./db').db, 'drill_role_by_target', S.DICT.drill_role_by_target); }
+function FORM_BY_ACTION(_db) { return dict(_db || require('./db').db, 'drill_form_by_action', S.DICT.drill_form_by_action); }
+function LEVEL_BY_SCENARIO(_db) { return dict(_db || require('./db').db, 'drill_level_by_scenario', S.DICT.drill_level_by_scenario); }
+function ACTION_META(_db) { return dict(_db || require('./db').db, 'drill_action_meta', S.DICT.drill_action_meta); }
+
 module.exports = {
-  ROLE_BY_TARGET, FORM_BY_ACTION, buildDecision, canHandle, ensureBasicTasks, backfillBasicTasks,
+  ROLE_BY_TARGET: ROLE_BY_TARGET,
+  FORM_BY_ACTION: FORM_BY_ACTION,
+  LEVEL_BY_SCENARIO: LEVEL_BY_SCENARIO,
+  ACTION_META: ACTION_META,
+  buildDecision, canHandle, ensureBasicTasks, backfillBasicTasks,
   defaultScores, ensureDistractors, backfillFlowScores, backfillReceivers, backfillFeedbackForm,
   parseDeps, basicNodeAvailability
 };

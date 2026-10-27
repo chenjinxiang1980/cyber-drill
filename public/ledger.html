@@ -134,7 +134,10 @@ document.addEventListener('app:ready', function(e){
     var blob = new Blob(['\uFEFF'+lines.join('\r\n')], { type:'text/csv;charset=utf-8' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = '演练模拟-盘州市人民医院网络安全演练台账-'+new Date().toISOString().slice(0,10)+'.csv';
+    var _lb = DRILL.brand() || {};
+    var _lUnit = _lb.unitName || '盘州市人民医院';
+    var _lSys = _lb.systemName || '网络安全演练';
+    a.download = '演练模拟-'+_lUnit+_lSys+'台账-'+new Date().toISOString().slice(0,10)+'.csv';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1500);
     API.addAudit('导出台账CSV（'+filtered.length+'条，演练模拟数据）');

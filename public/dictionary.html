@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>流程字典设置 · 盘州市人民医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<link rel="stylesheet" href="styles.css">
+<style>
+.dict-group-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp4);margin-bottom:var(--sp4)}
+.dict-group-head{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--text);margin-bottom:var(--sp3);padding-bottom:var(--sp3);border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+.dict-group-head svg{width:18px;height:18px;color:var(--accent2)}
+.dict-group-head .group-count{margin-left:auto;font-size:11px;color:var(--text3);background:var(--elev);padding:2px 8px;border-radius:10px}
+.dict-group-head .chev{width:14px;height:14px;transition:transform .2s;color:var(--text3)}
+.dict-group.collapsed .chev{transform:rotate(-90deg)}
+.dict-group.collapsed .dict-group-body{display:none}
+.dict-mini-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:var(--sp3)}
+.dict-mini-tabs .tab{padding:5px 12px;font-size:12px;border-radius:var(--r-sm);border:1px solid var(--border2);background:var(--elev);margin-bottom:0}
+.dict-mini-tabs .tab:hover{border-color:var(--accent)}
+.dict-mini-tabs .tab.on{background:var(--accent-dim);border-color:var(--accent);color:#fff}
+.dict-edit-area{padding:var(--sp4);background:var(--bg);border-radius:var(--r-sm);min-height:200px;border:1px solid var(--border)}
+.dict-edit-area input.dictRowInput{max-width:360px}
+.dict-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.dict-hint{font-size:12px;color:var(--text3);padding:8px 12px;background:rgba(88,166,255,.06);border-left:2px solid var(--info);border-radius:4px;margin-bottom:12px;line-height:1.7}
+</style>
+</head>
+<body data-page="dictionary">
+<script src="system.js"></script><script src="app.js"></script><script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var BRAND_ADMIN = role.id === 'platformadmin';
+
+  if(!BRAND_ADMIN){
+    document.getElementById('page').innerHTML =
+      '<div class="forbidden">'+App.icon('lock')+'<h2>权限不足</h2>'
+      +'<p>流程字典设置仅<b>平台管理员</b>可访问。</p>'
+      +'<div class="mt4"><a href="admin.html" class="btn">返回系统设置</a></div></div>';
+    return;
+  }
+
+  /* 字典分组（4 组 × 14 个 key） */
+  var DICT_GROUPS = [
+    { key:'role_mapping', name:'角色映射', icon:'user', desc:'剧本节点 → 角色权限的映射关系', items:[
+      { key:'drill_role_by_target', label:'剧本节点→角色ID', desc:'target 中文名 → role_id' },
+      { key:'target_role_aliases', label:'target 别名映射', desc:'历史别名 → role_id' },
+      { key:'fill_roles_by_role', label:'取证责任范围', desc:'各角色可负责取证的角色范围' },
+      { key:'managed_roles_by_role', label:'统筹任务范围', desc:'各角色可统筹的任务角色范围' }
+    ]},
+    { key:'flow_form', name:'流程与表单', icon:'flow', desc:'处置动作、决策干扰、表单匹配', items:[
+      { key:'drill_form_by_action', label:'动作→表单模板', desc:'处置动作类型 → form_templates.id' },
+      { key:'drill_level_by_scenario', label:'演练等级映射', desc:'scenario.level → task.level 默认值' },
+      { key:'drill_action_meta', label:'决策与干扰项', desc:'每个动作的决策问题 + 5 条干扰处置' },
+      { key:'script_action_types', label:'剧本处置动作', desc:'剧本编排时「处置动作」下拉选项' }
+    ]},
+    { key:'evidence_perm', name:'证据与权限', icon:'evidence', desc:'证据类型、会商频道、知识库权限', items:[
+      { key:'ev_types', label:'证据类型枚举', desc:'系统中可用的证据材料类型' },
+      { key:'external_evidence_types', label:'院外可见证据', desc:'外部单位可见的证据子集' },
+      { key:'chat_channels', label:'会商频道配置', desc:'频道 key → 名称 + 允许访问的角色' },
+      { key:'kb_edit_roles', label:'知识库编辑权限', desc:'可维护预案知识库的角色列表' }
+    ]},
+    { key:'node_feed', name:'节点特征与工作台', icon:'workbench', desc:'院外节点识别、工作台默认模块', items:[
+      { key:'external_node_patterns', label:'院外节点识别', desc:'机构名称 / 事件关键词匹配规则' },
+      { key:'role_feed_mapping', label:'工作台默认模块', desc:'角色进入工作台时默认加载的关注模块' }
+    ]}
+  ];
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>处置流程字典设置</h1><div class="sub">14 组字典 · 剧本基线 + 业务字典 + 前端字典（仅平台管理员 '+App.esc(role.name)+' 可维护）</div></div>'
+    + '<a href="admin.html" class="btn" style="margin-left:auto">'+App.icon('arrow-right')+'← 返回系统设置</a></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>修改字典将影响<b>剧本编排、角色工作台、演练导调</b>等全部业务模块的处置流程逻辑，请谨慎操作。</span></div>';
+
+  /* 渲染分组 */
+  DICT_GROUPS.forEach(function(g, gi){
+    var items = g.items.map(function(it){
+      return '<button class="tab dict-tab" data-key="'+it.key+'" title="'+App.esc(it.desc)+'">'+App.esc(it.label)+'</button>';
+    }).join('');
+    var card = document.createElement('div');
+    card.className = 'dict-group' + (gi > 0 ? ' collapsed' : '');
+    card.innerHTML =
+      '<div class="dict-group-card">'
+      + '<div class="dict-group-head">'
+      +   App.icon(g.icon)
+      +   '<span>'+App.esc(g.name)+'</span>'
+      +   '<span class="group-count">'+g.items.length+' 项</span>'
+      +   '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>'
+      + '</div>'
+      + '<div class="dict-group-body">'
+      +   '<div class="tiny dim" style="margin-bottom:10px">'+App.esc(g.desc)+'</div>'
+      +   '<div class="dict-mini-tabs">'+items+'</div>'
+      +   '<div class="dict-edit-area" id="edit-'+g.key+'"><span class="tiny dim">请选择上方字典项进行编辑</span></div>'
+      + '</div>'
+      + '</div>';
+    page.appendChild(card);
+
+    /* 分组折叠 */
+    card.querySelector('.dict-group-head').onclick = function(){
+      card.classList.toggle('collapsed');
+    };
+  });
+
+  /* ---------- 字典编辑引擎（复用原 admin.html initDict 逻辑 + 分组增强） ---------- */
+  var cache = {};
+  var currentKey = null;
+  var currentGroupKey = null;
+
+  function groupOfKey(key){
+    for(var i=0; i<DICT_GROUPS.length; i++){
+      if(DICT_GROUPS[i].items.some(function(x){ return x.key===key; })) return DICT_GROUPS[i].key;
+    }
+    return null;
+  }
+
+  function render(){
+    var el = document.getElementById('edit-'+currentGroupKey);
+    if(!el) return;
+    if(!cache[currentKey]){
+      el.innerHTML = '<span class="tiny dim">加载中…</span>';
+    } else {
+      el.innerHTML = cache[currentKey].html;
+      wire();
+    }
+  }
+
+  function load(key){
+    var gKey = groupOfKey(key);
+    currentGroupKey = gKey;
+    currentKey = key;
+    highlightTab(key);
+    API.getDict(key).then(function(res){
+      var value = res.value || {};
+      cache[key] = { value: value, dirty: false, html: build(key, value) };
+      render();
+    }).catch(function(e){
+      cache[key] = { value: {}, dirty: false, html: '<span class="dim">加载失败：'+(e&&e.message)+'</span>' };
+      render();
+    });
+  }
+
+  function highlightTab(key){
+    document.querySelectorAll('.dict-tab').forEach(function(t){
+      t.classList.toggle('on', t.getAttribute('data-key')===key);
+    });
+  }
+
+  /* ========== 以下 build/wire/collectValue 均来自原 admin.html initDict 函数 ========== */
+  function build(key, value){
+    var roles = (window.MOCK && MOCK.ROLES) ? MOCK.ROLES : [];
+    var forms = (window.MOCK && MOCK.FORM_TEMPLATES) ? MOCK.FORM_TEMPLATES : [];
+    var roleSelectAll = roles.map(function(r){
+      return '<option value="'+r.id+'" title="'+App.esc(r.name)+'">'+App.esc(r.name)+' ('+r.id+')</option>';
+    }).join('');
+
+    /* 简单数组类型 */
+    var ARRAY_KEYS = ['ev_types', 'external_evidence_types', 'script_action_types'];
+    if(ARRAY_KEYS.indexOf(key) >= 0){
+      var arr = Array.isArray(value) ? value : [];
+      var body1 = '<div class="dict-row"><span class="tiny dim" style="min-width:120px">数组项（非空字符串）</span></div>';
+      body1 += arr.map(function(item, i){
+        return '<div class="dict-row"><input class="input dictArrItem dictRowInput" value="'+App.esc(item)+'" data-i="'+i+'" style="flex:1;max-width:360px">'
+          +'<button class="btn sm danger dictArrDel">'+App.icon('x')+'</button></div>';
+      }).join('');
+      body1 += '<div class="dict-row"><button class="btn tiny" id="dictArrAdd">'+App.icon('plus')+'新增一项</button></div>';
+      return commonFoot(key) + body1;
+    }
+
+    /* role_id 数组类型 */
+    if(key === 'kb_edit_roles'){
+      var arr2 = Array.isArray(value) ? value : [];
+      var body2 = '<div class="dict-row"><span class="tiny dim" style="min-width:120px">角色（role_id）</span></div>';
+      body2 += arr2.map(function(rid, i){
+        return '<div class="dict-row"><select class="input dictArrRole dictRowInput" style="max-width:320px;flex:1" data-i="'+i+'">'
+          +roleSelectAll.replace(new RegExp('value="'+rid+'"','g'), function(m){ return m + ' selected'; })
+          +'</select>'
+          +'<button class="btn sm danger dictArrDel">'+App.icon('x')+'</button></div>';
+      }).join('');
+      body2 += '<div class="dict-row"><button class="btn tiny" id="dictArrAdd">'+App.icon('plus')+'新增一项</button></div>';
+      return commonFoot(key) + body2;
+    }
+
+    /* 嵌套结构 external_node_patterns */
+    if(key === 'external_node_patterns'){
+      var P = value || { orgs: [], events: [] };
+      var h = commonFoot(key);
+      h += '<div class="dict-group-card" style="padding:12px;margin-bottom:8px"><div class="section-title mb2">机构名称匹配（orgs）</div>';
+      h += (P.orgs||[]).map(function(t,i){ return '<div class="dict-row"><input class="input dictOrg dictRowInput" value="'+App.esc(t)+'" data-s="orgs" data-i="'+i+'" style="flex:1;max-width:360px"><button class="btn sm danger dictArrDel">'+App.icon('x')+'</button></div>'; }).join('');
+      h += '<div class="dict-row"><button class="btn tiny" data-add="orgs">'+App.icon('plus')+'新增机构</button></div></div>';
+      h += '<div class="dict-group-card" style="padding:12px;margin-bottom:8px"><div class="section-title mb2">事件关键词匹配（events）</div>';
+      h += (P.events||[]).map(function(t,i){ return '<div class="dict-row"><input class="input dictOrg dictRowInput" value="'+App.esc(t)+'" data-s="events" data-i="'+i+'" style="flex:1;max-width:360px"><button class="btn sm danger dictArrDel">'+App.icon('x')+'</button></div>'; }).join('');
+      h += '<div class="dict-row"><button class="btn tiny" data-add="events">'+App.icon('plus')+'新增关键词</button></div></div>';
+      return h;
+    }
+
+    /* 频道分组 chat_channels */
+    if(key === 'chat_channels'){
+      var CH = value || {};
+      var chHtml = commonFoot(key);
+      Object.keys(CH).forEach(function(chKey){
+        var ch = CH[chKey] || { label: '', roles: [] };
+        var rolesChk = roles.map(function(r){
+          var ck = (ch.roles||[]).indexOf(r.id) >= 0 ? ' checked' : '';
+          return '<label class="tiny" style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;margin-bottom:4px"><input type="checkbox" class="dictChRole" value="'+r.id+'" data-ch="'+chKey+'"'+ck+'>'+App.esc(r.name)+'</label>';
+        }).join('');
+        chHtml += '<div class="dict-group-card" style="padding:12px;margin-bottom:8px">'
+          +'<div class="dict-row">'
+          +'<input class="input dictChKey" style="max-width:140px" value="'+App.esc(chKey)+'" data-oldkey="'+App.esc(chKey)+'" placeholder="频道key">'
+          +'<input class="input dictChLabel" style="max-width:260px;flex:1" value="'+App.esc(ch.label||'')+'" data-ch="'+App.esc(chKey)+'" placeholder="频道名称">'
+          +'<button class="btn sm danger dictChDel" data-ch="'+App.esc(chKey)+'">'+App.icon('trash')+'</button></div>'
+          +'<div class="mt2">'+rolesChk+'</div></div>';
+      });
+      chHtml += '<button class="btn tiny" id="dictChAdd">'+App.icon('plus')+'新增频道</button>';
+      return chHtml;
+    }
+
+    /* key→数组/null 角色范围 */
+    var ROLE_SCOPE_KEYS = ['fill_roles_by_role', 'managed_roles_by_role'];
+    if(ROLE_SCOPE_KEYS.indexOf(key) >= 0){
+      var S = value || {};
+      var sHtml = commonFoot(key) + '<div class="tiny dim mb2">每个角色可负责/统筹的角色范围；勾选「全部」则忽略右侧多选</div>';
+      Object.keys(S).forEach(function(rid){
+        var arrVal = S[rid];
+        var allChecked = arrVal === null;
+        var multi = roles.map(function(r){
+          var ck = (arrVal && arrVal.indexOf(r.id) >= 0) ? ' checked' : '';
+          return '<label class="tiny" style="display:inline-flex;align-items:center;gap:3px;margin-right:8px"><input type="checkbox" class="dictSRole" data-k="'+rid+'" value="'+r.id+'"'+ck+'>'+App.esc(r.id)+'</label>';
+        }).join('');
+        var sel = roles.filter(function(r){ return r.id === rid; })[0];
+        var show = sel ? App.esc(sel.name) + ' (' + rid + ')' : App.esc(rid);
+        sHtml += '<div class="dict-group-card" style="padding:12px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start">'
+          +'<span style="min-width:180px;font-weight:600">'+show+'</span>'
+          +'<label class="tiny" style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" class="dictSAll" data-k="'+App.esc(rid)+'"'+(allChecked?' checked':'')+'>全部</label>'
+          +'<div class="grow" style="display:flex;flex-wrap:wrap">'+multi+'</div></div>';
+      });
+      return sHtml;
+    }
+
+    /* 通用 key→value */
+    var TWO_COL_KEYS = ['drill_role_by_target', 'drill_form_by_action', 'drill_level_by_scenario', 'target_role_aliases'];
+    if(TWO_COL_KEYS.indexOf(key) >= 0){
+      var rows = [];
+      rows.push(commonFoot(key));
+      rows.push('<div class="dict-row tiny dim" style="font-weight:600"><span style="min-width:240px">key</span><span>value</span><span style="min-width:50px"></span></div>');
+      Object.keys(value).forEach(function(k){
+        var v = value[k];
+        var left = '<input class="input dictLeft dictRowInput" style="max-width:240px" value="'+App.esc(k)+'">';
+        var right;
+        if(key === 'drill_role_by_target' || key === 'target_role_aliases'){
+          right = '<select class="input dictRight dictRowInput" style="max-width:280px;flex:1">'+roles.map(function(r){
+            return '<option value="'+r.id+'"'+(v===r.id?' selected':'')+'>'+App.esc(r.name)+' ('+r.id+')</option>';
+          }).join('')+'</select>';
+        } else if(key === 'drill_form_by_action'){
+          right = '<select class="input dictRight dictRowInput" style="max-width:280px;flex:1">'+forms.map(function(f){
+            return '<option value="'+f.id+'"'+(v===f.id?' selected':'')+'>'+f.id+' '+App.esc(f.name)+'</option>';
+          }).join('')+'</select>';
+        } else {
+          right = '<input class="input dictRight dictRowInput" style="max-width:200px;flex:1" value="'+App.esc(v)+'" placeholder="P0/P1/P2">';
+        }
+        rows.push('<div class="dict-row">'+left+right+'<button class="btn sm danger dictTwoDel">'+App.icon('trash')+'</button></div>');
+      });
+      rows.push('<div class="dict-row"><button class="btn tiny" id="dictAddRow">'+App.icon('plus')+'新增一行</button></div>');
+      return rows.join('');
+    }
+
+    /* role_feed_mapping */
+    if(key === 'role_feed_mapping'){
+      var FM = value || {};
+      var fmHtml = commonFoot(key) + '<div class="tiny dim mb2">每个角色进入工作台时默认加载的关注态势模块（对应 workbench.html tab id）</div>';
+      Object.keys(FM).forEach(function(rid){
+        var v = FM[rid] || '';
+        var sel = roles.filter(function(r){ return r.id === rid; })[0];
+        var show = sel ? (App.esc(sel.name) + ' (' + rid + ')') : App.esc(rid);
+        fmHtml += '<div class="dict-row" data-k="'+App.esc(rid)+'">'
+          +'<span style="min-width:220px;font-weight:600">'+show+'</span>'
+          +'<input class="input dictFMValue dictRowInput" style="max-width:200px;flex:1" value="'+App.esc(v)+'" placeholder="messages/evidence/impact/docs/audit…">'
+          +'<button class="btn sm danger dictFMDel" data-k="'+App.esc(rid)+'">'+App.icon('trash')+'</button>'
+          +'</div>';
+      });
+      fmHtml += '<div class="dict-row"><button class="btn tiny" id="dictFMAdd">'+App.icon('plus')+'新增角色映射</button></div>';
+      return fmHtml;
+    }
+
+    /* drill_action_meta 特殊表 */
+    if(key === 'drill_action_meta'){
+      var mRows = [];
+      mRows.push(commonFoot(key));
+      mRows.push('<div class="table-wrap"><table class="table tiny"><thead><tr>'
+        +'<th style="min-width:140px">动作类型</th><th style="min-width:160px">告警类问题</th>'
+        +'<th style="min-width:160px">报告类问题</th><th style="min-width:160px">一般问题</th>'
+        +'<th style="min-width:120px">干扰项 1</th><th style="min-width:120px">干扰项 2</th>'
+        +'<th style="min-width:120px">干扰项 3</th><th style="min-width:120px">干扰项 4</th>'
+        +'<th style="min-width:120px">干扰项 5</th></tr></thead><tbody>');
+      Object.keys(value).forEach(function(action){
+        var m = value[action] || {}, w = (m.wrong || []).slice(0,5); while(w.length < 5) w.push('');
+        mRows.push('<tr data-action="'+App.esc(action)+'">'
+          +'<td><input class="input" style="max-width:140px" value="'+App.esc(action)+'"></td>'
+          +'<td><input class="input" value="'+App.esc(m.alert||'')+'"></td>'
+          +'<td><input class="input" value="'+App.esc(m.report||'')+'"></td>'
+          +'<td><input class="input" value="'+App.esc(m.q||'')+'"></td>'
+          +w.map(function(x){ return '<td><input class="input" value="'+App.esc(x)+'"></td>'; }).join('')
+          +'</tr>');
+      });
+      mRows.push('</tbody></table></div>');
+      mRows.push('<div class="dict-row"><button class="btn tiny" id="dictMetaAdd">'+App.icon('plus')+'新增动作类型</button></div>');
+      return mRows.join('');
+    }
+
+    return '<span class="dim">未知的字典 key：'+App.esc(key)+'</span>' + commonFoot(key);
+  }
+
+  function commonFoot(key){
+    var hints = {
+      drill_role_by_target: '剧本节点 target 中文名 → role_id（影响角色工作台、实战版处置、混淆流程生成）。保存前校验 role_id 必须存在。',
+      drill_form_by_action: '动作类型 → form_templates.id（基础版任务自动匹配）。保存前校验 form_id 必须存在。',
+      drill_level_by_scenario: 'scenarios.level → tasks.level（基础版自动生成任务时赋默认等级）。',
+      drill_action_meta: '每个动作类型的决策问题 + 5 条干扰处置选项（实战版混淆流程生成 + 剧本画布决策题）。',
+      ev_types: '系统中可用的证据材料类型枚举（证据计划生成 + 取证分类）。',
+      external_evidence_types: '院外单位可见的证据材料子集（须是 ev_types 的子集）。',
+      target_role_aliases: '剧本节点 target 中文名（含历史别名） → role_id（roleIdOfTarget 先查此表再查 drill_role_by_target）。',
+      fill_roles_by_role: '各角色可负责取证的责任角色范围；null 表示全部。',
+      managed_roles_by_role: '各角色可统筹的任务角色范围；null 表示全部。',
+      chat_channels: '演练导调中心会商频道配置：频道 key → 名称 + 允许访问的角色列表。',
+      kb_edit_roles: '可维护知识库的角色列表（role_id 数组）。',
+      external_node_patterns: '院外节点识别：机构名称 / 事件关键词出现在节点 target 或描述中即归入院外上报沟通阶段。',
+      role_feed_mapping: '角色进入工作台时默认加载的关注态势模块（feed module 对应 workbench.html tab id，如 messages/evidence/impact/docs/docs/audit）。',
+      script_action_types: '剧本编排时「处置动作」下拉选项（scenarios.html ACTION_TYPES）。自由文本数组，可按演练场景需求调整。'
+    };
+    var hint = hints[key] ? '<div class="dict-hint">'+hints[key]+'</div>' : '';
+    return hint + '<div class="flex gap3 mt3" style="align-items:center">'
+      + '<button class="btn primary" id="dictSaveBtn">'+App.icon('check')+'保存此字典</button>'
+      + '<button class="btn" id="dictReloadBtn">'+App.icon('refresh')+'重新加载</button>'
+      + '<span class="tiny dim" id="dictDirty" style="display:none;margin-left:8px;color:var(--warn)">有未保存的修改</span>'
+      + '</div><div class="divider mt3" style="margin:12px 0"></div>';
+  }
+
+  function wire(){
+    var el = document.getElementById('edit-'+currentGroupKey);
+    if(!el) return;
+    el.querySelectorAll('input, select, textarea').forEach(function(ix){
+      ix.addEventListener('input', function(){
+        if(!cache[currentKey]) return;
+        cache[currentKey].dirty = true;
+        var db = document.getElementById('dictDirty');
+        if(db) db.style.display = '';
+        var sb = document.getElementById('dictSaveBtn');
+        if(sb) sb.disabled = false;
+      });
+    });
+
+    /* 新增数组项 */
+    var arrAdd = el.querySelector('#dictArrAdd');
+    if(arrAdd){ arrAdd.addEventListener('click', function(){
+      var curVal = cache[currentKey].value;
+      if(!Array.isArray(curVal)) curVal = [];
+      curVal.push(currentKey === 'kb_edit_roles' ? 'platformadmin' : '新条目');
+      cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, curVal);
+      render(); wire();
+    }); }
+
+    /* 新增外部节点特征 */
+    el.querySelectorAll('[data-add]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var section = btn.getAttribute('data-add');
+        var curVal = cache[currentKey].value || { orgs: [], events: [] };
+        if(!curVal[section]) curVal[section] = [];
+        curVal[section].push('新' + (section === 'orgs' ? '机构' : '关键词'));
+        cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, curVal);
+        render(); wire();
+      });
+    });
+
+    /* 删除按钮 */
+    el.querySelectorAll('.dictArrDel').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var curVal = cache[currentKey].value;
+        if(currentKey === 'external_node_patterns'){
+          var input = btn.parentElement.querySelector('.dictOrg');
+          if(input){
+            var section = input.getAttribute('data-s');
+            curVal = curVal || {};
+            curVal[section] = (curVal[section] || []).filter(function(_, i){ return i !== +input.getAttribute('data-i'); });
+          }
+        } else if(Array.isArray(curVal)){
+          var idx = btn.parentElement.querySelector('input, select');
+          idx = idx ? +idx.getAttribute('data-i') : -1;
+          curVal.splice(idx, 1);
+        } else { return; }
+        cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, curVal);
+        render(); wire();
+      });
+    });
+
+    /* 新增/删除频道 */
+    var chAdd = el.querySelector('#dictChAdd');
+    if(chAdd){ chAdd.addEventListener('click', function(){
+      var curVal = cache[currentKey].value || {};
+      var k = '频道' + Object.keys(curVal).length;
+      curVal[k] = { label: '新频道', roles: [] };
+      cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, curVal);
+      render(); wire();
+    }); }
+    el.querySelectorAll('.dictChDel').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var curVal = cache[currentKey].value || {};
+        delete curVal[btn.getAttribute('data-ch')];
+        cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, curVal);
+        render(); wire();
+      });
+    });
+
+    /* 新增两列行 */
+    var addBtn = el.querySelector('#dictAddRow');
+    if(addBtn){ addBtn.addEventListener('click', function(){
+      cache[currentKey].value['新条目'] = currentKey === 'drill_role_by_target' || currentKey === 'target_role_aliases' ? 'duty'
+        : currentKey === 'drill_form_by_action' ? '' : 'P2';
+      cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, cache[currentKey].value);
+      render(); wire();
+    }); }
+    el.querySelectorAll('.dictTwoDel').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var row = btn.parentElement;
+        var inputs = row.querySelectorAll('input, select');
+        if(inputs.length < 2) return;
+        var k = (inputs[0].value || '').trim();
+        if(!k) return;
+        delete cache[currentKey].value[k];
+        cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, cache[currentKey].value);
+        render(); wire();
+      });
+    });
+
+    /* role_feed_mapping 新增/删除 */
+    var fmAddBtn = el.querySelector('#dictFMAdd');
+    if(fmAddBtn){ fmAddBtn.addEventListener('click', function(){
+      var v = cache[currentKey].value || {};
+      var firstFree = (MOCK.roles || []).map(function(r){ return r.id; }).find(function(id){ return !v[id]; });
+      if(!firstFree){ App.toast('所有角色已配置，删除后再添加','warn'); return; }
+      v[firstFree] = 'messages';
+      cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, v);
+      render(); wire();
+    }); }
+    el.querySelectorAll('.dictFMDel').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var k = btn.getAttribute('data-k');
+        var v = cache[currentKey].value || {};
+        delete v[k];
+        cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, v);
+        render(); wire();
+      });
+    });
+
+    /* drill_action_meta 新增 */
+    var metaAddBtn = el.querySelector('#dictMetaAdd');
+    if(metaAddBtn){ metaAddBtn.addEventListener('click', function(){
+      cache[currentKey].value['新动作'] = { alert:'', report:'', q:'', wrong:['','','','',''] };
+      cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, cache[currentKey].value);
+      render(); wire();
+    }); }
+
+    var reloadBtn = el.querySelector('#dictReloadBtn');
+    if(reloadBtn){ reloadBtn.addEventListener('click', function(){ load(currentKey); }); }
+
+    var saveBtn = el.querySelector('#dictSaveBtn');
+    if(saveBtn){ saveBtn.addEventListener('click', function(){
+      saveBtn.disabled = true;
+      var v = collectValue();
+      API.saveDict(currentKey, v).then(function(){
+        App.toast('字典已保存','ok');
+        cache[currentKey].value = v; cache[currentKey].dirty = false;
+        cache[currentKey].html = build(currentKey, v);
+        render(); wire();
+      }).catch(function(e){
+        var msg = (e && e.error) ? e.error : (e && e.message) || '保存失败';
+        if(e && e.error && e.error.errors){ msg = msg + '｜' + e.error.errors.join('；'); }
+        App.toast(msg,'err'); saveBtn.disabled = false;
+      });
+    }); }
+  }
+
+  function collectValue(){
+    var el = document.getElementById('edit-'+currentGroupKey);
+    if(!el) return null;
+    var arrKeys = ['ev_types', 'external_evidence_types', 'script_action_types'];
+    if(arrKeys.indexOf(currentKey) >= 0){
+      var items = el.querySelectorAll('.dictArrItem');
+      return Array.prototype.map.call(items, function(i){ return (i.value || '').trim(); }).filter(Boolean);
+    }
+    if(currentKey === 'kb_edit_roles'){
+      var items2 = el.querySelectorAll('.dictArrRole');
+      return Array.prototype.map.call(items2, function(i){ return (i.value || '').trim(); }).filter(Boolean);
+    }
+    if(currentKey === 'external_node_patterns'){
+      var orgs = el.querySelectorAll('.dictOrg[data-s="orgs"]');
+      var events = el.querySelectorAll('.dictOrg[data-s="events"]');
+      return {
+        orgs: Array.prototype.map.call(orgs, function(i){ return (i.value || '').trim(); }).filter(Boolean),
+        events: Array.prototype.map.call(events, function(i){ return (i.value || '').trim(); }).filter(Boolean)
+      };
+    }
+    if(currentKey === 'chat_channels'){
+      var chCards = el.querySelectorAll('.dictChKey');
+      var obj = {};
+      chCards.forEach(function(kInput){
+        var oldKey = kInput.getAttribute('data-oldkey');
+        var newKey = (kInput.value || '').trim();
+        if(!newKey) return;
+        var labelInput = el.querySelector('.dictChLabel[data-ch="'+oldKey+'"]');
+        var roles = [];
+        el.querySelectorAll('.dictChRole[data-ch="'+oldKey+'"]:checked').forEach(function(c){ roles.push(c.value); });
+        obj[newKey] = { label: labelInput ? (labelInput.value || '').trim() : '', roles: roles };
+      });
+      return obj;
+    }
+    if(currentKey === 'fill_roles_by_role' || currentKey === 'managed_roles_by_role'){
+      var scopeCards = el.querySelectorAll('.dict-group-card[data-k], .dictSRole, .dictSAll, .dict-group-card');
+      var obj2 = {};
+      el.querySelectorAll('.dictSAll').forEach(function(cb){
+        var k = cb.getAttribute('data-k');
+        var allBox = cb;
+        if(allBox && allBox.checked){ obj2[k] = null; return; }
+        var arr = [];
+        el.querySelectorAll('.dictSRole[data-k="'+k+'"]:checked').forEach(function(c){ arr.push(c.value); });
+        obj2[k] = arr.length ? arr : null;
+      });
+      return obj2;
+    }
+    if(currentKey === 'role_feed_mapping'){
+      var rows = el.querySelectorAll('[data-k]');
+      var objFm = {};
+      rows.forEach(function(row){
+        var k = row.getAttribute('data-k');
+        var vInput = row.querySelector('.dictFMValue');
+        var v = vInput ? (vInput.value || '').trim() : '';
+        if(k && v) objFm[k] = v;
+      });
+      return objFm;
+    }
+    if(currentKey === 'drill_action_meta'){
+      var obj3 = {};
+      el.querySelectorAll('tbody tr[data-action]').forEach(function(tr){
+        var cells = tr.querySelectorAll('input');
+        var action = (cells[0] && cells[0].value || '').trim(); if(!action) return;
+        obj3[action] = {
+          alert: cells[1] ? (cells[1].value || '').trim() : '',
+          report: cells[2] ? (cells[2].value || '').trim() : '',
+          q: cells[3] ? (cells[3].value || '').trim() : '',
+          wrong: [4,5,6,7,8].map(function(i){ return (cells[i]&&cells[i].value||'').trim(); }).filter(Boolean)
+        };
+      });
+      return obj3;
+    }
+    /* 通用两列 key→value */
+    var obj4 = {};
+    el.querySelectorAll('.dict-row').forEach(function(row){
+      var inputs = row.querySelectorAll('input, select');
+      if(inputs.length < 2) return;
+      var k = (inputs[0].value || '').trim(), v = (inputs[1].value || '').trim();
+      if(!k) return; obj4[k] = v;
+    });
+    return obj4;
+  }
+
+  /* ========== tab 点击切换逻辑 ========== */
+  document.addEventListener('click', function(ev){
+    var tab = ev.target.closest('.dict-tab');
+    if(!tab) return;
+    var key = tab.getAttribute('data-key');
+    if(!key) return;
+    var gKey = groupOfKey(key);
+    if(!gKey) return;
+    /* 自动展开所属分组 */
+    var groupCard = document.getElementById('edit-'+gKey);
+    if(groupCard){
+      var parentGroup = groupCard.closest('.dict-group');
+      if(parentGroup && parentGroup.classList.contains('collapsed')){
+        parentGroup.classList.remove('collapsed');
+      }
+    }
+    load(key);
+  });
+
+  /* 默认加载第一个字典 */
+  load('drill_role_by_target');
+});
+App.boot('dictionary');
+</script>
+</body>
+</html>

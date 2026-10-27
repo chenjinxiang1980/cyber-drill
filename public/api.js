@@ -223,8 +223,8 @@ window.API = (function () {
       return r;
     });
   }
-  function saveScriptNodes(scenarioId, nodes, alert, name) {
-    return DRILL.post('/content/script-nodes', { scenarioId: scenarioId, nodes: nodes, alert: alert, name: name }).then(function (r) {
+  function saveScriptNodes(scenarioId, nodes, alert, name, versionBump) {
+    return DRILL.post('/content/script-nodes', { scenarioId: scenarioId, nodes: nodes, alert: alert, name: name, versionBump: versionBump || 'minor' }).then(function (r) {
       var s = (MOCK.SCENARIOS || []).filter(function (x) { return x.id === scenarioId; })[0];
       if (s) {
         s.version = r.version;
@@ -340,25 +340,8 @@ window.API = (function () {
     return saveScores([{ itemId: itemId, score: score, max: 10, note: note }]);
   }
 
-  /* ---------- 台账 / 舆情 / 知识库 / 审计 ---------- */
+  /* ---------- 台账 / 知识库 / 审计 ---------- */
   function getLedger() { return DRILL.get('/content/ledger'); }
-  function getOpinions() { return DRILL.get('/content/opinion'); }
-  function addOpinion(o) {
-    return DRILL.post('/content/opinion', o).then(function (r) {
-      (MOCK.OPINION = MOCK.OPINION || []).push({
-        id: r.id, time: new Date().toTimeString().slice(0, 5), channel: o.channel || '人工录入',
-        title: o.title, heat: o.heat || '-', risk: o.risk || '一般', status: '待研判', source: o.source || '人工发布'
-      });
-      return r;
-    });
-  }
-  function updateOpinion(id, patch) {
-    return DRILL.patch('/content/opinion/' + encodeURIComponent(id), patch).then(function (r) {
-      var o = (MOCK.OPINION || []).filter(function (x) { return x.id === id; })[0];
-      if (o) Object.keys(patch || {}).forEach(function (k) { o[k] = patch[k]; });
-      return r;
-    });
-  }
   function getKnowledge() { return DRILL.get('/content/knowledge'); }
   function uploadKnowledge(formData) {
     return DRILL.upload('/content/knowledge', formData).then(function (r) {
@@ -369,6 +352,17 @@ window.API = (function () {
   function deleteKnowledge(id) {
     return DRILL.del('/content/knowledge/' + encodeURIComponent(id)).then(function (r) {
       MOCK.KNOWLEDGE = (MOCK.KNOWLEDGE || []).filter(function (k) { return k.id !== id; });
+      return r;
+    });
+  }
+  function updateKnowledge(id, patch) {
+    return DRILL.patch('/content/knowledge/' + encodeURIComponent(id), patch).then(function (r) {
+      if (r && r.doc) {
+        var list = MOCK.KNOWLEDGE || [];
+        var k = list.filter(function (x) { return x.id === id; })[0];
+        if (k) Object.keys(r.doc).forEach(function (key) { k[key] = r.doc[key]; });
+        else list.push(r.doc);
+      }
       return r;
     });
   }
@@ -462,6 +456,10 @@ window.API = (function () {
   function getBrand() { return DRILL.loadBrand(); }
   function saveBrand(payload) { return DRILL.api('/system/brand', { method: 'PUT', body: payload }); }
   function uploadBrandLogo(formData) { return DRILL.upload('/system/logo', formData); }
+  function getSystemStatus() { return DRILL.api('/system/status'); }
+  function resetSystem() { return DRILL.api('/system/reset', { method: 'POST', body: {} }); }
+  function getDict(key) { return DRILL.api('/system/dict/' + encodeURIComponent(key)); }
+  function saveDict(key, value) { return DRILL.api('/system/dict/' + encodeURIComponent(key), { method: 'PUT', body: { value: value } }); }
 
   /* ---------- 演练模式与自动考评（基础版 / 实战版） ---------- */
   function getDrillWorkbench(projectId) { return DRILL.get('/drill/workbench/' + encodeURIComponent(projectId)); }
@@ -491,8 +489,8 @@ window.API = (function () {
     getSnapshots: getSnapshots, addSnapshot: addSnapshot,
     getTimeline: getTimeline, getSeqFlow: getSeqFlow, saveSeqFlow: saveSeqFlow,
     getScoreItems: getScoreItems, getScores: getScores, saveScore: saveScore, saveScores: saveScores,
-    getLedger: getLedger, getOpinions: getOpinions, addOpinion: addOpinion, updateOpinion: updateOpinion,
-    getKnowledge: getKnowledge, uploadKnowledge: uploadKnowledge, deleteKnowledge: deleteKnowledge, getAuditLogs: getAuditLogs, addAudit: addAudit,
+    getLedger: getLedger,
+    getKnowledge: getKnowledge, uploadKnowledge: uploadKnowledge, deleteKnowledge: deleteKnowledge, updateKnowledge: updateKnowledge, getAuditLogs: getAuditLogs, addAudit: addAudit,
     getImpact: getImpact, updateImpact: updateImpact, getDict: getDict, actSim: actSim,
     getUsers: getUsers, getRoles: getRoles,
     adminUsers: adminUsers, addUser: addUser, updateUser: updateUser, resetUserPassword: resetUserPassword,
@@ -501,6 +499,8 @@ window.API = (function () {
     adminForms: adminForms, addFormTemplate: addFormTemplate, updateFormTemplate: updateFormTemplate,
     backupData: backupData, listBackups: listBackups, sysinfo: sysinfo,
     getBrand: getBrand, saveBrand: saveBrand, uploadBrandLogo: uploadBrandLogo,
+    getSystemStatus: getSystemStatus, resetSystem: resetSystem,
+    getDict: getDict, saveDict: saveDict,
     getDrillReport: getDrillReport, markReportExported: markReportExported,
     getDrillWorkbench: getDrillWorkbench,
     getDrillFlows: getDrillFlows, getDrillFaults: getDrillFaults,

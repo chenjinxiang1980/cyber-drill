@@ -88,7 +88,6 @@ window.DRILL = (function () {
     MOCK.SCORE_ITEMS = d.scoreItems || [];
     MOCK.SCORES = d.scores || [];
     MOCK.LEDGER = d.ledger || [];
-    MOCK.OPINION = d.opinion || [];
     MOCK.KNOWLEDGE = d.knowledge || [];
     MOCK.AUDIT_LOGS = d.auditLogs || [];
     MOCK.IMPACT = d.impact || [];

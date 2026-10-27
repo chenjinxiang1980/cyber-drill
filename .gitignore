@@ -2,3 +2,33 @@
 .gh-config/
 *.db-wal
 *.db-shm
+
+# dependencies
+node_modules/
+
+# temp scripts
+tmp_*.js
+
+# database backups
+data/backups/
+data/_merge_verify.db
+data/_merge_verify.db-*
+data/_tmp_brand.db
+data/_tmp_brand.db-*
+data/server.out.log
+data/server.err.log
+
+# IDE / agent
+.trae/
+.trae-html-share-packages/
+
+# uploads
+uploads/
+
+# env
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db

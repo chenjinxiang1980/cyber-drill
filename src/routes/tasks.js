@@ -12,15 +12,17 @@ const notify = require('../notify');
 
 const router = express.Router();
 const upload = makeUploader('tasks');
+const drillDict = require('../drill_dict');
 
-const MANAGED_ROLES = ['itlead', 'duty', 'netsec', 'sysadmin'];
-
-/* 校验任务可见性 */
+/* 校验任务可见性：信息科负责人可统筹条线角色，其他角色仅自己 */
 function taskAccess(user, task) {
   const rid = user.role.id;
   if (rid === 'commander') return true;
-  /* 仅信息科负责人可统筹处置本科室条线任务 */
-  if (rid === 'itlead') return MANAGED_ROLES.indexOf(task.role_id) >= 0;
+  /* 统筹角色（command/platformadmin）看全部，条线负责人（itlead）看可统筹范围，其余只看自己 */
+  const mbr = drillDict.get(db, 'managed_roles_by_role', { platformadmin: null, commander: null, itlead: ['itlead','duty','netsec','sysadmin'] });
+  const scope = mbr[rid];
+  if (scope === null) return true;                /* null = 全部 */
+  if (Array.isArray(scope) && scope.indexOf(task.role_id) >= 0) return true;
   return task.role_id === rid;
 }
 

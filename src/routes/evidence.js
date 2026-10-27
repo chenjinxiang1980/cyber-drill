@@ -7,53 +7,39 @@ const { db, parseJson } = require('../db');
 const auth = require('../auth');
 const { makeUploader, handleUploadError, UPLOAD_DIR } = require('../upload');
 const { now, hhmm, fmtSize, safeName } = require('../util');
+const drillDict = require('../drill_dict');
 
 const router = express.Router();
 const upload = makeUploader('evidence');
 
-const EXTERNAL_EVIDENCE_TYPES = ['表单文书', '上报材料', '报案材料'];
-
-/* 剧本节点的责任角色名称 → 角色ID（兼容历史剧本中的不同写法） */
-const TARGET_ROLE = {
-  '院应急指挥部': 'commander',
-  '信息科值班员': 'duty',
-  '网络安全管理员': 'netsec',
-  '系统管理员': 'sysadmin',
-  '信息科负责人': 'itlead',
-  '医务科主任': 'medlead', '医务部主任': 'medlead', '门诊部主任': 'medlead', '医务部/门诊部负责人': 'medlead',
-  '临床科室': 'clinical', '收费窗口': 'clinical', '临床科室/收费窗口': 'clinical',
-  '市卫生健康局': 'healthbureau', '卫健委': 'healthbureau',
-  '市委网信办': 'cac', '市网信办': 'cac',
-  '市网安大队': 'cyberpolice', '公安网安': 'cyberpolice'
-};
-
-/* 各角色可负责取证的责任角色范围（null 表示全部；与分级权限隔离一致） */
-const FILL_ROLES = {
-  platformadmin: null,
-  commander: null,
-  itlead: ['itlead', 'duty', 'netsec', 'sysadmin'],
-  duty: ['duty'],
-  netsec: ['netsec'],
-  sysadmin: ['sysadmin'],
-  medlead: ['medlead'],
-  clinical: ['clinical'],
-  healthbureau: ['healthbureau'],
-  cac: ['cac'],
-  cyberpolice: ['cyberpolice']
-};
-
 function roleIdOfTarget(target) {
+  const aliases = drillDict.get(db, 'target_role_aliases', {
+    '院应急指挥部': 'commander', '信息科值班员': 'duty', '网络安全管理员': 'netsec',
+    '系统管理员': 'sysadmin', '信息科负责人': 'itlead',
+    '医务科主任': 'medlead', '医务部主任': 'medlead', '门诊部主任': 'medlead', '医务部/门诊部负责人': 'medlead',
+    '临床科室': 'clinical', '收费窗口': 'clinical', '临床科室/收费窗口': 'clinical',
+    '市卫生健康局': 'healthbureau', '卫健委': 'healthbureau',
+    '市委网信办': 'cac', '市网信办': 'cac',
+    '市网安大队': 'cyberpolice', '公安网安': 'cyberpolice'
+  });
   const t = String(target || '').trim();
-  if (TARGET_ROLE[t]) return TARGET_ROLE[t];
-  const hit = Object.keys(TARGET_ROLE).filter(function (k) { return t && (t.indexOf(k) >= 0 || k.indexOf(t) >= 0); })[0];
-  return hit ? TARGET_ROLE[hit] : '';
+  if (aliases[t]) return aliases[t];
+  const hit = Object.keys(aliases).filter(function (k) { return t && (t.indexOf(k) >= 0 || k.indexOf(t) >= 0); })[0];
+  return hit ? aliases[hit] : '';
 }
 
 /* 当前用户是否可为本节点取证（不能由一个角色一次性填充全部材料） */
 function canFillNode(user, node) {
   if (!node) return false;
   if (user.role.external) return false;
-  const allow = FILL_ROLES[user.role.id];
+  const fillRoles = drillDict.get(db, 'fill_roles_by_role', {
+    platformadmin: null, commander: null,
+    itlead: ['itlead', 'duty', 'netsec', 'sysadmin'],
+    duty: ['duty'], netsec: ['netsec'], sysadmin: ['sysadmin'],
+    medlead: ['medlead'], clinical: ['clinical'],
+    healthbureau: ['healthbureau'], cac: ['cac'], cyberpolice: ['cyberpolice']
+  });
+  const allow = fillRoles[user.role.id];
   if (!allow) return true;
   return allow.indexOf(roleIdOfTarget(node.target)) >= 0;
 }
@@ -67,8 +53,9 @@ function decodeName(raw) {
 
 function visible(user, rows) {
   if (!user.role.external) return rows;
+  const extTypes = drillDict.get(db, 'external_evidence_types', ['表单文书', '上报材料', '报案材料']);
   return rows.filter(function (e) {
-    return EXTERNAL_EVIDENCE_TYPES.indexOf(e.type) >= 0 || ['itlead', 'commander'].indexOf(e.role_id) >= 0;
+    return extTypes.indexOf(e.type) >= 0 || ['itlead', 'commander'].indexOf(e.role_id) >= 0;
   });
 }
 

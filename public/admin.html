@@ -20,6 +20,16 @@ table.mx-table td:first-child, table.mx-table th:first-child{text-align:left;whi
 tr.ext td{background:rgba(210,153,34,.07)}
 .adm-pane{display:none} .adm-pane.on{display:block}
 
+/* ===== 权限矩阵：双方向粘性锁定 ===== */
+#pane-matrix .table-wrap{max-height:calc(100vh - 320px);max-height:calc(100dvh - 320px);overflow:auto}
+table.mx-table thead th{position:sticky;top:0;z-index:10;background:var(--elev);box-shadow:0 1px 0 var(--border)}
+table.mx-table th:first-child,
+table.mx-table td:first-child{position:sticky;left:0;z-index:5;background:var(--panel);box-shadow:1px 0 0 var(--border)}
+table.mx-table thead th:first-child{z-index:20;background:var(--elev);box-shadow:1px 1px 0 var(--border)}
+table.mx-table tr.ext td:first-child{background:rgba(210,153,34,.07)}
+table.mx-table tr:hover td:first-child{background:var(--hover)}
+table.mx-table tr.ext:hover td:first-child{background:rgba(210,153,34,.14)}
+
 </style>
 </head>
 <body data-page="admin">
@@ -38,12 +48,12 @@ document.addEventListener('app:ready', function(e){
   var auditPage = 1;
   var auditPageSize = 10;
   var BRAND_ADMIN = role.id === 'platformadmin'; /* 系统设置仅平台管理员可维护 */
-  var MODS = [['dashboard','演练看板'],['workbench','角色工作台'],['collab','演练导调'],['scenarios','剧本库与编排'],['projects','演练项目'],['screen','监视大屏'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['report','演练报告'],['ledger','台账统计'],['opinion','公告舆情'],['knowledge','预案知识库'],['admin','系统管理']];
+  var MODS = [['dashboard','演练看板'],['workbench','角色工作台'],['collab','演练导调'],['scenarios','剧本库与编排'],['projects','演练项目'],['screen','监视大屏'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['report','演练报告'],['ledger','台账统计'],['knowledge','预案知识库'],['admin','系统设置'],['dictionary','流程字典']];
   function roleName(id){ var r = MOCK.ROLES.filter(function(x){ return x.id===id; })[0]; return r ? r.name : id; }
   function objOf(a){ var m = a.match(/《(.+?)》/); if(m) return m[1]; var i = a.indexOf('：'); return i>=0 ? a.slice(i+1) : '—'; }
 
   page.innerHTML =
-    '<div class="page-head"><div><h1>系统基础管理</h1><div class="sub">账号 · 权限矩阵 · 表单模板 · 审计日志 · 通知与备份（'+App.esc(role.name)+'）</div></div></div>'
+    '<div class="page-head"><div><h1>系统设置</h1><div class="sub">账号 · 权限矩阵 · 表单模板 · 审计日志 · 通知与备份（'+App.esc(role.name)+'）</div></div></div>'
     + '<div class="sim-banner">'+App.icon('alert')+'<span>本页面所有增删改操作均为<b>演练平台自身配置模拟</b>，不触达医院真实生产系统与数据。</span></div>'
     + '<div class="tabs" id="admTabs">'
     +   '<div class="tab active" data-t="users">'+App.icon('user')+'用户账号</div>'
@@ -51,7 +61,7 @@ document.addEventListener('app:ready', function(e){
     +   '<div class="tab" data-t="forms">'+App.icon('file')+'表单模板</div>'
     +   '<div class="tab" data-t="audit">'+App.icon('eye')+'审计日志</div>'
     +   '<div class="tab" data-t="ops">'+App.icon('db')+'通知与备份</div>'
-    +   (BRAND_ADMIN ? '<div class="tab" data-t="brand">'+App.icon('admin')+'系统设置</div>' : '')
+    +   (BRAND_ADMIN ? '<div class="tab" data-t="brand">'+App.icon('admin')+'基本信息设置</div>' : '')
     + '</div>'
     + '<div class="adm-pane on" id="pane-users">'
     +   '<div class="card"><div class="card-title">'+App.icon('user')+'用户账号<span class="more" id="uAddBtn">'+App.icon('plus')+'新增用户</span></div>'
@@ -76,7 +86,7 @@ document.addEventListener('app:ready', function(e){
     +   '<div class="pager" id="aPager"></div></div>'
     + '</div>'
     + '<div class="adm-pane" id="pane-ops">'
-    +   '<div class="grid grid-2">'
+    +   '<div class="grid '+(BRAND_ADMIN?'grid-3':'grid-2')+'" style="align-items:start">'
     +     '<div class="card"><div class="card-title">'+App.icon('bell')+'站内消息通知<span class="more tiny dim">默认开启 · 无需配置</span></div>'
     +       '<div class="kv">'
     +         '<span class="k">消息渠道</span><span>站内消息（唯一渠道）</span>'
@@ -84,6 +94,11 @@ document.addEventListener('app:ready', function(e){
     +         '<span class="k">查看方式</span><span>点击页面右上角铃铛查看，角标数字为未读消息数</span>'
     +       '</div>'
     +       '<div class="tiny dim mt3">已取消短信、邮件模拟渠道配置；所有提醒仅在演练平台内展示，不对外发送。</div></div>'
+    +     (BRAND_ADMIN ? '<div class="card"><div class="card-title danger">'+App.icon('trash')+'系统初始化<span class="more tiny dim">慎用：清空全部业务数据</span></div>'
+    +       '<div id="rsStatus" class="tiny dim" style="padding:10px;background:var(--elev);border-radius:var(--r-sm);line-height:1.7">加载中…</div>'
+    +       '<div class="flex gap3 mt4"><button class="btn danger" id="rsBtn" style="width:100%">'+App.icon('trash')+'重置系统为初始状态</button></div>'
+    +       '<div class="tiny dim mt3" style="line-height:1.8">会清空：角色权限、账号、场景剧本、项目任务、会商/取证/台账/评分/审计日志、表单模板。<br><b style="color:var(--warn)">不会删除</b>：uploads/ 上传文件、data/backups/ 备份文件。<br>重置后当前登录态失效，需用初始密码重新登录。</div>'
+    +     '</div>' : '')
     +     '<div class="card"><div class="card-title">'+App.icon('db')+'数据备份</div>'
     +       '<div class="kv"><span class="k">备份范围</span><span>账号配置 / 剧本库 / 台账 / 审计日志 / 取证档案索引</span>'
     +       '<span class="k">上次备份</span><span class="mono" id="bkLast">读取中…</span>'
@@ -95,23 +110,33 @@ document.addEventListener('app:ready', function(e){
     + '</div>'
     + (BRAND_ADMIN ?
       '<div class="adm-pane" id="pane-brand">'
-      + '<div class="card"><div class="card-title">'+App.icon('admin')+'系统设置<span class="more tiny dim">保存后同步到登录页、大屏与全部业务页面</span></div>'
-      +   '<div class="form-grid">'
+      + '<div class="grid grid-3">'
+      + '<div class="card"><div class="card-title">'+App.icon('admin')+'系统基本信息</div>'
+      +   '<div class="form-grid" style="grid-template-columns:1fr">'
       +     '<div class="form-row"><label class="f-label">系统名称 <span class="req">*</span></label><input class="input" id="bsName" maxlength="40" placeholder="如 网络安全应急演练系统"></div>'
       +     '<div class="form-row"><label class="f-label">单位名称 <span class="req">*</span></label><input class="input" id="bsUnit" maxlength="40" placeholder="如 盘州市人民医院"></div>'
       +     '<div class="form-row"><label class="f-label">版本信息</label><input class="input" id="bsVer" maxlength="20" placeholder="如 v0.1.7"></div>'
+      +   '</div>'
+      +   '<div class="flex gap3 mt4"><button class="btn primary" id="bsSaveBtn" style="flex:1">'+App.icon('check')+'保存设置</button><button class="btn" id="bsResetBtn">'+App.icon('refresh')+'恢复默认</button></div>'
+      +   '<div class="tiny dim mt3">保存后同步到登录页、大屏与全部业务页面。</div>'
+      + '</div>'
+      + '<div class="card"><div class="card-title">'+App.icon('github')+'项目仓库链接</div>'
+      +   '<div class="form-grid" style="grid-template-columns:1fr">'
       +     '<div class="form-row"><label class="f-label">GitHub 项目地址</label><input class="input" id="bsGh" type="url" placeholder="https://github.com/..."></div>'
       +     '<div class="form-row"><label class="f-label">Gitee 项目地址</label><input class="input" id="bsGe" type="url" placeholder="https://gitee.com/..."></div>'
       +   '</div>'
-      +   '<div class="section-title mt4">单位 Logo</div>'
-      +   '<div class="flex gap4" style="align-items:center;flex-wrap:wrap">'
-      +     '<span class="logo" style="width:64px;height:64px;border-radius:50%;background:#fff;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;padding:3px;overflow:hidden;flex:none"><img id="bsLogo" src="img/logo.png" alt="单位 Logo" style="width:100%;height:100%;object-fit:contain;border-radius:50%"></span>'
-      +     '<div class="grow" style="min-width:240px"><input class="input" type="file" id="bsLogoFile" accept="image/png,image/jpeg,image/webp,image/gif"><div class="tiny dim mt2">支持 PNG / JPG / WebP / GIF，单个文件 ≤ 2MB，保存路径 uploads/system/</div></div>'
-      +     '<button class="btn" id="bsUploadBtn">'+App.icon('upload')+'上传 Logo</button>'
+      +   '<div class="tiny dim mt3">两个仓库地址会展示在侧边栏底部登录信息区。</div>'
+      + '</div>'
+      + '<div class="card"><div class="card-title">'+App.icon('building')+'单位 Logo</div>'
+      +   '<div style="display:flex;flex-direction:column;gap:var(--sp3);align-items:center">'
+      +     '<span class="logo" style="width:80px;height:80px;border-radius:50%;background:#fff;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;padding:4px;overflow:hidden"><img id="bsLogo" src="img/logo.png" alt="单位 Logo" style="width:100%;height:100%;object-fit:contain;border-radius:50%"></span>'
+      +     '<input class="input" type="file" id="bsLogoFile" accept="image/png,image/jpeg,image/webp,image/gif">'
+      +     '<button class="btn primary" id="bsUploadBtn" style="width:100%">'+App.icon('upload')+'上传并应用</button>'
+      +     '<div class="tiny dim" style="text-align:center">PNG / JPG / WebP / GIF<br>单个文件 ≤ 2MB</div>'
       +   '</div>'
-      +   '<div class="flex gap3 mt4"><button class="btn primary" id="bsSaveBtn">'+App.icon('check')+'保存设置</button><button class="btn" id="bsResetBtn">'+App.icon('refresh')+'恢复默认值</button></div>'
-      +   '<div class="tiny dim mt3">系统名称、单位名称、Logo、版本信息保存后即时同步到登录页、演练监视大屏及登录后各页面的侧边栏与页面标题；GitHub / Gitee 图标在侧边栏底部登录信息区展示。</div>'
-      + '</div></div>' : '')
+      + '</div>'
+      + '</div>'
+      + '</div>' : '')
     + '';
 
   /* ---------- 页签 ---------- */
@@ -181,7 +206,7 @@ document.addEventListener('app:ready', function(e){
         ov.querySelector('#euYes').onclick = function(){
           var acc = ov.querySelector('#euAcc').value.trim();
           var nm = ov.querySelector('#euName').value.trim();
-          var org = ov.querySelector('#euOrg').value.trim() || '盘州市人民医院';
+          var org = ov.querySelector('#euOrg').value.trim() || ((DRILL.brand()||{}).unitName) || '盘州市人民医院';
           var roles = Array.prototype.slice.call(ov.querySelectorAll('.euRole:checked')).map(function(x){ return x.value; });
           if(!/^[A-Za-z0-9_.-]{3,32}$/.test(acc)){ App.toast('账号需为 3-32 位字母、数字或 _ . -','err'); return; }
           if(!nm){ App.toast('姓名必填','err'); return; }
@@ -646,8 +671,62 @@ document.addEventListener('app:ready', function(e){
     };
   }
 
+  /* ---------- g) 系统重置（仅平台管理员） ---------- */
+  function initReset(){
+    var btn = document.getElementById('rsBtn');
+    var statusEl = document.getElementById('rsStatus');
+    function refreshStatus(){
+      API.getSystemStatus().then(function(s){
+        if(!s){ statusEl.textContent = '无法获取状态'; return; }
+        var c = s.counts || {};
+        var t = s.initializedAt ? new Date(Number(s.initializedAt)*1000).toLocaleString('zh-CN') : '（未初始化）';
+        statusEl.innerHTML =
+          '初始化时间：'+App.esc(t)+' &nbsp;|&nbsp; '
+          +'活动项目：'+App.esc(s.activeProject||'—')+' &nbsp;|&nbsp; '
+          +'角色 <b>'+(c.roles||0)+'</b> · 用户 <b>'+(c.users||0)+'</b> · 场景 <b>'+(c.scenarios||0)+'</b> · 项目 <b>'+(c.projects||0)+'</b>'
+          +' · 剧本节点 <b>'+(c.script_nodes||0)+'</b> · 表单 <b>'+(c.form_templates||0)+'</b> · 知识库 <b>'+(c.knowledge||0)+'</b>';
+      }).catch(function(){ statusEl.textContent = '状态获取失败'; });
+    }
+    refreshStatus();
+    btn.onclick = function(){
+      App.modal({
+        title: '⚠️ 即将执行系统重置',
+        body:
+          '<div style="line-height:1.9">'
+          +'<div style="margin-bottom:10px;font-weight:600;color:var(--red)">以下数据将被清空并恢复到初始基线：</div>'
+          +'<div>✅ 11 个角色权限矩阵</div>'
+          +'<div>✅ 11 个内置账号（admin / yuanzhang / liming …）</div>'
+          +'<div>✅ 8 类演练场景（S01–S08）与全部剧本节点</div>'
+          +'<div>✅ 示例项目、任务编排</div>'
+          +'<div>✅ 所有会商记录、取证材料、台账、评分、审计日志</div>'
+          +'<div>✅ 内置表单模板（F1–F8）</div>'
+          +'<div style="margin-top:12px;color:var(--green)">不会删除：uploads/ 上传文件、data/backups/ 数据库备份</div>'
+          +'<div style="margin-top:12px;color:var(--red)">⚠️ 重置后当前登录态将失效，需用初始密码 <code>Pzy@2026</code> 重新登录</div>'
+          +'</div>',
+        footer: '<button class="btn" id="rsCancel">取消</button><button class="btn danger" id="rsConfirm">确认重置</button>',
+        onOpen: function(m){
+          m.querySelector('#rsCancel').onclick = function(){ m.remove(); };
+          m.querySelector('#rsConfirm').onclick = function(){
+            var b = m.querySelector('#rsConfirm');
+            b.disabled = true; b.textContent = '重置中…';
+            API.resetSystem().then(function(r){
+              m.remove();
+              App.toast('系统已重置为初始基线，即将跳转登录页…','ok');
+              setTimeout(function(){ DRILL.logout(); }, 1500);
+            }).catch(function(e){
+              m.remove();
+              refreshStatus();
+              App.toast((e&&e.message)||'重置失败','err');
+            });
+          };
+        }
+      });
+    };
+  }
+
+
   renderUsers(); renderForms(); renderAudit(); loadLastBackup();
-  if(BRAND_ADMIN) initBrand();
+  if(BRAND_ADMIN){ initBrand(); initReset(); }
 });
 App.boot('admin');
 </script>

@@ -54,7 +54,9 @@ document.addEventListener('app:ready', function(e){
   var page = document.getElementById('page');
   var ext = !!role.external;
   var TYPE_CLS = { '操作日志':'gray','附件截图':'blue','聊天记录':'purple','表单文书':'green','处置记录':'yellow','样本摘要':'red','状态变更':'blue','附件':'blue','上报材料':'green','报案材料':'green' };
-  var TYPES = ['附件截图','操作日志','处置记录','样本摘要','表单文书','上报材料','报案材料','附件'];
+  /* DEFAULT_TYPES 与 src/seed_data.js DICT.ev_types 保持一致 */
+  var DEFAULT_TYPES = ['附件截图','操作日志','处置记录','样本摘要','表单文书','上报材料','报案材料','附件'];
+  var TYPES = (Array.isArray(MOCK.DICT.ev_types) && MOCK.DICT.ev_types.length) ? MOCK.DICT.ev_types : DEFAULT_TYPES;
   var MAX_MB = 20;
   var BAD_EXT = /\.(exe|bat|cmd|com|scr|pss?1|vbs|js|jse|jar|msi|dll|apk|sh|py|psm1|hta|lnk)$/i;
 
