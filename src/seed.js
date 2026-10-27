@@ -7,6 +7,7 @@
  */
 'use strict';
 const path = require('node:path');
+const fs = require('node:fs');
 
 process.env.DRILL_DB = process.env.DRILL_DB || path.join(__dirname, '..', 'data', 'drill.db');
 const { db, migrate, isSeeded, tx } = require('./db');
@@ -156,11 +157,59 @@ function exportBaseline(version, note) {
   return { version: version, note: note, created_at: ts };
 }
 
+/* ---------- 剧本节点快照备份 ---------- */
+const BACKUP_DIR = path.join(__dirname, '..', 'data', 'backups');
+function ensureBackupDir() {
+  if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
+/* 备份 script_nodes 到 JSON（在 seed/apply 覆盖前自动调用） */
+function snapshotScriptNodes(db, label) {
+  ensureBackupDir();
+  const rows = db.prepare('SELECT * FROM script_nodes ORDER BY scenario_id, seq').all();
+  if (!rows.length) return null;
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const fname = 'script-nodes-' + ts + (label ? '-' + label : '') + '.json';
+  const fpath = path.join(BACKUP_DIR, fname);
+  const pack = {
+    meta: { label: label || 'auto', at: new Date().toISOString(), count: rows.length },
+    nodes: rows.map(function (r) {
+      const o = {};
+      Object.keys(r).forEach(function (k) { o[k] = r[k]; });
+      return o;
+    })
+  };
+  fs.writeFileSync(fpath, JSON.stringify(pack, null, 2), 'utf-8');
+  // 只留最近 20 份
+  const all = fs.readdirSync(BACKUP_DIR).filter(function (f) { return f.startsWith('script-nodes-'); });
+  if (all.length > 20) {
+    all.sort().slice(0, all.length - 20).forEach(function (f) {
+      try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch (e) {}
+    });
+  }
+  console.log('[seed] script_nodes 已备份 → data/backups/' + fname + '（' + rows.length + '条）');
+  return fpath;
+}
+
 /* 将 scenario baseline 中的剧本节点写入数据库
  * 接受 SBLx = { SCEN, MAIN_DEPS, PROJECT_MODE }，兼容老格式（元组数组）和新格式（完整对象）
  * 此函数是自包含的，不依赖 scenario_baseline.js，确保 seed_baseline 可独立完成初始化
+ *
+ * 安全机制：
+ *   - 默认行为：script_nodes 表已有数据则**跳过**（不会覆盖用户编辑）
+ *   - force=true：无条件覆盖（会先自动备份）
+ *   - 备份文件保存在 data/backups/ 目录，保留最近 20 份
  */
-function applyScenarioNodes(db, SBLx, today) {
+function applyScenarioNodes(db, SBLx, today, opts) {
+  opts = opts || {};
+  const force = !!opts.force;
+  const _cnt = db.prepare('SELECT COUNT(*) c FROM script_nodes').get();
+  if (!force && _cnt.c > 0) {
+    console.log('[seed] script_nodes 已有 ' + _cnt.c + ' 条数据，跳过 apply（如需强制覆盖请显式 force=true）');
+    return { skipped: true, reason: 'has_data', count: _cnt.c };
+  }
+  if (force && _cnt.c > 0) {
+    snapshotScriptNodes(db, 'pre-force-apply');
+  }
   const _SCEN = (SBLx && SBLx.SCEN) || {};
   const _MAIN_DEPS = (SBLx && SBLx.MAIN_DEPS) || {};
   const _PROJECT_MODE = (SBLx && SBLx.PROJECT_MODE) || {};

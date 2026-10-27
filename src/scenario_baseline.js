@@ -1,7 +1,14 @@
 /* 场景剧本基线数据：8 类医院网络安全应急演练的标准处置剧本
  * 本文件由 DB 数据反向生成（2026-10-28），包含完整坐标、parallel_desc 等字段
  * apply() 函数已同步更新：INSERT 支持 posX/posY/parallel_desc
+ *
+ * 安全机制（apply 函数）：
+ *   - 默认：script_nodes 表已有数据则跳过（保护前端画布编辑成果）
+ *   - force=true：先自动备份到 data/backups/，再无条件覆盖
  */
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
 
 const SCEN = {};
 const MAIN_DEPS = {};
@@ -3951,6 +3958,24 @@ const PROJECT_MODE = {};
 
 function apply(db, opts) {
   opts = opts || {};
+  const force = !!opts.force;
+
+  /* ---------- 安全前置：空表检查 + 强制覆盖前自动备份 ---------- */
+  const _cnt = db.prepare('SELECT COUNT(*) c FROM script_nodes').get();
+  if (!force && _cnt.c > 0) {
+    console.log('[baseline.apply] script_nodes 已有 ' + _cnt.c + ' 条数据，跳过 apply（如需强制覆盖显式传 force=true）');
+    return [{ scenario_id: 'ALL', nodes: _cnt.c, skipped: true }];
+  }
+  if (force && _cnt.c > 0) {
+    const BACKUP_DIR = path.join(__dirname, '..', 'data', 'backups');
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const rows = db.prepare('SELECT * FROM script_nodes ORDER BY scenario_id, seq').all();
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const fname = 'script-nodes-' + ts + '-pre-apply.json';
+    fs.writeFileSync(path.join(BACKUP_DIR, fname), JSON.stringify({ meta: { at: new Date().toISOString(), count: rows.length, label: 'baseline-apply-force' }, nodes: rows }, null, 2), 'utf-8');
+    console.log('[baseline.apply] 强制覆盖前已备份 → data/backups/' + fname + '（' + rows.length + '条）');
+  }
+
   const _SCEN = opts.scenarioData && opts.scenarioData.SCEN ? opts.scenarioData.SCEN : SCEN;
   const _MAIN_DEPS = opts.scenarioData && opts.scenarioData.MAIN_DEPS ? opts.scenarioData.MAIN_DEPS : MAIN_DEPS;
   const _PROJECT_MODE = opts.scenarioData && opts.scenarioData.PROJECT_MODE ? opts.scenarioData.PROJECT_MODE : PROJECT_MODE;
