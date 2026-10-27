@@ -190,7 +190,7 @@ window.ReportPage = (function () {
       + '<tr><td class="k">演练日期</td><td>'+App.esc(p.date)+'</td><td class="k">演练地点</td><td>院内演练环境（独立演练服务器，与生产网物理隔离）</td></tr>'
       + '<tr><td class="k">参演单位</td><td colspan="3">'+App.esc((p.units||[]).join('、')||'盘州市人民医院')+'</td></tr>'
       + '<tr><td class="k">演练目标</td><td colspan="3">'+App.esc(p.target||'—')+'</td></tr>'
-      + '<tr><td class="k">场景剧本</td><td colspan="3">'+App.esc(sc?sc.name+'（'+sc.version+'）':'—')+(sc?('，事件类型'+App.esc(sc.type)+'，剧本节点 '+sc.nodes+' 个'):'')+'</td></tr>'
+      + '<tr><td class="k">场景剧本</td><td colspan="3">'+App.esc(sc?sc.name+'（'+sc.version+'）':'—')+(sc?('，剧本节点 '+sc.nodes+' 个'):'')+'</td></tr>'
       + '</table>';
 
     var s2 = '<h2>二、演练组织与职责分工</h2><table><tr><th style="width:26%">参演角色</th><th style="width:20%">参演人员</th><th>主要职责</th></tr>'
@@ -262,7 +262,7 @@ window.ReportPage = (function () {
     }
 
     var s10 = '<h2>十、演练结论</h2><p>'+App.esc(conclusion)+'</p>'
-      + '<p>通过本次演练，检验了医院在「'+App.esc(sc?sc.type:'网络安全事件')+'」场景下的监测发现、研判决策、协同处置、业务兜底与上报取证能力，演练过程全程留痕、可回溯、可复盘。演练中形成的处置流程与改进建议，应纳入医院网络安全应急预案修订与年度培训计划。</p>';
+      + '<p>通过本次演练，检验了医院在「'+App.esc(sc?sc.name:'本次演练')+'」场景下的监测发现、研判决策、协同处置、业务兜底与上报取证能力，演练过程全程留痕、可回溯、可复盘。演练中形成的处置流程与改进建议，应纳入医院网络安全应急预案修订与年度培训计划。</p>';
 
     var s11 = '<h2>十一、附件</h2><ol>'
       + (o.tl ? '<li>附件1　处置流程时序表及关键操作记录（见第四章）</li>' : '')

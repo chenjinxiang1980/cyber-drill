@@ -131,15 +131,20 @@ router.post('/:id/complete', auth.requireAuth, loadTask, function (req, res) {
     .run(t.project_id, hhmm(), req.user.name, req.user.role.id, '任务完成',
       '任务 ' + t.id + ' 已完成，处置留痕已归档', '', nextSeq(t.project_id));
   auth.audit(req, '完成任务 ' + t.id);
-  /* 站内消息：节点完成情况与当前节点进度 */
+  /* 站内消息：节点完成（模板驱动） */
   const proj = db.prepare('SELECT name FROM projects WHERE id=?').get(t.project_id);
   const prog = db.prepare("SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status='已完成' THEN 1 ELSE 0 END),0) AS done FROM tasks WHERE project_id=?").get(t.project_id);
   notify.push({
-    title: '节点完成 · ' + t.title,
-    desc: '演练项目「' + (proj ? proj.name : t.project_id) + '」任务 ' + t.id + ' 已由 ' + req.user.name
-      + '（' + req.user.role.name + '）完成，已完成 ' + (prog ? prog.done : 0) + '/' + (prog ? prog.total : 0) + ' 个节点。',
-    level: 'P2',
-    source: '角色工作台'
+    event: 'node_done',
+    vars: {
+      title: t.title,
+      project: proj ? proj.name : t.project_id,
+      taskId: t.id,
+      user: req.user.name,
+      role: req.user.role.name,
+      done: prog ? prog.done : 0,
+      total: prog ? prog.total : 0
+    }
   });
   res.json({ ok: true, status: '已完成' });
 });

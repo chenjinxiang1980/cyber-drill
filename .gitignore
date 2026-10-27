@@ -9,6 +9,16 @@ node_modules/
 # temp scripts
 tmp_*.js
 
+# stray temp DBs (accidental writes to cwd)
+datadrill.db
+*.db
+!data/drill.db
+
+# extracted documents from user uploads
+*_extracted.md
+预案*.md
+应急预案*.md
+
 # database backups
 data/backups/
 data/_merge_verify.db

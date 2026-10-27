@@ -16,6 +16,44 @@ document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
   var proj = API.activeProject();
+
+  /* ---------- 无演练项目：展示待机空态 ---------- */
+  if (!proj) {
+    Promise.all([API.getScenarios(), API.getProjects(), API.getScriptNodes()]).then(function(r){
+      var scens = Array.isArray(r[0]) ? r[0] : [];
+      var projs = Array.isArray(r[1]) ? r[1] : [];
+      var nodes = Array.isArray(r[2]) ? r[2] : [];
+      page.innerHTML =
+        '<div class="standby-hero">'
+        + '<div class="sb-icon" style="background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.28);color:var(--ok)">'+App.icon('workbench')+'</div>'
+        + '<div class="sb-body">'
+        +   '<span class="sb-tag" style="color:var(--ok);background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.28)"><span class="dot" style="background:var(--ok)"></span>READY · 工作台就绪</span>'
+        +   '<h2>'+App.esc(role.name)+' · 工作台待机中</h2>'
+        +   '<div class="sb-sub">当前无进行中的演练项目，工作台处于待命状态。演练启动后，系统将按剧本节点自动为本角色生成待办任务、故障通报、处置表单与证据采集指引。</div>'
+        +   '<div class="sb-acts">'
+        +     '<a class="btn primary" href="projects.html">'+App.icon('projects')+'创建演练项目</a>'
+        +     '<a class="btn" href="scenarios.html">'+App.icon('scenarios')+'选择剧本启动推演</a>'
+        +     '<a class="btn" href="dashboard.html">'+App.icon('dashboard')+'返回态势总看板</a>'
+        +   '</div>'
+        +   '<div class="sb-meta">'
+        +     '<div class="m-item"><b>'+scens.length+'</b>内置场景</div>'
+        +     '<div class="m-item"><b>'+nodes.length+'</b>剧本节点</div>'
+        +     '<div class="m-item"><b>'+projs.length+'</b>历史项目</div>'
+        +   '</div>'
+        + '</div></div>'
+        + '<div class="card"><div class="card-title">'+App.icon('workbench')+'工作台功能概览</div>'
+        +   '<div class="small" style="line-height:2">角色工作台是演练期间参演人员的<b>主要操作界面</b>，承载四类核心能力：<br>'
+        +   '<b>· 待办任务处置</b>：按剧本节点自动生成本角色待办，支持基础版（按引导逐步执行）和实战版（自主研判选择处置动作）两种演练模式。<br>'
+        +   '<b>· 故障通报与引导</b>：演练开始时弹窗展示剧本预设故障通报，工作台顶部持续显示醒目告警条，处置节点提供引导提示、决策问题与干扰处置。<br>'
+        +   '<b>· 表单分步填写</b>：处置表单采用分步向导逐字段引导，支持一键模拟数据预填并自动归档至取证模块；实战版需自行研判流转对象。<br>'
+        +   '<b>· 证据采集与打分</b>：处置过程中可上传文件或屏幕截图，系统自动生成告警与故障截图作为取证材料；演练期间实时显示评分与偏离情况。</div>'
+        + '</div>';
+    }).catch(function(){
+      page.innerHTML = '<div class="forbidden">'+App.icon('alert')+'<h2>数据加载失败</h2><p>请检查网络或联系管理员</p></div>';
+    });
+    return;
+  }
+
   var isExternal = !!role.external;
   var isPractical = proj.mode === '实战版';
 
@@ -33,7 +71,7 @@ document.addEventListener('app:ready', function(e){
   var SCEN = (MOCK.SCENARIOS||[]).filter(function(s){ return s.id===proj.scenarioId; })[0] || null;
   /* 剧本故障通报：演练开始后先弹窗展示，再在页面正上方固定显示；内容来自剧本编排「演练初始故障通报」 */
   var ALERT = String((SCEN && SCEN.alert) || '').trim()
-    || (SCEN ? (SCEN.type+'事件：'+SCEN.desc) : '');
+    || (SCEN ? (SCEN.desc || SCEN.name || '') : '');
   var started = proj.status === '演练中';
   /* 实战版：可选下一节点接收角色 + 取证材料完成情况（未归档不允许结束演练） */
   var RECEIVERS = [];
@@ -50,7 +88,7 @@ document.addEventListener('app:ready', function(e){
     if(added.length) App.voice.speak('有新的'+label+'到达，共 '+added.length+' 项，请及时处理');
   }
   var SIM = MOCK.SIM_DATA || {};
-  var FACTS = (SCEN && SIM[SCEN.type]) || SIM['通用'] || {
+  var FACTS = SIM['通用'] || {
     sys:'院内业务系统（模拟地址 10.20.x.x）', fault:'模拟故障现象（通用兜底，请按实际修改）',
     alert:'态势感知平台（模拟）：推送安全告警', ip:'10.20.x.x（模拟可疑IP）',
     sample:'模拟样本摘要（占位）', scope:'模拟范围（无真实业务影响）',
@@ -168,7 +206,7 @@ document.addEventListener('app:ready', function(e){
     if(/事件处置结果|处置结果/.test(fd)) return '受影响业务已恢复，故障现象消除，未发现数据外泄（模拟结果，请核对）';
     if(/整改|工作计划/.test(fd)) return '1. 修补漏洞并更新防护策略；2. 完善备份与恢复演练；3. 责任部门：信息科，7 个工作日内完成复查（模拟计划）';
     if(/异常现象|描述|现象/.test(fd)) return FACTS.fault;
-    if(/判断/.test(fd)) return '结合告警与样本特征（'+FACTS.sample+'），初步判定为'+(SCEN?SCEN.type:'模拟')+'类事件（模拟判定）';
+    if(/判断/.test(fd)) return '结合告警与样本特征（'+FACTS.sample+'），初步判定为该类事件（模拟判定）';
     if(/核实人|确认人|审批人|联系人|报送人|填报人|研判人|报案人|评估人/.test(fd)) return App.curUser()||role.short;
     if(/影响范围|范围/.test(fd)) return FACTS.scope;
     if(/进展/.test(fd)) return FACTS.progress;
@@ -178,7 +216,7 @@ document.addEventListener('app:ready', function(e){
     }
     if(/风险等级/.test(fd)) return '低';
     if(/等级/.test(fd)) return (SCEN&&SCEN.level)||t.level||'较大';
-    if(/类型/.test(fd)) return SCEN?SCEN.type:'模拟事件';
+    if(/类型/.test(fd)) return SCEN?SCEN.name:'模拟事件';
     if(/单位/.test(fd)) return (proj.units&&proj.units[0]) || ((DRILL.brand()||{}).unitName) || '盘州市人民医院';
     if(/摘要|依据/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'（系统自动填充，请核对修改）';
     if(/患者数/.test(fd)) return '0（虚拟数据，无真实患者）';
@@ -311,7 +349,7 @@ document.addEventListener('app:ready', function(e){
       return (MOCK.FORM_TEMPLATES||[]).filter(function(f){ return f.id===fid; })[0];
     }).filter(Boolean);
     if(!forms.length) return '';
-    return '<div class="section-title mt3">'+App.icon('edit')+'需提交表单 <span class="tiny dim" style="font-weight:400">已按场景【'+App.esc(SCEN?SCEN.type:'通用')+'】生成模拟数据，请按字段说明逐项核对</span></div>'
+    return '<div class="section-title mt3">'+App.icon('edit')+'需提交表单 <span class="tiny dim" style="font-weight:400">已按场景【'+App.esc(SCEN?SCEN.name:'通用')+'】生成模拟数据，请按字段说明逐项核对</span></div>'
       + forms.map(function(f, fi){
           var key = 'b-'+t.id+'-'+f.id;
           return '<div class="card mb3" style="padding:12px 14px"><div class="small bold mb2">'+App.esc(f.name)+' <span class="tag gray">'+f.id+'</span></div>'

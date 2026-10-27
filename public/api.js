@@ -446,6 +446,9 @@ window.API = (function () {
   }
   function backupData() { return DRILL.post('/admin/backup', {}); }
   function listBackups() { return DRILL.get('/admin/backups'); }
+  function restoreFromBackup(file) { return DRILL.post('/admin/restore', { file: file }); }
+  function restoreFromUpload(formData) { return DRILL.upload('/admin/restore-upload', formData); }
+  function deleteBackup(file) { return DRILL.api('/admin/backups/' + encodeURIComponent(file), { method: 'DELETE' }); }
   function sysinfo() { return DRILL.get('/admin/sysinfo'); }
   function getDrillReport(projectId) { return DRILL.get('/admin/report/' + encodeURIComponent(projectId)); }
   function markReportExported(projectId, format) {
@@ -497,7 +500,8 @@ window.API = (function () {
     adminRoles: adminRoles, addRole: addRole, updateRole: updateRole,
     setRoleStatus: setRoleStatus, deleteRole: deleteRole, reorderRoles: reorderRoles,
     adminForms: adminForms, addFormTemplate: addFormTemplate, updateFormTemplate: updateFormTemplate,
-    backupData: backupData, listBackups: listBackups, sysinfo: sysinfo,
+    backupData: backupData, listBackups: listBackups, restoreFromBackup: restoreFromBackup,
+    restoreFromUpload: restoreFromUpload, deleteBackup: deleteBackup, sysinfo: sysinfo,
     getBrand: getBrand, saveBrand: saveBrand, uploadBrandLogo: uploadBrandLogo,
     getSystemStatus: getSystemStatus, resetSystem: resetSystem,
     getDict: getDict, saveDict: saveDict,

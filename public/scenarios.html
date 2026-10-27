@@ -33,11 +33,11 @@
 .dag-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 .dag-edge{fill:none;stroke:var(--border2);stroke-width:1.8;pointer-events:stroke;cursor:pointer;transition:stroke .12s}
 .dag-edge:hover{stroke:var(--err);stroke-width:2.6}
-.dag-edge.branch{stroke:var(--purple);stroke-dasharray:5 4}
+.dag-edge.parallel{stroke:var(--warn);stroke-width:2.2}
 .dag-edge-label{font-size:10.5px;fill:var(--text3);pointer-events:none;user-select:none}
 .dag-node{position:absolute;width:236px;background:var(--panel);border:1px solid var(--border2);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25);transition:border-color .12s,box-shadow .12s;z-index:2}
 .dag-node:hover{border-color:var(--accent)}
-.dag-node.is-branch{border-color:var(--purple);box-shadow:inset 3px 0 0 var(--purple),0 2px 8px rgba(0,0,0,.25)}
+.dag-node.is-parallel{border-color:var(--warn);box-shadow:inset 3px 0 0 var(--warn),0 2px 8px rgba(0,0,0,.25)}
 .dag-node.active{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim),0 2px 8px rgba(0,0,0,.25)}
 .dag-node.dragging{opacity:.86;z-index:20}
 .dag-head{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px dashed var(--border);cursor:grab;user-select:none}
@@ -103,7 +103,7 @@ document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
   var BUILTIN = ['S01','S02','S03','S04','S05','S06','S07','S08'];
-  var f = { q:'', type:'', level:'' };
+  var f = { q:'', level:'' };
 
   page.innerHTML =
     '<div class="page-head"><div><h1>场景剧本库与编排</h1><div class="sub">内置 8 个医院典型网络安全事件场景 · 点击「编辑剧本」打开并行编排画布（节点可配置多个前置、并行推进）</div></div>'
@@ -112,8 +112,7 @@ document.addEventListener('app:ready', function(e){
     + '<button class="btn primary" id="btnNew">'+App.icon('plus')+'新建自定义场景</button></div></div>'
     + '<div class="sim-banner">'+App.icon('alert')+'<span>场景库仅用于应急演练推演编排，所有告警样本、IP、数据均为虚拟测试内容，与医院真实生产环境无关。</span></div>'
     + '<div class="filters">'
-    + '<span class="input" style="display:flex;align-items:center;gap:8px;width:260px;color:var(--text3)">'+App.icon('search')+'<input class="input" id="fQ" placeholder="按场景名称/类型搜索…" style="border:none;background:transparent;padding:0;flex:1"></span>'
-    + '<select class="select" id="fType"><option value="">全部事件类型</option>'+MOCK.DICT.eventTypes.map(function(t){ return '<option>'+t+'</option>'; }).join('')+'</select>'
+    + '<span class="input" style="display:flex;align-items:center;gap:8px;width:260px;color:var(--text3)">'+App.icon('search')+'<input class="input" id="fQ" placeholder="按场景名称搜索…" style="border:none;background:transparent;padding:0;flex:1"></span>'
     + '<select class="select" id="fLevel"><option value="">全部等级</option>'+MOCK.DICT.levels.map(function(l){ return '<option>'+l+'</option>'; }).join('')+'</select>'
     + '<span class="dim small" id="fCount"></span></div>'
     + '<div class="grid sc-grid" id="scGrid"></div>';
@@ -123,8 +122,7 @@ document.addEventListener('app:ready', function(e){
 
   function render(){
     var list = MOCK.SCENARIOS.filter(function(s){
-      if(f.q && (s.name+s.type).toLowerCase().indexOf(f.q.toLowerCase())<0) return false;
-      if(f.type && s.type!==f.type) return false;
+      if(f.q && s.name.toLowerCase().indexOf(f.q.toLowerCase())<0) return false;
       if(f.level && s.level!==f.level) return false;
       return true;
     });
@@ -136,7 +134,7 @@ document.addEventListener('app:ready', function(e){
       return '<div class="card sc-card">'
       + '<div class="flex gap2" style="justify-content:space-between"><div class="flex gap2"><span class="tag gray mono">'+s.id+'</span>'+App.levelTag(s.level)+'</div>'+App.statusTag(s.status)+'</div>'
       + '<div class="sc-name">'+App.esc(s.name)+'</div>'
-      + '<div class="flex gap2 wrap mt2"><span class="tag blue">'+s.type+'</span><span class="mono dim small">'+s.version+'</span></div>'
+      + '<div class="flex gap2 wrap mt2"><span class="mono dim small">'+s.version+'</span></div>'
       + '<div class="sc-desc">'+App.esc(s.desc)+'</div>'
       + '<div class="sc-foot"><span>'+App.icon('flow')+' '+s.nodes+' 个节点</span><span class="right">更新于 '+s.updated+'</span>'+(builtin?'<span class="tag gray">内置</span>':'<span class="tag purple">自定义</span>')+'</div>'
       + '<div class="flex gap1 wrap sc-acts">'
@@ -166,7 +164,7 @@ document.addEventListener('app:ready', function(e){
       onOpen:function(ov){ ov.querySelector('#cpNo').onclick=ov.close; ov.querySelector('#cpYes').onclick=function(){
         var n = ov.querySelector('#cpName').value.trim();
         if(!n){ App.toast('请填写新场景名称','err'); return; }
-        API.addScenario({ name:n, type:s.type, level:s.level, status:'停用', version:'v1.0', updated:today(), nodes:s.nodes, desc:s.desc }).then(function(ns){
+        API.addScenario({ name:n, level:s.level, status:'停用', version:'v1.0', updated:today(), nodes:s.nodes, desc:s.desc }).then(function(ns){
           ov.close(); render(); App.toast('已复制为自定义场景 '+ns.id+'（演练模拟）','ok');
         });
       }; } });
@@ -199,14 +197,12 @@ document.addEventListener('app:ready', function(e){
   }
 
   document.getElementById('fQ').oninput = function(){ f.q=this.value; render(); };
-  document.getElementById('fType').onchange = function(){ f.type=this.value; render(); };
   document.getElementById('fLevel').onchange = function(){ f.level=this.value; render(); };
 
   document.getElementById('btnNew').onclick = function(){
     App.modal({ title:'新建自定义场景', wide:true,
       body:'<div class="form-grid">'
       + '<div class="form-row span2"><label class="f-label">场景名称<span class="req">*</span></label><input class="input" id="ncName" placeholder="如：医保专线中断应急演练"></div>'
-      + '<div class="form-row"><label class="f-label">事件类型</label><select class="select" id="ncType">'+MOCK.DICT.eventTypes.map(function(t){ return '<option>'+t+'</option>'; }).join('')+'</select></div>'
       + '<div class="form-row"><label class="f-label">事件等级</label><select class="select" id="ncLevel">'+MOCK.DICT.levels.map(function(l){ return '<option>'+l+'</option>'; }).join('')+'</select></div>'
       + '<div class="form-row"><label class="f-label">初始状态</label><select class="select" id="ncStatus"><option>启用</option><option>停用</option></select></div>'
       + '<div class="form-row span2"><label class="f-label">场景描述</label><textarea class="textarea" id="ncDesc" placeholder="推演目标、涉及系统、关键节点说明（全部为虚拟演练内容）…"></textarea></div>'
@@ -215,7 +211,7 @@ document.addEventListener('app:ready', function(e){
       onOpen:function(ov){ ov.querySelector('#ncNo').onclick=ov.close; ov.querySelector('#ncYes').onclick=function(){
         var n = ov.querySelector('#ncName').value.trim();
         if(!n){ App.toast('请填写场景名称','err'); return; }
-        API.addScenario({ name:n, type:ov.querySelector('#ncType').value, level:ov.querySelector('#ncLevel').value, status:ov.querySelector('#ncStatus').value, version:'v1.0', updated:today(), nodes:0, desc:ov.querySelector('#ncDesc').value.trim()||'（暂无描述）' }).then(function(ns){
+        API.addScenario({ name:n, level:ov.querySelector('#ncLevel').value, status:ov.querySelector('#ncStatus').value, version:'v1.0', updated:today(), nodes:0, desc:ov.querySelector('#ncDesc').value.trim()||'（暂无描述）' }).then(function(ns){
           ov.close(); render(); App.toast('演练模拟：自定义场景 '+ns.id+' 已创建，可在列表中点击「编辑剧本」编排节点','ok');
         });
       }; } });
@@ -223,16 +219,16 @@ document.addEventListener('app:ready', function(e){
 
   document.getElementById('btnImport').onclick = function(){
     App.modal({ title:'导入场景（JSON）', wide:true,
-      body:'<div class="form-row"><label class="f-label">粘贴场景 JSON<span class="req">*</span></label><textarea class="textarea" id="imJson" style="min-height:180px;font-family:var(--mono)" placeholder=\'{"name":"XX应急演练","type":"勒索病毒","level":"较大","desc":"…"}\'></textarea></div>'
-      + '<div class="tiny dim">结构要求：name / type 必填，level、desc 选填；导入后将作为自定义场景追加至场景库，演练模式在新建演练项目时选择。</div>',
+      body:'<div class="form-row"><label class="f-label">粘贴场景 JSON<span class="req">*</span></label><textarea class="textarea" id="imJson" style="min-height:180px;font-family:var(--mono)" placeholder=\'{"name":"XX应急演练","level":"较大","desc":"…"}\'></textarea></div>'
+      + '<div class="tiny dim">结构要求：name 必填，level、desc 选填；导入后将作为自定义场景追加至场景库，演练模式在新建演练项目时选择。</div>',
       foot:'<button class="btn" id="imNo">取消</button><button class="btn primary" id="imYes">校验并导入</button>',
       onOpen:function(ov){ ov.querySelector('#imNo').onclick=ov.close; ov.querySelector('#imYes').onclick=function(){
         var raw = ov.querySelector('#imJson').value.trim();
         if(!raw){ App.toast('请粘贴 JSON 内容','err'); return; }
         var obj;
         try{ obj = JSON.parse(raw); }catch(err){ App.toast('导入失败：JSON 解析错误 · '+err.message,'err'); return; }
-        if(!obj || typeof obj!=='object' || Array.isArray(obj) || !obj.name || !obj.type){ App.toast('导入失败：缺少 name / type 字段，结构不符合场景规范','err'); return; }
-        API.addScenario({ name:String(obj.name), type:String(obj.type), level:(MOCK.DICT.levels.indexOf(obj.level)>=0?obj.level:'一般'), status:'停用', version:'v1.0', updated:today(), nodes:(obj.nodes&&obj.nodes.length?obj.nodes.length:0), desc:String(obj.desc||'（导入场景，暂无描述）') }).then(function(ns){
+        if(!obj || typeof obj!=='object' || Array.isArray(obj) || !obj.name){ App.toast('导入失败：缺少 name 字段，结构不符合场景规范','err'); return; }
+        API.addScenario({ name:String(obj.name), level:(MOCK.DICT.levels.indexOf(obj.level)>=0?obj.level:'一般'), status:'停用', version:'v1.0', updated:today(), nodes:(obj.nodes&&obj.nodes.length?obj.nodes.length:0), desc:String(obj.desc||'（导入场景，暂无描述）') }).then(function(ns){
           ov.close(); render(); App.toast('演练模拟：场景导入成功（'+ns.id+'），默认停用待编排','ok');
         });
       }; } });
@@ -242,7 +238,7 @@ document.addEventListener('app:ready', function(e){
   var TYPES = {
     alert:  { label:'告警', icon:'bell',   color:'var(--err)',    dim:'var(--err-dim)' },
     task:   { label:'任务', icon:'tasks',  color:'var(--accent)', dim:'var(--accent-dim)' },
-    branch: { label:'分支', icon:'flow',   color:'var(--purple)', dim:'var(--purple-dim)' },
+    parallel: { label:'并行', icon:'flow',   color:'var(--warn)',   dim:'var(--warn-dim)' },
     report: { label:'上报', icon:'send',   color:'var(--info)',   dim:'var(--info-dim)' },
     end:    { label:'终止', icon:'power',  color:'var(--text2)',  dim:'var(--elev)' }
   };
@@ -282,7 +278,7 @@ document.addEventListener('app:ready', function(e){
   }
   function fallbackNodes(s){
     return [
-      { id:'FN1', type:'alert', title:'T+0 '+s.type+'模拟告警推送', target:'信息科值班员', timeout:10, desc:'推送「'+s.name+'」场景模拟告警（实战版仅原始告警）', flowType:'correct', score:10, deps:[] },
+      { id:'FN1', type:'alert', title:'T+0 模拟告警推送', target:'信息科值班员', timeout:10, desc:'推送「'+s.name+'」场景模拟告警', flowType:'correct', score:10, deps:[] },
       { id:'FN2', type:'task', title:'核实与初步处置', target:'网络安全管理员', timeout:15, desc:'按预案核实异常并执行模拟处置、留存证据', flowType:'correct', score:20, deps:['FN1'] },
       { id:'FN3', type:'report', title:'研判简报上报指挥部', target:'信息科负责人', timeout:10, form:'F2', desc:'形成研判简报并提交院应急指挥部', flowType:'correct', score:20, deps:['FN2'] },
       { id:'FN4', type:'end', title:'演练终止与复盘', target:'院应急指挥部', desc:'下达终止指令，进入复盘评估', deps:['FN3'] }
@@ -309,7 +305,7 @@ document.addEventListener('app:ready', function(e){
   function openEditor(scenarioId){
     var curId = (scenarioId && scenarioById(scenarioId)) ? scenarioId : 'S01';
     var nodes = loadNodes(curId);
-    var playTimer = null, dragNode = null, linkDrag = null, panState = null;
+    var playTimer = null, dragNode = null, linkDrag = null, panState = null, dragSelection = null;
     var s0 = scenarioById(curId);
     var NODE_W = 236;
     var zoom = 1, ZOOM_MIN = 0.2, ZOOM_MAX = 2, ZOOM_STEP = 0.1;
@@ -386,11 +382,8 @@ document.addEventListener('app:ready', function(e){
         +         '<span class="dag-tool-sep"></span>'
         +         '<button class="btn sm icon-only" id="btnAlignV" title="上对齐">'+App.icon('arrow-up')+'</button>'
         +         '<button class="btn sm icon-only" id="btnAlignV2" title="下对齐">'+App.icon('arrow-down')+'</button>'
-        +         '<button class="btn sm icon-only" id="btnCenterY" title="垂直居中">'+App.icon('center-v')+'</button>'
-        +         '<button class="btn sm icon-only" id="btnDistV" title="垂直均分间距">'+App.icon('dist-v')+'</button>'
         +         '<button class="btn sm icon-only" id="btnAlignH" title="左对齐">'+App.icon('arrow-left')+'</button>'
         +         '<button class="btn sm icon-only" id="btnAlignH2" title="右对齐">'+App.icon('arrow-right')+'</button>'
-        +         '<button class="btn sm icon-only" id="btnCenterX" title="水平居中">'+App.icon('center-h')+'</button>'
         +       '</div>'
         +     '</div>'
         +     '<div class="dag-pool" id="poolFlow"></div>'
@@ -748,12 +741,13 @@ document.addEventListener('app:ready', function(e){
       }
       if(n.action) tags.push('<span class="tag blue">'+App.esc(n.action)+'</span>');
       if(n.form) tags.push('<span class="tag purple">'+App.esc(formName(n.form))+'</span>');
-      if(n.type==='branch' && n.branches) tags.push('<span class="tag purple">是：'+App.esc(n.branches[0]||'条件成立')+'</span><span class="tag purple">否：'+App.esc(n.branches[1]||'条件不成立')+'</span>');
+      if(n.type==='parallel' && (n.parallelDesc||n.parallel_desc)) tags.push('<span class="tag warn">并行组：'+App.esc(n.parallelDesc||n.parallel_desc)+'</span>');
       var body = '<div class="dag-body"><div class="dag-meta"><span class="mono">处置时长 '+(n.timeout?'<b>'+n.timeout+'</b> 分钟':'—')+'</span><span>接收：'+App.esc(n.target||'—')+'</span></div>'
         + '<div class="dag-tags">'+tags.join('')+'<span class="tag gray">'+t.label+'</span></div>'
         + '<div class="dag-ops"><button class="btn sm" data-edit="'+i+'">'+App.icon('edit')+'配置</button>'
+        + '<button class="btn sm" data-copy="'+i+'" title="复制节点（演练模拟）">'+App.icon('copy')+'复制</button>'
         + '<button class="btn sm danger" data-del="'+i+'" title="删除节点（演练模拟）">'+App.icon('x')+'</button></div></div>';
-      var cls = 'dag-node'+(n.type==='branch'?' is-branch':'');
+      var cls = 'dag-node'+(n.type==='parallel'?' is-parallel':'');
       var styleAttr = inPool ? '' : ' style="left:'+(Number(n.posX)||0)+'px;top:'+(Number(n.posY)||0)+'px"';
       var ports = inPool ? '' : '<span class="dag-port in"></span><span class="dag-port out" data-src="'+App.esc(String(n.id))+'" title="按住拖拽到目标节点建立依赖"></span>';
       return '<div class="'+cls+'" data-id="'+App.esc(String(n.id))+'" data-i="'+i+'"'+styleAttr+'>'+ports
@@ -778,21 +772,12 @@ document.addEventListener('app:ready', function(e){
           var by = (Number(to.posY)||0) + toEl.offsetHeight/2;
           var dx = Math.max(36, Math.abs(bx-ax)*0.45);
           var path = document.createElementNS('http://www.w3.org/2000/svg','path');
-          path.setAttribute('class', 'dag-edge'+(from.type==='branch'?' branch':''));
+          path.setAttribute('class', 'dag-edge'+(from.type==='parallel'?' parallel':''));
           path.setAttribute('d', 'M'+ax+','+ay+' C'+(ax+dx)+','+ay+' '+(bx-dx)+','+by+' '+bx+','+by);
           path.setAttribute('marker-end', 'url(#dagArrow)');
           path.setAttribute('data-from', String(from.id));
           path.setAttribute('data-to', String(to.id));
           svg.appendChild(path);
-          if(from.type==='branch'){
-            var succ = succOf(from.id);
-            var label = document.createElementNS('http://www.w3.org/2000/svg','text');
-            label.setAttribute('class','dag-edge-label');
-            label.setAttribute('x', (ax+bx)/2);
-            label.setAttribute('y', (ay+by)/2 - 8);
-            label.textContent = succ.indexOf(to)===1 ? '否' : '是';
-            svg.appendChild(label);
-          }
         });
       });
       Array.prototype.slice.call(svg.querySelectorAll('.dag-edge')).forEach(function(p){
@@ -856,6 +841,20 @@ document.addEventListener('app:ready', function(e){
           ev.preventDefault();
           dragNode = { n:n, el:el, sx:ev.clientX, sy:ev.clientY, ox:Number(n.posX)||0, oy:Number(n.posY)||0, moved:false };
           el.classList.add('dragging');
+          /* 整体拖拽：selection 有多个节点且当前节点也被选中 → 批量移动 */
+          var nodeId = String(n.id);
+          if(selection.size >= 2 && selection.has(nodeId)){
+            dragSelection = {};
+            selection.forEach(function(id){
+              var nn = nodeById(id);
+              if(!nn) return;
+              dragSelection[id] = { ox: Number(nn.posX)||0, oy: Number(nn.posY)||0 };
+              var selEl = root.querySelector('.dag-node[data-id="'+id+'"]');
+              if(selEl) selEl.classList.add('dragging');
+            });
+          } else {
+            dragSelection = null;
+          }
         });
         el.addEventListener('click', function(ev){
           /* 拖拽移动超过阈值就不触发选中 */
@@ -905,6 +904,30 @@ document.addEventListener('app:ready', function(e){
           App.toast('节点已移除（演练模拟）','ok');
         });
       }; });
+      root.querySelectorAll('[data-copy]').forEach(function(b){ b.onclick = function(){
+        var n = nodes[+b.dataset.copy];
+        if(!n) return;
+        /* 深拷贝 + 生成唯一新 id */
+        var copy = JSON.parse(JSON.stringify(n));
+        var id = String(n.id);
+        var newId = id + '-copy';
+        var ids = nodes.map(function(x){ return String(x.id); });
+        while(ids.indexOf(newId) >= 0){ /* 防重：-copy → -copy2 → -copy3 ... */
+          var m = /-copy(\d*)$/.exec(newId);
+          newId = id + '-copy' + ((m && m[1] ? (Number(m[1])+1) : 2));
+        }
+        copy.id = newId;
+        copy.title = (n.title||'') + '（副本）';
+        /* 位置偏移，避免完全重叠 */
+        copy.posX = (Number(n.posX)||0) + 60;
+        copy.posY = (Number(n.posY)||0) + 60;
+        /* deps 指向原依赖不变，去掉对自身的引用 */
+        copy.deps = (Array.isArray(n.deps) ? n.deps : []).map(String).filter(function(d){ return d !== id; });
+        nodes.push(copy);
+        render();
+        selectOne(newId);
+        App.toast('节点已复制：「'+copy.title+'」（演练模拟，保存后生效）','ok');
+      }; });
       drawEdges();
     }
 
@@ -920,10 +943,25 @@ document.addEventListener('app:ready', function(e){
         return;
       }
       if(dragNode){
-        dragNode.n.posX = Math.max(0, dragNode.ox + (ev.clientX - dragNode.sx)/zoom);
-        dragNode.n.posY = Math.max(0, dragNode.oy + (ev.clientY - dragNode.sy)/zoom);
-        dragNode.el.style.left = dragNode.n.posX+'px';
-        dragNode.el.style.top = dragNode.n.posY+'px';
+        var dx = (ev.clientX - dragNode.sx)/zoom;
+        var dy = (ev.clientY - dragNode.sy)/zoom;
+        if(dragSelection){
+          /* 整体拖拽：用同一个 dx/dy 批量更新所有选中节点 */
+          Object.keys(dragSelection).forEach(function(id){
+            var nn = nodeById(id);
+            if(!nn) return;
+            nn.posX = Math.max(0, dragSelection[id].ox + dx);
+            nn.posY = Math.max(0, dragSelection[id].oy + dy);
+            var selEl = root.querySelector('.dag-node[data-id="'+id+'"]');
+            if(selEl){ selEl.style.left = nn.posX+'px'; selEl.style.top = nn.posY+'px'; }
+          });
+        } else {
+          /* 单节点拖拽 */
+          dragNode.n.posX = Math.max(0, dragNode.ox + dx);
+          dragNode.n.posY = Math.max(0, dragNode.oy + dy);
+          dragNode.el.style.left = dragNode.n.posX+'px';
+          dragNode.el.style.top = dragNode.n.posY+'px';
+        }
         drawEdges();
       } else if(linkDrag){
         var svg = root.querySelector('.dag-edges');
@@ -941,6 +979,14 @@ document.addEventListener('app:ready', function(e){
       if(dragNode){
         var moved = Math.abs(ev.clientX-dragNode.sx)>2 || Math.abs(ev.clientY-dragNode.sy)>2;
         dragNode.el.classList.remove('dragging');
+        /* 清理整体拖拽状态 */
+        if(dragSelection){
+          Object.keys(dragSelection).forEach(function(id){
+            var selEl = root.querySelector('.dag-node[data-id="'+id+'"]');
+            if(selEl) selEl.classList.remove('dragging');
+          });
+          dragSelection = null;
+        }
         dragNode = null;
         if(moved) render();
         return;
@@ -1121,10 +1167,10 @@ document.addEventListener('app:ready', function(e){
         + '<div class="tiny dim mb2">演练时会在「取证与材料归档」中逐项提醒参演人员取证；点击「按剧本自动生成」可根据本节点动作自动生成相符的模拟取证材料，参演人员可一键导入后再核对修改。</div>'
         + '<div class="flex gap2 mb2"><button class="btn sm outline" id="ndEvAuto" type="button">'+App.icon('file')+'按剧本自动生成</button><span class="tiny dim">类型可选：'+App.esc(((MOCK.DICT.ev_types||DEFAULT_EV_TYPES).join(' / ')))+'</span></div>'
         + '<div class="form-row"><textarea class="textarea" id="ndEv" rows="4" placeholder="处置记录|处置记录-隔离感染终端.md|责任角色：网络安全管理员；记录隔离终端IP与时间&#10;附件截图|告警界面截图.svg|告警时刻与受影响终端">'+App.esc(evText(n))+'</textarea></div>'
-        + '<div id="ndBranchRow"'+(n.type==='branch'?'':' style="display:none"')+'>'
-        + '<div class="divider"></div><div class="section-title">分支判断条件</div>'
-        + '<div class="form-grid"><div class="form-row"><label class="f-label">条件「是」去向描述</label><input class="input" id="ndB0" value="'+App.esc((n.branches&&n.branches[0])||'')+'" placeholder="如：一般事件 → 科内处置"></div>'
-        + '<div class="form-row"><label class="f-label">条件「否」去向描述</label><input class="input" id="ndB1" value="'+App.esc((n.branches&&n.branches[1])||'')+'" placeholder="如：较大及以上 → 上报指挥部"></div></div></div>'
+        + '<div id="ndBranchRow"'+(n.type==='parallel'?'':' style="display:none"')+'>'
+        + '<div class="divider"></div><div class="section-title">并行节点属性</div>'
+        + '<div class="form-row"><label class="f-label">并行分组共同目标</label><input class="input" id="ndPD" value="'+App.esc(n.parallelDesc||n.parallel_desc||'')+'" placeholder="如：核实感染范围后三路并行处置（断网隔离+检查备份+预警研判）"></div>'
+        + '<div class="tiny dim">提示：并行节点是流程的 fork 点，其直接下游节点将同时开放处置。并行分组描述用于在剧本和看板中标识这一组并行节点的共同处置目标。</div></div>'
         + '<div class="tiny dim">处置时长：'+(n.timeout?App.esc(n.timeout)+' 分钟':'未设置')+'（在画布中拖动卡片可调整布局，保存后写回坐标）</div>';
       App.drawer({ title:'节点配置 · '+App.esc(n.title), body:body, persist:true, onOpen:function(dv){
         /* ---- 初始化 MultiSelect ---- */
@@ -1152,7 +1198,7 @@ document.addEventListener('app:ready', function(e){
         dv.close = function(){ openDrawerNode = null; openDrawerMs = null; depsMs.destroy(); recvMs.destroy(); origClose.call(dv); };
         /* ---- end MultiSelect ---- */
 
-        dv.querySelector('#ndType').onchange = function(){ dv.querySelector('#ndBranchRow').style.display = this.value==='branch'?'':'none'; };
+        dv.querySelector('#ndType').onchange = function(){ dv.querySelector('#ndBranchRow').style.display = this.value==='parallel'?'':'none'; };
         /* 实时统计正确流程总分，超过 100 分给出超分提醒 */
         function refreshScoreTip(){
           var isDis = dv.querySelector('#ndFlow').value==='distractor';
@@ -1214,8 +1260,8 @@ document.addEventListener('app:ready', function(e){
           n.deps = n.flowType==='distractor' ? [] : depsMs.getValue();
           n.evidenceReq = parseEvText(dv.querySelector('#ndEv').value);
           n.keywords = dv.querySelector('#ndKeywords').value.split(/[,，、;；\s]+/).filter(function(x){ return !!x; });
-          if(ty==='branch'){ n.branches = [ dv.querySelector('#ndB0').value.trim()||'条件成立', dv.querySelector('#ndB1').value.trim()||'条件不成立' ]; }
-          else { delete n.branches; }
+          if(ty==='parallel'){ var pv = dv.querySelector('#ndPD').value.trim(); n.parallelDesc = pv; n.parallel_desc = pv; delete n.branches; }
+          else { delete n.parallelDesc; delete n.parallel_desc; delete n.branches; }
           dv.close(); render();
           var tot = scoreTotal();
           App.toast(tot>100
@@ -1232,7 +1278,7 @@ document.addEventListener('app:ready', function(e){
       var n = { id:id, type:isDis?'task':type, title:'新'+t.label+'节点', target:'信息科值班员', desc:'',
         flowType:isDis?'distractor':'correct', score:isDis?10:0, receiver:'', deps:[] };
       if(type!=='end') n.timeout = isDis ? 10 : 15;
-      if(type==='branch'){ n.branches = ['条件成立','条件不成立']; }
+      if(type==='parallel'){ n.parallelDesc = ''; n.parallel_desc = ''; }
       nodes.push(n);
       if(!isDis){
         var lastX = 0, lastY = 0;
@@ -1251,11 +1297,8 @@ document.addEventListener('app:ready', function(e){
     root.querySelector('#btnAdd').onclick = function(){ addNode('task'); };
     root.querySelector('#btnAlignV').onclick = function(){ alignTop(selectedOrAll()); render(); App.toast('已上对齐','ok'); };
     root.querySelector('#btnAlignV2').onclick = function(){ alignBottom(selectedOrAll()); render(); App.toast('已下对齐','ok'); };
-    root.querySelector('#btnCenterY').onclick = function(){ alignCenterY(selectedOrAll()); render(); App.toast('已垂直居中','ok'); };
     root.querySelector('#btnAlignH').onclick = function(){ alignLeft(selectedOrAll()); render(); App.toast('已左对齐','ok'); };
     root.querySelector('#btnAlignH2').onclick = function(){ alignRight(selectedOrAll()); render(); App.toast('已右对齐','ok'); };
-    root.querySelector('#btnCenterX').onclick = function(){ alignCenterX(selectedOrAll()); render(); App.toast('已水平居中','ok'); };
-    root.querySelector('#btnDistV').onclick = function(){ distributeV(selectedOrAll()); render(); App.toast('已按列平均分配垂直间距','ok'); };
     root.querySelector('#btnScore').onclick = function(){
       ensureLayout();
       autoSplitScore();

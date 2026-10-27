@@ -63,15 +63,28 @@ function buildDecision(node, _db) {
   return { question: question, options: options };
 }
 
-/* 判断当前角色是否可处置该剧本节点 */
+/* target 中文名 → roles 表 role_id
+ * 三级匹配：精确 name/short → 反向包含（target 包含 role.name 或 role.short，反之亦然） → 兜底 duty */
+function targetToRoleId(db, target) {
+  const t = String(target || '').trim();
+  if (!t) return 'duty';
+  // 精确匹配
+  let row = db.prepare("SELECT id FROM roles WHERE name=? OR short=?").get(t, t);
+  if (row) return row.id;
+  // 包含匹配（处理 "医务部/门诊部负责人" 这种组合名称 → roles.short="医务部"）
+  const contains = db.prepare("SELECT id, name, short FROM roles WHERE ? LIKE '%' || name || '%' OR ? LIKE '%' || short || '%' OR name LIKE '%' || ? || '%' OR short LIKE '%' || ? || '%'").all(t, t, t, t);
+  if (contains.length === 1) return contains[0].id;
+  return 'duty';
+}
+
+/* 判断当前角色是否可处置该剧本节点（target=中文名 → 查表） */
 function canHandle(role, target, _db) {
   if (!role) return false;
   if (role.id === 'platformadmin' || role.id === 'commander') return true;
   const db = _db || require('./db').db;
-  const roleByTarget = dict(db, 'drill_role_by_target', S.DICT.drill_role_by_target);
-  const mapped = roleByTarget[target] || null;
+  const mapped = targetToRoleId(db, target);
   if (role.id === 'itlead') return ['itlead', 'duty', 'netsec', 'sysadmin'].indexOf(mapped) >= 0;
-  return target === role.name || target === role.short || mapped === role.id;
+  return mapped === role.id;
 }
 
 /* 基础版：按剧本节点自动下发任务，并自动匹配需提交的表单 */
@@ -85,17 +98,14 @@ function ensureBasicTasks(db, project) {
   if (!nodes.length) return 0;
   const sc = db.prepare('SELECT * FROM scenarios WHERE id=?').get(project.scenario_id);
   const levelByScenario = dict(db, 'drill_level_by_scenario', S.DICT.drill_level_by_scenario);
-  const roleByTarget = dict(db, 'drill_role_by_target', S.DICT.drill_role_by_target);
-  const formByAction = dict(db, 'drill_form_by_action', S.DICT.drill_form_by_action);
   const level = levelByScenario[(sc && sc.level) || ''] || 'P2';
   const prefix = 'T' + String(project.id).replace(/[^0-9]/g, '') + '-';
   const insert = db.prepare('INSERT INTO tasks (id,project_id,role_id,title,descr,deadline,status,level,forms,node_id,seq) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
   let count = 0;
   nodes.forEach(function (n, i) {
-    const roleId = roleByTarget[n.target] || 'duty';
-    /* 上报审批：指挥部决策环节使用《应急启动审批单》，信息科负责人环节使用《网络和数据安全事件反馈单》 */
-    let formId = formByAction[n.action] || '';
-    if (n.action === '上报审批' && n.target === '院应急指挥部') formId = 'F4';
+    const roleId = targetToRoleId(db, n.target);
+    let formId = String(n.form || '').trim();
+    if (!formId && n.action === '上报审批' && targetToRoleId(db, n.target) === 'commander') formId = 'F4';
     const forms = formId ? [formId] : [];
     insert.run(prefix + String(i + 1).padStart(2, '0'), project.id, roleId, n.title, n.descr || '',
       '', '待处理', level, JSON.stringify(forms), n.id, i + 1);
@@ -140,7 +150,6 @@ function defaultScores(db, scenarioId) {
  * 基础版不显示混淆流程（工作台按 flow_type 过滤），因此共用同一份剧本 */
 function ensureDistractors(db) {
   const scenarios = db.prepare('SELECT id FROM scenarios').all();
-  const roleByTarget = dict(db, 'drill_role_by_target', S.DICT.drill_role_by_target);
   const actionMeta = dict(db, 'drill_action_meta', S.DICT.drill_action_meta);
   let count = 0;
   scenarios.forEach(function (sc) {
@@ -152,7 +161,7 @@ function ensureDistractors(db) {
     const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,deps,pos_x,pos_y) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
     const byRole = {};
     nodes.forEach(function (n) {
-      const roleId = roleByTarget[n.target] || 'duty';
+      const roleId = targetToRoleId(db, n.target);
       if (!byRole[roleId]) byRole[roleId] = [];
       byRole[roleId].push(n);
     });
@@ -271,15 +280,13 @@ function backfillFeedbackForm(db) {
   return { nodes: nodes, tasks: tasks };
 }
 
-/* 导出的字典快照（外部 require drill_plan.ROLE_BY_TARGET 等的兼容层，只读）
+/* 导出的字典快照（兼容层，只读）
  * 注意：这个是运行时快照，缓存 30s。如需写操作请走 dict 表 + drillDict.invalidate() */
-function ROLE_BY_TARGET(_db) { return dict(_db || require('./db').db, 'drill_role_by_target', S.DICT.drill_role_by_target); }
 function FORM_BY_ACTION(_db) { return dict(_db || require('./db').db, 'drill_form_by_action', S.DICT.drill_form_by_action); }
 function LEVEL_BY_SCENARIO(_db) { return dict(_db || require('./db').db, 'drill_level_by_scenario', S.DICT.drill_level_by_scenario); }
 function ACTION_META(_db) { return dict(_db || require('./db').db, 'drill_action_meta', S.DICT.drill_action_meta); }
 
 module.exports = {
-  ROLE_BY_TARGET: ROLE_BY_TARGET,
   FORM_BY_ACTION: FORM_BY_ACTION,
   LEVEL_BY_SCENARIO: LEVEL_BY_SCENARIO,
   ACTION_META: ACTION_META,

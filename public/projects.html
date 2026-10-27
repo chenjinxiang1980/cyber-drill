@@ -201,18 +201,15 @@ document.addEventListener('app:ready', function(e){
       + '<div class="form-row span2"><label class="f-label">参演角色（多选，按角色添加，无需指定人员）</label><div class="flex gap3 wrap" id="npRoles">'
       +   MOCK.ROLES.map(function(r){ return '<label class="check"><input type="checkbox" value="'+r.id+'"'+(r.id==='commander'?' checked':'')+'>'+r.name+'</label>'; }).join('')
       + '</div><div class="tiny dim" style="margin-top:4px">凡使用该角色演练账号登录的用户均视为该角色参演；添加后可在编组管理中继续维护。</div></div>'
-      + '<div class="form-row span2"><label class="f-label">参演单位（多选）</label><div class="flex gap3 wrap" id="npUnits">'+unitSet.map(function(u,i){ return '<label class="check"><input type="checkbox" value="'+App.esc(u)+'"'+(i===0?' checked':'')+'>'+u+'</label>'; }).join('')+'</div></div>'
       + '</div><div class="tiny dim">创建后状态为「未开始」，可在列表中启动演练或先发起预演（演练模拟）。</div>',
       foot:'<button class="btn" id="npNo">取消</button><button class="btn primary" id="npYes">创建项目</button>',
       onOpen:function(ov){ ov.querySelector('#npNo').onclick=ov.close; ov.querySelector('#npYes').onclick=function(){
         var name = ov.querySelector('#npName').value.trim();
         var date = ov.querySelector('#npDate').value;
-        var units = Array.prototype.slice.call(ov.querySelectorAll('#npUnits input:checked')).map(function(c){ return c.value; });
         var members = Array.prototype.slice.call(ov.querySelectorAll('#npRoles input:checked')).map(function(c){ return { role:c.value }; });
         if(!name){ App.toast('请填写项目名称','err'); return; }
         if(!date){ App.toast('请选择计划日期','err'); return; }
         if(!members.length){ App.toast('请至少选择一个参演角色','err'); return; }
-        if(!units.length){ App.toast('请至少勾选一个参演单位','err'); return; }
         var sc = MOCK.SCENARIOS.filter(function(s){ return s.id===ov.querySelector('#npSc').value; })[0];
         var btn = ov.querySelector('#npYes');
         btn.disabled = true; btn.textContent = '创建中…';
@@ -221,7 +218,7 @@ document.addEventListener('app:ready', function(e){
         API.createProject({
           name:name, type:ov.querySelector('#npType').value, date:date, mode:mode,
           scenarioId:sc?sc.id:'', level:sc?sc.level:'一般',
-          units:units, members:members,
+          units:undefined, members:members,
           target:'（演练模拟）验证'+ov.querySelector('#npType').value+'流程与协同时效'
         }).then(function(res){
           ov.close(); render(); App.refreshShell();

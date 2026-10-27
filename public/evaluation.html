@@ -35,6 +35,42 @@ document.addEventListener('app:ready', function(e){
   var canAdd = true;
   var WB = null;
 
+  /* ---------- 无演练：展示空态 ---------- */
+  if (!proj) {
+    Promise.all([API.getScenarios(), API.getProjects(), API.getScriptNodes()]).then(function(r){
+      var scens = Array.isArray(r[0]) ? r[0] : [];
+      var projs = Array.isArray(r[1]) ? r[1] : [];
+      var nodes = Array.isArray(r[2]) ? r[2] : [];
+      page.innerHTML =
+        '<div class="standby-hero">'
+        + '<div class="sb-icon" style="background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.28);color:var(--warn)">'+App.icon('score')+'</div>'
+        + '<div class="sb-body">'
+        +   '<span class="sb-tag" style="color:var(--warn);background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.28)"><span class="dot" style="background:var(--warn)"></span>AWAITING DRILL · 待复盘</span>'
+        +   '<h2>暂无演练可复盘评估</h2>'
+        +   '<div class="sb-sub">复盘评估依据演练项目中的处置记录、节点完成情况与剧本基线自动计算。请先创建演练项目并完成至少一次推演，系统将自动生成本次演练的考评明细、改进建议与评估汇总。</div>'
+        +   '<div class="sb-acts">'
+        +     '<a class="btn primary" href="projects.html">'+App.icon('projects')+'创建演练项目</a>'
+        +     '<a class="btn" href="scenarios.html">'+App.icon('flow')+'选择剧本启动推演</a>'
+        +     '<a class="btn" href="dashboard.html">'+App.icon('dashboard')+'返回态势总看板</a>'
+        +   '</div>'
+        +   '<div class="sb-meta">'
+        +     '<div class="m-item"><b>'+scens.length+'</b>内置场景</div>'
+        +     '<div class="m-item"><b>'+nodes.length+'</b>剧本节点</div>'
+        +     '<div class="m-item"><b>'+projs.length+'</b>历史项目</div>'
+        +   '</div>'
+        + '</div></div>'
+        + '<div class="card"><div class="card-title">'+App.icon('score')+'复盘评估机制说明</div>'
+        +   '<div class="small" style="line-height:2">系统支持<b>两种演练模式</b>，考评口径不同：<br>'
+        +   '<b>· 基础版（诱导演练）</b>：逐节点下发任务并提供引导提示，考评仅统计<b>处置时长达成率</b>（按时完成率 × 100 分）。<br>'
+        +   '<b>· 实战版（自主研判）</b>：仅展示已发现故障，参演人员在角色工作台自主选择处置动作。按<b>与剧本基线偏离、处置超时、未处置、额外无效操作</b>扣分，满分 100 分。<br>'
+        +   '演练模式在创建项目时选定，创建后不可切换。系统在演练进行中即可实时显示考评，演练结束后可一键导出报告。</div>'
+        + '</div>';
+    }).catch(function(){
+      page.innerHTML = '<div class="forbidden">'+App.icon('alert')+'<h2>数据加载失败</h2><p>请检查网络或联系管理员</p></div>';
+    });
+    return;
+  }
+
   function mins(t){ var m=/^(\d{1,2}):(\d{2})/.exec(String(t||'')); return m ? (+m[1])*60 + (+m[2]) : null; }
   function grade(v){ return v>=90?'优秀':v>=80?'良好':v>=70?'合格':'不合格'; }
   function gradeCls(v){ return v>=90?'green':v>=80?'blue':v>=70?'yellow':'red'; }

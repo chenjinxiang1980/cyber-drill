@@ -13,22 +13,16 @@ const router = express.Router();
 const upload = makeUploader('evidence');
 
 function roleIdOfTarget(target) {
-  const aliases = drillDict.get(db, 'target_role_aliases', {
-    '院应急指挥部': 'commander', '信息科值班员': 'duty', '网络安全管理员': 'netsec',
-    '系统管理员': 'sysadmin', '信息科负责人': 'itlead',
-    '医务科主任': 'medlead', '医务部主任': 'medlead', '门诊部主任': 'medlead', '医务部/门诊部负责人': 'medlead',
-    '临床科室': 'clinical', '收费窗口': 'clinical', '临床科室/收费窗口': 'clinical',
-    '市卫生健康局': 'healthbureau', '卫健委': 'healthbureau',
-    '市委网信办': 'cac', '市网信办': 'cac',
-    '市网安大队': 'cyberpolice', '公安网安': 'cyberpolice'
-  });
   const t = String(target || '').trim();
-  if (aliases[t]) return aliases[t];
-  const hit = Object.keys(aliases).filter(function (k) { return t && (t.indexOf(k) >= 0 || k.indexOf(t) >= 0); })[0];
-  return hit ? aliases[hit] : '';
+  if (!t) return '';
+  let row = db.prepare("SELECT id FROM roles WHERE name=? OR short=?").get(t, t);
+  if (row) return row.id;
+  const contains = db.prepare("SELECT id FROM roles WHERE ? LIKE '%' || name || '%' OR ? LIKE '%' || short || '%' OR name LIKE '%' || ? || '%' OR short LIKE '%' || ? || '%'").all(t, t, t, t);
+  if (contains.length === 1) return contains[0].id;
+  return '';
 }
 
-/* 当前用户是否可为本节点取证（不能由一个角色一次性填充全部材料） */
+/* 当前用户是否可为本节点取证 */
 function canFillNode(user, node) {
   if (!node) return false;
   if (user.role.external) return false;

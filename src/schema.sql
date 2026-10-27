@@ -401,3 +401,14 @@ CREATE INDEX IF NOT EXISTS idx_evidence_project ON evidence(project_id);
 CREATE INDEX IF NOT EXISTS idx_timeline_project ON timeline(project_id);
 CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(time);
 CREATE INDEX IF NOT EXISTS idx_chat_grp ON chat_messages(grp);
+
+-- 种子数据基线版本（系统初始化依赖，多版本并存，resetAll 使用最新）
+CREATE TABLE IF NOT EXISTS seed_baseline (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  version    TEXT NOT NULL,
+  component  TEXT NOT NULL,
+  data       TEXT NOT NULL,
+  note       TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(version, component)
+);

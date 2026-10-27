@@ -483,46 +483,6 @@ module.exports = {
       "alert": "T+0 办公网多台终端批量弹出异常进程提示并生成可疑文件，终端资源占用异常升高；业务网暂未发现波及，疑似恶意代码在办公网批量感染。"
     }
   ],
-  "PROJECTS": [
-    {
-      "id": "P2026-009",
-      "name": "钓鱼邮件防范季度演练",
-      "mode": "基础版",
-      "scenario_id": "S04",
-      "date": "2026-07-10 09:30",
-      "status": "已归档"
-    },
-    {
-      "id": "P2026-010",
-      "name": "门诊收费系统DDoS桌面推演",
-      "mode": "实战版",
-      "scenario_id": "S03",
-      "date": "2026-11-05 15:00",
-      "status": "未开始"
-    },
-    {
-      "id": "P2026-011",
-      "name": "数据泄露舆情联合演练（卫健牵头）",
-      "mode": "基础版",
-      "scenario_id": "S06",
-      "date": "2026-09-18 14:00",
-      "status": "已结束"
-    },
-    {
-      "id": "P2026-012",
-      "name": "2026年勒索病毒专项应急演练",
-      "mode": "基础版",
-      "scenario_id": "S01",
-      "date": "2026-10-23 09:00",
-      "status": "演练中"
-    }
-  ],
-  "PROJECT_MODE": {
-    "P2026-009": "基础版",
-    "P2026-010": "实战版",
-    "P2026-011": "基础版",
-    "P2026-012": "基础版"
-  },
   "KNOWLEDGE": [
     {
       "id": "KB1",
@@ -2155,18 +2115,6 @@ module.exports = {
       "基础版（引导式）",
       "实战版（无引导）"
     ],
-    "drill_role_by_target": {
-      "院应急指挥部": "commander",
-      "信息科负责人": "itlead",
-      "信息科值班员": "duty",
-      "网络安全管理员": "netsec",
-      "系统管理员": "sysadmin",
-      "医务部/门诊部负责人": "medlead",
-      "临床科室/收费窗口": "clinical",
-      "市卫生健康局": "healthbureau",
-      "市网信办": "cac",
-      "市网安大队": "cyberpolice"
-    },
     "drill_form_by_action": {
       "告警核实": "F1",
       "研判分级": "F4",
@@ -2301,26 +2249,6 @@ module.exports = {
       "上报材料",
       "报案材料"
     ],
-    "target_role_aliases": {
-      "院应急指挥部": "commander",
-      "信息科值班员": "duty",
-      "网络安全管理员": "netsec",
-      "系统管理员": "sysadmin",
-      "信息科负责人": "itlead",
-      "医务科主任": "medlead",
-      "医务部主任": "medlead",
-      "门诊部主任": "medlead",
-      "医务部/门诊部负责人": "medlead",
-      "临床科室": "clinical",
-      "收费窗口": "clinical",
-      "临床科室/收费窗口": "clinical",
-      "市卫生健康局": "healthbureau",
-      "卫健委": "healthbureau",
-      "市委网信办": "cac",
-      "市网信办": "cac",
-      "市网安大队": "cyberpolice",
-      "公安网安": "cyberpolice"
-    },
     "fill_roles_by_role": {
       "platformadmin": null,
       "commander": null,
@@ -2375,7 +2303,8 @@ module.exports = {
           "medlead",
           "clinical",
           "itlead",
-          "commander"
+          "commander",
+          "platformadmin"
         ]
       },
       "external": {
@@ -2385,7 +2314,8 @@ module.exports = {
           "cac",
           "cyberpolice",
           "itlead",
-          "commander"
+          "commander",
+          "platformadmin"
         ]
       }
     },

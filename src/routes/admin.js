@@ -4,7 +4,7 @@ const express = require('express');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
-const { db, parseJson, DB_FILE, DATA_DIR } = require('../db');
+const { db, reload, parseJson, DB_FILE, DATA_DIR } = require('../db');
 const auth = require('../auth');
 const { nowSec } = require('../util');
 
@@ -324,6 +324,133 @@ router.get('/backups', auth.requireAuth, adminOnly, function (req, res) {
     return { file: f, size: st.size, time: d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) +
       ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()) };
   }).sort(function (a, b) { return a.file < b.file ? 1 : -1; }));
+});
+
+/* 校验备份文件名安全（防止路径穿越） */
+function safeBackupFile(name) {
+  if (!name || typeof name !== 'string') return null;
+  if (!/^[a-zA-Z0-9._-]+\.db$/.test(name)) return null;
+  const full = path.resolve(BACKUP_DIR, name);
+  if (!full.startsWith(path.resolve(BACKUP_DIR))) return null;
+  return full;
+}
+
+/* 从指定备份恢复数据库 */
+router.post('/restore', auth.requireAuth, adminOnly, function (req, res) {
+  const file = String((req.body && req.body.file) || '');
+  const backupPath = safeBackupFile(file);
+  if (!backupPath || !fs.existsSync(backupPath)) {
+    return res.status(400).json({ error: '备份文件不存在：' + file });
+  }
+
+  /* 安全网：恢复前自动备份当前数据库 */
+  if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (e) {}
+  const preTs = nowSec().replace(/[-: ]/g, '');
+  const preBackup = path.join(BACKUP_DIR, 'drill-pre-restore-' + preTs + '.db');
+  fs.copyFileSync(DB_FILE, preBackup);
+
+  try {
+    /* 校验备份完整性：打开后执行 integrity_check */
+    const { DatabaseSync } = require('node:sqlite');
+    const tmp = new DatabaseSync(backupPath);
+    const ic = tmp.prepare('PRAGMA integrity_check').get();
+    tmp.close();
+    if (!ic || ic.integrity_check !== 'ok') {
+      return res.status(400).json({ error: '备份文件完整性校验失败，已中止恢复' });
+    }
+
+    /* 替换数据库文件 */
+    fs.copyFileSync(backupPath, DB_FILE);
+
+    /* 刷新连接 + 迁移 + 清 sessions */
+    reload();
+    try { require('../db').migrate(); } catch (e) {}
+    try { db.exec('DELETE FROM sessions'); } catch (e) {}
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (e) {}
+
+    const info = fs.statSync(DB_FILE);
+    auth.audit(req, '从备份恢复数据库：' + file + '（安全网：' + path.basename(preBackup) + '）');
+    res.json({ ok: true, file: file, preBackup: path.basename(preBackup), size: info.size, time: nowSec() });
+  } catch (e) {
+    console.error('[restore]', e && e.stack ? e.stack : e);
+    res.status(500).json({ error: '恢复失败：' + (e.message || e) });
+  }
+});
+
+/* 上传备份文件并恢复 */
+const MAX_BACKUP_UPLOAD = 100 * 1024 * 1024; /* 100MB */
+const { makeUploader, handleUploadError } = require('../upload');
+router.post('/restore-upload', auth.requireAuth, adminOnly,
+  makeUploader('backups').single('file'), handleUploadError, function (req, res) {
+    const f = req.file;
+    if (!f) return res.status(400).json({ error: '请选择要上传的 .db 备份文件' });
+    if (path.extname(f.originalname || f.filename) !== '.db') {
+      try { fs.unlinkSync(f.path); } catch (e) {}
+      return res.status(400).json({ error: '仅支持 .db 格式的备份文件' });
+    }
+    if (f.size < 1024 || f.size > MAX_BACKUP_UPLOAD) {
+      try { fs.unlinkSync(f.path); } catch (e) {}
+      return res.status(400).json({ error: '文件大小需在 1KB ~ 100MB 之间' });
+    }
+
+    /* 安全网 */
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (e) {}
+    const preTs = nowSec().replace(/[-: ]/g, '');
+    const preBackup = path.join(BACKUP_DIR, 'drill-pre-restore-upload-' + preTs + '.db');
+    fs.copyFileSync(DB_FILE, preBackup);
+
+    try {
+      /* 完整性校验 */
+      const { DatabaseSync } = require('node:sqlite');
+      const tmp = new DatabaseSync(f.path);
+      const ic = tmp.prepare('PRAGMA integrity_check').get();
+      tmp.close();
+      if (!ic || ic.integrity_check !== 'ok') {
+        try { fs.unlinkSync(f.path); } catch (e) {}
+        return res.status(400).json({ error: '备份文件完整性校验失败（非有效 SQLite 数据库）' });
+      }
+
+      /* 复制到备份目录存档 + 替换主数据库 */
+      const archiveName = 'drill-upload-' + nowSec().replace(/[-: ]/g, '') + '.db';
+      fs.copyFileSync(f.path, path.join(BACKUP_DIR, archiveName));
+      fs.copyFileSync(f.path, DB_FILE);
+      try { fs.unlinkSync(f.path); } catch (e) {}
+
+      reload();
+      try { require('../db').migrate(); } catch (e) {}
+      try { db.exec('DELETE FROM sessions'); } catch (e) {}
+      try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (e) {}
+
+      auth.audit(req, '上传备份文件恢复：' + archiveName);
+      res.json({ ok: true, file: archiveName, preBackup: path.basename(preBackup), size: f.size, time: nowSec() });
+    } catch (e) {
+      try { fs.unlinkSync(f.path); } catch (e2) {}
+      console.error('[restore-upload]', e && e.stack ? e.stack : e);
+      res.status(500).json({ error: '恢复失败：' + (e.message || e) });
+    }
+  });
+
+/* 删除备份文件 */
+router.delete('/backups/:file', auth.requireAuth, adminOnly, function (req, res) {
+  const full = safeBackupFile(req.params.file);
+  if (!full) return res.status(400).json({ error: '文件名不合法' });
+  if (!fs.existsSync(full)) return res.status(404).json({ error: '备份文件不存在' });
+  try { fs.unlinkSync(full); } catch (e) {
+    return res.status(500).json({ error: '删除失败：' + e.message });
+  }
+  auth.audit(req, '删除备份：' + req.params.file);
+  res.json({ ok: true });
+});
+
+/* 下载备份文件 */
+router.get('/backups/:file', auth.requireAuth, adminOnly, function (req, res) {
+  const full = safeBackupFile(req.params.file);
+  if (!full) return res.status(400).json({ error: '文件名不合法' });
+  if (!fs.existsSync(full)) return res.status(404).json({ error: '备份文件不存在' });
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (e) {}
+  res.download(full, req.params.file);
 });
 
 /* 演练报告数据聚合：按项目汇总概况、时序、任务、评分、取证，供导出标准报告 */

@@ -39,13 +39,16 @@ document.addEventListener('app:ready', function(e){
     return;
   }
 
-  /* 字典分组（4 组 × 14 个 key） */
+  /* 字典分组（5 组 × 15 个 key） */
   var DICT_GROUPS = [
-    { key:'role_mapping', name:'角色映射', icon:'user', desc:'剧本节点 → 角色权限的映射关系', items:[
-      { key:'drill_role_by_target', label:'剧本节点→角色ID', desc:'target 中文名 → role_id' },
-      { key:'target_role_aliases', label:'target 别名映射', desc:'历史别名 → role_id' },
+    { key:'role_mapping', name:'角色映射与权限矩阵', icon:'user', desc:'角色→权限映射、会商频道访问、知识库编辑权限', items:[
       { key:'fill_roles_by_role', label:'取证责任范围', desc:'各角色可负责取证的角色范围' },
-      { key:'managed_roles_by_role', label:'统筹任务范围', desc:'各角色可统筹的任务角色范围' }
+      { key:'managed_roles_by_role', label:'统筹任务范围', desc:'各角色可统筹的任务角色范围' },
+      { key:'chat_channels', label:'会商频道配置', desc:'频道 key → 名称 + 允许访问的角色' },
+      { key:'kb_edit_roles', label:'知识库编辑权限', desc:'可维护预案知识库的角色列表' }
+    ]},
+    { key:'notif', name:'站内消息模板', icon:'bell', desc:'7 种系统事件的消息标题/正文模板（{变量} 占位）', items:[
+      { key:'notif_templates', label:'消息模板全集', desc:'event key → title/desc/source/level 模板' }
     ]},
     { key:'flow_form', name:'流程与表单', icon:'flow', desc:'处置动作、决策干扰、表单匹配', items:[
       { key:'drill_form_by_action', label:'动作→表单模板', desc:'处置动作类型 → form_templates.id' },
@@ -53,11 +56,9 @@ document.addEventListener('app:ready', function(e){
       { key:'drill_action_meta', label:'决策与干扰项', desc:'每个动作的决策问题 + 5 条干扰处置' },
       { key:'script_action_types', label:'剧本处置动作', desc:'剧本编排时「处置动作」下拉选项' }
     ]},
-    { key:'evidence_perm', name:'证据与权限', icon:'evidence', desc:'证据类型、会商频道、知识库权限', items:[
+    { key:'evidence', name:'证据字典', icon:'evidence', desc:'证据类型枚举与院外可见范围', items:[
       { key:'ev_types', label:'证据类型枚举', desc:'系统中可用的证据材料类型' },
-      { key:'external_evidence_types', label:'院外可见证据', desc:'外部单位可见的证据子集' },
-      { key:'chat_channels', label:'会商频道配置', desc:'频道 key → 名称 + 允许访问的角色' },
-      { key:'kb_edit_roles', label:'知识库编辑权限', desc:'可维护预案知识库的角色列表' }
+      { key:'external_evidence_types', label:'院外可见证据', desc:'外部单位可见的证据子集' }
     ]},
     { key:'node_feed', name:'节点特征与工作台', icon:'workbench', desc:'院外节点识别、工作台默认模块', items:[
       { key:'external_node_patterns', label:'院外节点识别', desc:'机构名称 / 事件关键词匹配规则' },
@@ -234,8 +235,31 @@ document.addEventListener('app:ready', function(e){
       return sHtml;
     }
 
+    /* 站内消息模板：event → {title, desc, source, level}，支持 {变量} 占位 */
+    if(key === 'notif_templates'){
+      var NT = value || {};
+      var ntHtml = commonFoot(key);
+      ntHtml += '<div class="tiny dim mb2">模板中 <code>{变量名}</code> 会在发送时自动替换为实际值；可用变量因 event 而异（见下方提示）。level：P0=紧急/P1=重要/P2=一般</div>';
+      Object.keys(NT).forEach(function(evKey){
+        var ev = NT[evKey] || { title:'', desc:'', source:'', level:'P2' };
+        var lvSel = ['P0','P1','P2'].map(function(l){ return '<option value="'+l+'"'+(l===ev.level?' selected':'')+'>'+l+'</option>'; }).join('');
+        ntHtml += '<div class="dict-group-card" style="padding:12px;margin-bottom:10px;border-left:3px solid var(--info)">'
+          + '<div class="dict-row" style="margin-bottom:8px">'
+          +  '<span style="font-weight:700;color:var(--text);font-family:monospace">event: '+App.esc(evKey)+'</span>'
+          +  '<button class="btn sm danger dictNTDel" data-ev="'+App.esc(evKey)+'">'+App.icon('trash')+'</button></div>'
+          + '<div class="dict-row"><label class="tiny dim" style="min-width:48px">标题</label><input class="input dictNTTitle" data-ev="'+App.esc(evKey)+'" value="'+App.esc(ev.title||'')+'" style="flex:1" placeholder="{action} · {project}"></div>'
+          + '<div class="dict-row" style="align-items:flex-start"><label class="tiny dim" style="min-width:48px">正文</label><textarea class="input dictNTDesc" data-ev="'+App.esc(evKey)+'" rows="3" style="flex:1;resize:vertical">'+App.esc(ev.desc||'')+'</textarea></div>'
+          + '<div class="dict-row">'
+          +  '<label class="tiny dim" style="min-width:48px">来源</label><input class="input dictNTSource" data-ev="'+App.esc(evKey)+'" value="'+App.esc(ev.source||'')+'" style="max-width:200px">'
+          +  '<label class="tiny dim" style="margin-left:16px">等级</label><select class="input dictNTLevel" data-ev="'+App.esc(evKey)+'" style="max-width:100px">'+lvSel+'</select>'
+          + '</div></div>';
+      });
+      ntHtml += '<button class="btn tiny" id="dictNTAdd">'+App.icon('plus')+'新增事件模板</button>';
+      return ntHtml;
+    }
+
     /* 通用 key→value */
-    var TWO_COL_KEYS = ['drill_role_by_target', 'drill_form_by_action', 'drill_level_by_scenario', 'target_role_aliases'];
+    var TWO_COL_KEYS = ['drill_form_by_action', 'drill_level_by_scenario'];
     if(TWO_COL_KEYS.indexOf(key) >= 0){
       var rows = [];
       rows.push(commonFoot(key));
@@ -309,13 +333,11 @@ document.addEventListener('app:ready', function(e){
 
   function commonFoot(key){
     var hints = {
-      drill_role_by_target: '剧本节点 target 中文名 → role_id（影响角色工作台、实战版处置、混淆流程生成）。保存前校验 role_id 必须存在。',
       drill_form_by_action: '动作类型 → form_templates.id（基础版任务自动匹配）。保存前校验 form_id 必须存在。',
       drill_level_by_scenario: 'scenarios.level → tasks.level（基础版自动生成任务时赋默认等级）。',
       drill_action_meta: '每个动作类型的决策问题 + 5 条干扰处置选项（实战版混淆流程生成 + 剧本画布决策题）。',
       ev_types: '系统中可用的证据材料类型枚举（证据计划生成 + 取证分类）。',
       external_evidence_types: '院外单位可见的证据材料子集（须是 ev_types 的子集）。',
-      target_role_aliases: '剧本节点 target 中文名（含历史别名） → role_id（roleIdOfTarget 先查此表再查 drill_role_by_target）。',
       fill_roles_by_role: '各角色可负责取证的责任角色范围；null 表示全部。',
       managed_roles_by_role: '各角色可统筹的任务角色范围；null 表示全部。',
       chat_channels: '演练导调中心会商频道配置：频道 key → 名称 + 允许访问的角色列表。',
@@ -407,11 +429,28 @@ document.addEventListener('app:ready', function(e){
       });
     });
 
+    /* 站内消息模板：新增/删除 event */
+    var ntAdd = el.querySelector('#dictNTAdd');
+    if(ntAdd){ ntAdd.addEventListener('click', function(){
+      var curVal = cache[currentKey].value || {};
+      var k = 'event_' + (Object.keys(curVal).length + 1);
+      curVal[k] = { title:'新模板 · {project}', desc:'请编辑模板内容，支持 {变量} 占位。', source:'演练调度', level:'P2' };
+      cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, curVal);
+      render(); wire();
+    }); }
+    el.querySelectorAll('.dictNTDel').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var curVal = cache[currentKey].value || {};
+        delete curVal[btn.getAttribute('data-ev')];
+        cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, curVal);
+        render(); wire();
+      });
+    });
+
     /* 新增两列行 */
     var addBtn = el.querySelector('#dictAddRow');
     if(addBtn){ addBtn.addEventListener('click', function(){
-      cache[currentKey].value['新条目'] = currentKey === 'drill_role_by_target' || currentKey === 'target_role_aliases' ? 'duty'
-        : currentKey === 'drill_form_by_action' ? '' : 'P2';
+      cache[currentKey].value['新条目'] = currentKey === 'drill_form_by_action' ? '' : 'P2';
       cache[currentKey].dirty = true; cache[currentKey].html = build(currentKey, cache[currentKey].value);
       render(); wire();
     }); }
@@ -510,6 +549,22 @@ document.addEventListener('app:ready', function(e){
       });
       return obj;
     }
+    if(currentKey === 'notif_templates'){
+      var ntObj = {};
+      var evKeys = {};
+      el.querySelectorAll('.dictNTTitle, .dictNTDesc, .dictNTSource, .dictNTLevel').forEach(function(inp){
+        var ev = inp.getAttribute('data-ev');
+        if(!evKeys[ev]) evKeys[ev] = { title:'', desc:'', source:'', level:'P2' };
+        if(inp.classList.contains('dictNTTitle')) evKeys[ev].title = (inp.value||'').trim();
+        if(inp.classList.contains('dictNTDesc')) evKeys[ev].desc = (inp.value||'').trim();
+        if(inp.classList.contains('dictNTSource')) evKeys[ev].source = (inp.value||'').trim();
+        if(inp.classList.contains('dictNTLevel')) evKeys[ev].level = inp.value || 'P2';
+      });
+      Object.keys(evKeys).forEach(function(ev){
+        if(evKeys[ev].title) ntObj[ev] = evKeys[ev];
+      });
+      return ntObj;
+    }
     if(currentKey === 'fill_roles_by_role' || currentKey === 'managed_roles_by_role'){
       var scopeCards = el.querySelectorAll('.dict-group-card[data-k], .dictSRole, .dictSAll, .dict-group-card');
       var obj2 = {};
@@ -579,7 +634,7 @@ document.addEventListener('app:ready', function(e){
   });
 
   /* 默认加载第一个字典 */
-  load('drill_role_by_target');
+  load('drill_form_by_action');
 });
 App.boot('dictionary');
 </script>

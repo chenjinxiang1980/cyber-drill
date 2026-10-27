@@ -19,6 +19,42 @@ document.addEventListener('app:ready', function(e){
   /* 监视大屏：指挥部 / 平台管理员 / 信息科负责人 */
   var canScreen = ['commander','platformadmin','itlead'].indexOf(role.id)>=0;
 
+  /* ---------- 无演练：展示空态 ---------- */
+  if (!proj) {
+    Promise.all([API.getScenarios(), API.getProjects(), API.getScriptNodes()]).then(function(r){
+      var scens = Array.isArray(r[0]) ? r[0] : [];
+      var projs = Array.isArray(r[1]) ? r[1] : [];
+      var nodes = Array.isArray(r[2]) ? r[2] : [];
+      page.innerHTML =
+        '<div class="standby-hero">'
+        + '<div class="sb-icon">'+App.icon('shield')+'</div>'
+        + '<div class="sb-body">'
+        +   '<span class="sb-tag"><span class="dot"></span>SYSTEM STANDBY · 待机模式</span>'
+        +   '<h2>当前无进行中的安全演练</h2>'
+        +   '<div class="sb-sub">系统已就绪，所有剧本节点、流程字典、模拟场景均已加载。请先创建演练项目或从剧本库选择场景启动推演。</div>'
+        +   '<div class="sb-acts">'
+        +     '<a class="btn primary" href="projects.html">'+App.icon('projects')+'创建演练项目</a>'
+        +     '<a class="btn" href="scenarios.html">'+App.icon('scenarios')+'浏览剧本库</a>'
+        +     '<a class="btn" href="knowledge.html">'+App.icon('knowledge')+'查阅应急预案</a>'
+        +   '</div>'
+        +   '<div class="sb-meta">'
+        +     '<div class="m-item"><b>'+scens.length+'</b>内置场景</div>'
+        +     '<div class="m-item"><b>'+nodes.length+'</b>剧本节点</div>'
+        +     '<div class="m-item"><b>'+projs.length+'</b>历史项目</div>'
+        +   '</div>'
+        + '</div></div>'
+        + '<div class="card"><div class="card-title">'+App.icon('flow')+'快速预览：场景剧本库</div><div id="sensList" class="scroll-panel"></div></div>';
+      var box = document.getElementById('sensList');
+      if (!scens.length) { box.innerHTML = '<div class="empty"><p>暂无场景数据</p></div>'; return; }
+      box.innerHTML = scens.slice(0, 6).map(function(s){
+        return '<div class="file-chip" style="display:flex;margin-bottom:10px;width:100%"><span class="tag blue">'+App.esc(s.id)+'</span><span class="grow ellip" style="margin-left:10px">'+App.esc(s.name)+'</span><span class="fc-size">'+(s.nodes||0)+' 节点 · '+(s.level||'一般')+'级</span></div>';
+      }).join('');
+    }).catch(function(){
+      page.innerHTML = '<div class="forbidden">'+App.icon('alert')+'<h2>数据加载失败</h2><p>请检查网络或联系管理员</p></div>';
+    });
+    return;
+  }
+
   page.innerHTML =
     '<div class="page-head"><div><h1>演练态势总看板</h1><div class="sub">'+proj.name+' · '+proj.type+' · 参演单位：'+proj.units.join('、')+'</div></div>'
     + '<div class="acts">'
@@ -95,7 +131,7 @@ document.addEventListener('app:ready', function(e){
     var nodes = DATA.nodes || [];
     if(!nodes.length){ autoScroll(document.getElementById('scriptBox'), '<div class="tiny dim">当前剧本暂无节点</div>'); return; }
     var html = '<div class="timeline">' + nodes.map(function(n, i){
-      var icon = n.type==='alert'?'bell':n.type==='branch'?'flow':n.type==='report'?'send':n.type==='end'?'power':'tasks';
+      var icon = n.type==='alert'?'bell':n.type==='parallel'?'flow':n.type==='report'?'send':n.type==='end'?'power':'tasks';
       return '<div class="tl-item gray"><span class="tl-dot"></span><div class="flex gap2"><span class="tl-time">第 '+(i+1)+' 节点</span></div><div class="tl-title">'+App.icon(icon)+' '+n.title+'</div><div class="tl-desc">接收：'+n.target+(n.form?' · 需提交：'+(MOCK.FORM_TEMPLATES.filter(function(f){return f.id===n.form;})[0]||{}).name:'')+(n.timeout?' · 处置时长 '+n.timeout+' 分钟':'')+'</div></div>';
     }).join('') + '</div>';
     autoScroll(document.getElementById('scriptBox'), html);

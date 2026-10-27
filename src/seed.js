@@ -1,4 +1,7 @@
-/* 初始化数据库：建表 + 从 seed_data.js 导入初始演练数据
+/* 初始化数据库：建表 + 从种子数据导入初始演练数据
+ * 种子数据优先从 seed_baseline 表读取（已入库的基线版本），
+ * 数据库为空时回退到 seed_data.js + scenario_baseline.js 文件，
+ * 首次文件加载后自动 snapshot 入库，固化种子数据避免文件丢失/修改。
  * 用法：node src/seed.js            首次初始化（已有数据则跳过）
  *       node src/seed.js --reset    清空并重新初始化（谨慎使用）
  */
@@ -10,13 +13,236 @@ const { db, migrate, isSeeded, tx } = require('./db');
 const { hashPassword, INITIAL_PASSWORD } = require('./auth');
 const { nowSec } = require('./util');
 
-/* 种子数据中心（从运行时 DB 反向导出） */
-const SD = require('./seed_data.js');
-
-/* 专项预案正文 */
-const KB_CONTENT = require('./kb-content');
-
 const RESET = process.argv.indexOf('--reset') >= 0;
+
+/* 延迟加载：只有当 seed_baseline 表不可用时才尝试从文件读取 */
+let _SD = null;
+let _SBM = null;
+function getSD() {
+  if (!_SD) _SD = require('./seed_data.js');
+  return _SD;
+}
+function getSBM() {
+  if (!_SBM) _SBM = require('./scenario_baseline');
+  return _SBM;
+}
+
+/* ========================================================================
+ * 种子数据来源解析：数据库优先，文件兜底
+ * ======================================================================== */
+
+/* 从数据库 seed_baseline 表读取最新的一套种子数据 */
+function loadSeedFromDb() {
+  try {
+    const rows = db.prepare('SELECT version, component, data FROM seed_baseline ORDER BY id DESC').all();
+    if (!rows || rows.length < 2) return null;
+    // 提取最最新版本的每个 component
+    const byComp = {};
+    rows.forEach(function (r) {
+      if (!byComp[r.component]) {
+        try { byComp[r.component] = JSON.parse(r.data); } catch (e) {}
+      }
+    });
+    if (byComp.seed_data && byComp.scenario_baseline) {
+      return {
+        version: rows[0].version,
+        seedData: byComp.seed_data,
+        scenarioBaseline: { SCEN: byComp.scenario_baseline.SCEN || byComp.scenario_baseline,
+          MAIN_DEPS: byComp.scenario_baseline.MAIN_DEPS,
+          PROJECT_MODE: byComp.scenario_baseline.PROJECT_MODE }
+      };
+    }
+  } catch (e) { /* seed_baseline 表不存在或为空 */ }
+  return null;
+}
+
+/* 从文件兜底加载种子数据 */
+function loadSeedFromFile() {
+  const SD = getSD();
+  const SBM = getSBM();
+  return {
+    version: 'file',
+    seedData: SD,
+    scenarioBaseline: {
+      SCEN: SBM.SCEN,
+      MAIN_DEPS: SBM.MAIN_DEPS,
+      PROJECT_MODE: SBM.PROJECT_MODE
+    }
+  };
+}
+
+/* 统一入口：返回 { seedData, scenarioBaseline, version, fromDb } */
+function loadSeedSource() {
+  const fromDb = loadSeedFromDb();
+  if (fromDb) {
+    fromDb.fromDb = true;
+    return fromDb;
+  }
+  const fromFile = loadSeedFromFile();
+  fromFile.fromDb = false;
+  return fromFile;
+}
+
+/* 将当前种子数据 snapshot 存入 seed_baseline 表（幂等） */
+function snapshotSeed(seedData, scenarioBaseline, version, note) {
+  const ts = nowSec();
+  try {
+    const ins = db.prepare(
+      'INSERT OR REPLACE INTO seed_baseline (version, component, data, note, created_at) VALUES (?,?,?,?,?)'
+    );
+    ins.run(version || 'initial', 'seed_data', JSON.stringify(seedData), note || '首次部署自动入库', ts);
+    ins.run(version || 'initial', 'scenario_baseline', JSON.stringify(scenarioBaseline), note || '首次部署自动入库', ts);
+    console.log('[seed] 种子数据已 snapshot 入 seed_baseline（version=' + (version || 'initial') + '）');
+    return true;
+  } catch (e) {
+    console.warn('[seed] snapshotSeed 失败（可能是表尚未创建）：', e.message);
+    return false;
+  }
+}
+
+/* 检查 seed_baseline 表是否有种子数据 */
+function hasBaseline() {
+  try {
+    const row = db.prepare('SELECT COUNT(*) c FROM seed_baseline').get();
+    return row.c >= 2;
+  } catch (e) { return false; }
+}
+
+/* 导出当前运行时数据库为基线（供 /api/system/seed/export 使用） */
+function exportBaseline(version, note) {
+  version = version || 'v-custom-' + nowSec().slice(0, 10);
+  note = note || '运行时导出';
+  const ts = nowSec();
+
+  /* 从当前数据库反导出 seed_data 格式 */
+  const seedData = {};
+  seedData.ROLES = db.prepare('SELECT * FROM roles ORDER BY seq').all().map(function (r) {
+    return { id: r.id, name: r.name, short: r.short, icon: r.icon, color: r.color,
+      descr: r.descr, nav: JSON.parse(r.nav || '[]'), external: !!r.external, seq: r.seq };
+  });
+  seedData.USERS = db.prepare('SELECT username,name,role_id AS role,org FROM users').all();
+  seedData.SCENARIOS = db.prepare('SELECT * FROM scenarios ORDER BY id').all().map(function (s) {
+    return { id: s.id, name: s.name, type: s.type, level: s.level, status: s.status,
+      version: s.version, descr: s.descr, alert: s.alert };
+  });
+  seedData.KNOWLEDGE = db.prepare('SELECT id,name,cat,updated,size,pages FROM knowledge').all();
+  seedData.KB_CONTENT = {};
+  db.prepare("SELECT id,content FROM knowledge WHERE content IS NOT NULL AND content<>''").all().forEach(function (k) {
+    try { seedData.KB_CONTENT[k.id] = JSON.parse(k.content); } catch (e) {}
+  });
+  const dictRows = db.prepare('SELECT key,value FROM dict').all();
+  seedData.DICT = {};
+  dictRows.forEach(function (r) {
+    try { seedData.DICT[r.key] = JSON.parse(r.value); } catch (e) { seedData.DICT[r.key] = r.value; }
+  });
+  const simRows = db.prepare('SELECT type,data FROM sim_data').all();
+  seedData.SIM_DATA = {};
+  simRows.forEach(function (r) {
+    try { seedData.SIM_DATA[r.type] = JSON.parse(r.data); } catch (e) { seedData.SIM_DATA[r.type] = r.data; }
+  });
+
+  /* scenario_baseline：优先从 seed_baseline 数据库读，没有再兜底从文件 */
+  let scenarioBL = null;
+  try {
+    const sbRow = db.prepare("SELECT data FROM seed_baseline WHERE component='scenario_baseline' ORDER BY id DESC LIMIT 1").get();
+    if (sbRow) scenarioBL = JSON.parse(sbRow.data);
+  } catch (e) {}
+  if (!scenarioBL) {
+    const SBM = getSBM();
+    scenarioBL = { SCEN: SBM.SCEN, MAIN_DEPS: SBM.MAIN_DEPS, PROJECT_MODE: SBM.PROJECT_MODE };
+  }
+
+  snapshotSeed(seedData, scenarioBL, version, note);
+  return { version: version, note: note, created_at: ts };
+}
+
+/* 将 scenario baseline 中的剧本节点写入数据库
+ * 接受 SBLx = { SCEN, MAIN_DEPS, PROJECT_MODE }，兼容老格式（元组数组）和新格式（完整对象）
+ * 此函数是自包含的，不依赖 scenario_baseline.js，确保 seed_baseline 可独立完成初始化
+ */
+function applyScenarioNodes(db, SBLx, today) {
+  const _SCEN = (SBLx && SBLx.SCEN) || {};
+  const _MAIN_DEPS = (SBLx && SBLx.MAIN_DEPS) || {};
+  const _PROJECT_MODE = (SBLx && SBLx.PROJECT_MODE) || {};
+  const del = db.prepare('DELETE FROM script_nodes WHERE scenario_id=?');
+  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,required,deps,flow_type,score,pos_x,pos_y,parallel_desc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  Object.keys(_SCEN).forEach(function (sid) {
+    const sc = db.prepare('SELECT * FROM scenarios WHERE id=?').get(sid);
+    if (!sc) return;
+    const all = _SCEN[sid];
+    const isFull = all && all._mode === 'full';
+    let main, dist;
+    if (isFull) {
+      main = all.main.slice();
+      dist = all.dist.slice();
+    } else {
+      main = all.filter(function (r) { return r[5] === 1; });
+      dist = all.filter(function (r) { return r[5] === 0; });
+    }
+    del.run(sid);
+    if (isFull) {
+      main.forEach(function (o, i) {
+        const px = (o.posX !== undefined && o.posX !== null) ? o.posX : null;
+        const py = (o.posY !== undefined && o.posY !== null) ? o.posY : null;
+        ins.run(o.id, sid, o.type, o.title, o.target, '', o.timeout || null, '', '', o.desc || '',
+          JSON.stringify([]), i, o.guide || '', o.keywords || '', o.action || '', o.required,
+          JSON.stringify(o.deps || []), o.flow_type || 'correct', (o.score !== undefined && o.score !== null) ? o.score : 0, px, py, o.parallel_desc || '');
+      });
+      dist.forEach(function (o, i) {
+        const sc_ = (o.score !== undefined && o.score !== null) ? o.score : 10;
+        const ft = o.flow_type || 'distractor';
+        const px = (o.posX !== undefined && o.posX !== null) ? o.posX : null;
+        const py = (o.posY !== undefined && o.posY !== null) ? o.posY : null;
+        ins.run(o.id, sid, o.type, o.title, o.target, '', o.timeout || null, '', '', o.desc || '',
+          JSON.stringify([]), main.length + i, o.guide || '', o.keywords || '', o.action || '', o.required,
+          JSON.stringify(o.deps || []), ft, sc_, px, py, o.parallel_desc || '');
+      });
+    } else {
+      const mainCount = main.length;
+      const remainCount = mainCount - 1;
+      const mainBase = remainCount > 0 ? Math.floor(100 / remainCount) : 0;
+      const mainRemainder = remainCount > 0 ? 100 % remainCount : 0;
+      main.forEach(function (r, i) {
+        const id = sid + '-' + (i + 1);
+        const deps = _MAIN_DEPS[sid] && _MAIN_DEPS[sid][i]
+          ? _MAIN_DEPS[sid][i].map(function (di) { return sid + '-' + (di + 1); })
+          : [];
+        let score;
+        if (i === 0) score = 0;
+        else if ((i - 1) < mainRemainder) score = mainBase + 1;
+        else score = mainBase;
+        ins.run(id, sid, r[0], r[1], r[2], '', r[4] || null, '', '', r[6] || '',
+          JSON.stringify([]), i, r[7] || '', r[8] || '', r[9] || '', 1,
+          JSON.stringify(deps), 'correct', score, null, null, '');
+      });
+      const roleByTarget = {};
+      const roles = db.prepare('SELECT id, name, short FROM roles').all();
+      roles.forEach(function (role) { roleByTarget[role.name] = role.id; roleByTarget[role.short] = role.id; });
+      let roleCounters = {};
+      let seq = main.length;
+      dist.forEach(function (r, i) {
+        const roleId = roleByTarget[r[2]] || 'other';
+        roleCounters[roleId] = (roleCounters[roleId] || 0) + 1;
+        const id = 'DS' + sid + '-' + roleId + '-' + roleCounters[roleId];
+        ins.run(id, sid, r[0], r[1], r[2], '', r[4] || null, '', '', r[6] || '',
+          JSON.stringify([]), seq + i, r[7] || '', r[8] || '', r[9] || '', 0,
+          JSON.stringify([]), 'distractor', 10, null, null, '');
+      });
+    }
+    db.prepare('UPDATE scenarios SET nodes=?, updated=? WHERE id=?').run(main.length, today, sid);
+  });
+  try {
+    Object.keys(_PROJECT_MODE).forEach(function (pid) {
+      const p = db.prepare('SELECT id FROM projects WHERE id=?').get(pid);
+      if (p) db.prepare('UPDATE projects SET mode=? WHERE id=?').run(_PROJECT_MODE[pid], pid);
+    });
+  } catch (e) {}
+  db.prepare("UPDATE projects SET mode='基础版' WHERE mode IS NULL OR mode=''").run();
+}
+
+/* ========================================================================
+ * 初始化主体
+ * ======================================================================== */
 
 function clearAll() {
   const tables = ['notif_reads','notifs','messages','chat_messages','task_attachments','form_submissions',
@@ -28,33 +254,30 @@ function clearAll() {
   db.exec('PRAGMA foreign_keys = ON');
 }
 
-function run() {
-  migrate();
-  if (RESET) {
-    clearAll();
-  } else if (isSeeded()) {
-    console.log('[seed] 数据库已初始化，跳过。如需重建请执行：npm run reset');
-    return;
-  }
+function run(opts) {
+  opts = opts || {};
+  const source = loadSeedSource();
+  const SDx = source.seedData;
+  const SBLx = source.scenarioBaseline;
 
   const ts = nowSec();
 
   tx(function () {
     /* ---------- 角色 ---------- */
     const ri = db.prepare('INSERT INTO roles (id,name,short,icon,color,descr,nav,external,seq) VALUES (?,?,?,?,?,?,?,?,?)');
-    SD.ROLES.forEach(function (r) {
+    SDx.ROLES.forEach(function (r) {
       const nav = (r.nav || []).filter(function (k) { return k !== 'tasks'; });
       if (r.id === 'platformadmin' && nav.indexOf('report') < 0) nav.push('report');
       if (r.id === 'platformadmin' && nav.indexOf('replay') < 0) nav.push('replay');
       if (['commander', 'platformadmin', 'itlead'].indexOf(r.id) >= 0 && nav.indexOf('screen') < 0) nav.push('screen');
-      ri.run(r.id, r.name, r.short || '', SD.ROLE_ICON[r.id] || r.icon || 'user', r.color || '',
+      ri.run(r.id, r.name, r.short || '', (SDx.ROLE_ICON && SDx.ROLE_ICON[r.id]) || r.icon || 'user', r.color || '',
         r.descr || '', JSON.stringify(nav), r.external ? 1 : 0, r.seq || 0);
     });
 
     /* ---------- 用户 + user_roles ---------- */
     const ui = db.prepare('INSERT INTO users (username,name,role_id,org,pwd_salt,pwd_hash,status,must_change,created_at) VALUES (?,?,?,?,?,?,?,?,?)');
     const ur = db.prepare('INSERT INTO user_roles (user_id,role_id) VALUES (?,?)');
-    SD.USERS.forEach(function (u) {
+    SDx.USERS.forEach(function (u) {
       const p = hashPassword(INITIAL_PASSWORD);
       const r = ui.run(u.username, u.name, u.role, u.org || '', p.salt, p.hash, '启用', 1, ts);
       ur.run(Number(r.lastInsertRowid), u.role);
@@ -62,121 +285,60 @@ function run() {
 
     /* ---------- 场景 ---------- */
     const si = db.prepare('INSERT INTO scenarios (id,name,type,level,status,version,updated,nodes,descr,alert) VALUES (?,?,?,?,?,?,?,?,?,?)');
-    SD.SCENARIOS.forEach(function (s) {
-      si.run(s.id, s.name, s.type || '基础版', s.level || '一般', s.status || '启用', s.version || 'v1.0',
+    SDx.SCENARIOS.forEach(function (s) {
+      si.run(s.id, s.name, s.type || '', s.level || '一般', s.status || '启用', s.version || 'v1.0',
         ts.slice(0, 10), 0, s.descr || '', s.alert || '');
     });
 
-    /* ---------- 项目 ---------- */
-    const pi = db.prepare('INSERT INTO projects (id,name,mode,date,scenario_id,level,status,target,units,members,observers,started_at,paused_sec) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
-    SD.PROJECTS.forEach(function (p) {
-      pi.run(p.id, p.name, p.mode || '基础版', p.date || '', p.scenario_id, '', p.status || '进行中', '',
-        '[]', '[]', '[]', null, 0);
-    });
-
-    /* ---------- 任务 ---------- */
-    const ti = db.prepare('INSERT INTO tasks (id,project_id,role_id,title,descr,deadline,status,level,node_id,seq) VALUES (?,?,?,?,?,?,?,?,?,?)');
-    (SD.TASKS || []).forEach(function (t) {
-      ti.run(t.id, t.project_id, t.role_id, t.title, t.descr || '', t.deadline || '', t.status || '待办', t.level || '',
-        t.node_id || null, t.seq || 0);
-    });
-
     /* ---------- 剧本节点（从 scenario_baseline 基线） ---------- */
-    require('./scenario_baseline').apply(db, { bump: false, date: ts.slice(0, 10) });
+    applyScenarioNodes(db, SBLx, ts.slice(0, 10));
 
     /* ---------- 表单模板 ---------- */
-    const fi = db.prepare('INSERT OR REPLACE INTO form_templates (id,name,fields) VALUES (?,?,?)');
     try {
-      require('./forms').DEFAULT_TEMPLATES.forEach(function (f) { fi.run(f.id, f.name, JSON.stringify(f.fields || [])); });
-    } catch (e) {
-      /* forms 模块不存在时跳过 */
-    }
-
-    /* ---------- 消息 ---------- */
-    const mi = db.prepare('INSERT INTO messages (id,time,level,source,text,targets,seq) VALUES (?,?,?,?,?,?,?)');
-    (SD.MESSAGES || []).forEach(function (m) { mi.run(m.id, m.time, m.level, m.source, m.text, typeof m.targets === 'string' ? m.targets : JSON.stringify(m.targets || []), m.seq || 0); });
-
-    /* ---------- 通知 ---------- */
-    const noi = db.prepare('INSERT INTO notifs (id,time,level,source,title,descr,seq) VALUES (?,?,?,?,?,?,?)');
-    (SD.NOTIFS || []).forEach(function (n) { noi.run(n.id, n.time, n.level, n.source || '系统', n.title, n.descr || '', n.seq || 0); });
-
-    /* ---------- 会商（按 grp 分组） ---------- */
-    const ci = db.prepare('INSERT INTO chat_messages (grp,sender,role_id,time,text,att) VALUES (?,?,?,?,?,?)');
-    Object.keys(SD.CHAT || {}).forEach(function (g) {
-      (SD.CHAT[g] || []).forEach(function (c) {
-        ci.run(g, c.sender, c.role, c.time, c.text, c.att || null);
+      const forms = require('./forms');
+      (forms.DEFAULT_TEMPLATES || SDx.FORM_TEMPLATES || []).forEach(function (f) {
+        db.prepare('INSERT OR REPLACE INTO form_templates (id,name,fields) VALUES (?,?,?)').run(f.id, f.name, JSON.stringify(f.fields || []));
       });
-    });
-
-    /* ---------- 取证 ---------- */
-    const ei = db.prepare('INSERT INTO evidence (id,type,name,size,time,role_id,uploader,auto,task_id,project_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-    (SD.EVIDENCE || []).forEach(function (e) {
-      ei.run(e.id, e.type, e.name, e.size || '-', e.time, e.role_id || 'sys', e.uploader || '',
-        e.auto ? 1 : 0, e.task_id || null, e.project_id || null, ts);
-    });
-
-    /* ---------- 快照 ---------- */
-    const spi = db.prepare('INSERT INTO snapshots (id,project_id,name,time,by_user,note) VALUES (?,?,?,?,?,?)');
-    (SD.SNAPSHOTS || []).forEach(function (s) { spi.run(s.id, s.project_id || activeProjectId(), s.name, s.time, s.by_user || '', s.note || ''); });
-
-    /* ---------- 时序 ---------- */
-    const tli = db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)');
-    (SD.TIMELINE || []).forEach(function (t) {
-      tli.run(t.project_id || activeProjectId(), t.t, t.actor, t.role_id || '', t.action, t.detail || '', t.level || '', t.seq || 0);
-    });
-
-    /* ---------- 处置时序图 ---------- */
-    const sfi = db.prepare('INSERT INTO seq_flow (project_id,name,time,role,state,seq) VALUES (?,?,?,?,?,?)');
-    (SD.SEQ_FLOW || []).forEach(function (s) { sfi.run(s.project_id || activeProjectId(), s.name, s.time, s.role, s.state, s.seq || 0); });
-
-    /* ---------- 评分指标与结果 ---------- */
-    const kii = db.prepare('INSERT INTO score_items (id,name,weight,rule,seq) VALUES (?,?,?,?,?)');
-    (SD.SCORE_ITEMS || []).forEach(function (k) { kii.run(k.id, k.name, k.weight || 0, k.rule || '', k.seq || 0); });
-    const kri = db.prepare('INSERT INTO scores (item_id,project_id,score,max,note,auto,updated_at) VALUES (?,?,?,?,?,?,?)');
-    (SD.SCORES || []).forEach(function (s) { kri.run(s.item_id, activeProjectId(), s.score, s.max || 100, s.note || '', 1, ts); });
-
-    /* ---------- 台账 ---------- */
-    const li = db.prepare('INSERT INTO ledger (id,project_id,name,date,type,event,level,result,score,org) VALUES (?,?,?,?,?,?,?,?,?,?)');
-    (SD.LEDGER || []).forEach(function (l) {
-      const pid = l.project_id || l.id;
-      li.run(l.id, pid, l.name, l.date, l.type, l.event, l.level, l.result, l.score, l.org || '');
-    });
+    } catch (e) { /* forms 模块不存在时跳过 */ }
 
     /* ---------- 知识库 ---------- */
-    const kbi = db.prepare('INSERT INTO knowledge (id,name,cat,updated,size,pages,content,file_path) VALUES (?,?,?,?,?,?,?,?)');
-    (SD.KNOWLEDGE || []).forEach(function (k) {
-      const body = SD.KB_CONTENT && SD.KB_CONTENT[k.id]
-        ? JSON.stringify(SD.KB_CONTENT[k.id])
-        : (KB_CONTENT[k.id] ? JSON.stringify(KB_CONTENT[k.id]) : '');
-      kbi.run(k.id, k.name, k.cat || '预案', k.updated || ts.slice(0, 10), k.size || '', k.pages || 0, body, null);
+    (SDx.KNOWLEDGE || []).forEach(function (k) {
+      const body = SDx.KB_CONTENT && SDx.KB_CONTENT[k.id]
+        ? JSON.stringify(SDx.KB_CONTENT[k.id])
+        : '';
+      db.prepare('INSERT INTO knowledge (id,name,cat,updated,size,pages,content,file_path) VALUES (?,?,?,?,?,?,?,?)')
+        .run(k.id, k.name, k.cat || '预案', k.updated || ts.slice(0, 10), k.size || '', k.pages || 0, body, null);
     });
 
-    /* ---------- 业务影响 ---------- */
-    const ii = db.prepare('INSERT INTO impact (sys,state,pct,seq) VALUES (?,?,?,?)');
-    (SD.IMPACT || []).forEach(function (m) { ii.run(m.sys, m.state, m.pct, m.seq || 0); });
-
     /* ---------- 字典 ---------- */
-    const di = db.prepare('INSERT INTO dict (key,value) VALUES (?,?)');
-    Object.keys(SD.DICT || {}).forEach(function (k) { di.run(k, JSON.stringify(SD.DICT[k])); });
+    Object.keys(SDx.DICT || {}).forEach(function (k) {
+      db.prepare('INSERT INTO dict (key,value) VALUES (?,?)').run(k, JSON.stringify(SDx.DICT[k]));
+    });
 
     /* ---------- 场景模拟数据 ---------- */
-    const sdi = db.prepare('INSERT INTO sim_data (type,data) VALUES (?,?)');
-    Object.keys(SD.SIM_DATA || {}).forEach(function (k) { sdi.run(k, JSON.stringify(SD.SIM_DATA[k])); });
+    Object.keys(SDx.SIM_DATA || {}).forEach(function (k) {
+      db.prepare('INSERT INTO sim_data (type,data) VALUES (?,?)').run(k, JSON.stringify(SDx.SIM_DATA[k]));
+    });
 
     /* ---------- 系统设置 ---------- */
-    db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run('active_project', activeProjectId());
+    db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run('active_project', '');
     db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run('initialized_at', ts);
     require('./brand').ensureBrand(db);
   });
 
-  console.log('[seed] 初始化完成');
+  /* 文件兜底加载后自动 snapshot 入库，固化种子 */
+  if (!source.fromDb && !opts.skipSnapshot) {
+    try { snapshotSeed(SDx, SBLx, 'initial', '首次部署自动固化'); } catch (e) {}
+  }
+
+  console.log('[seed] 初始化完成（来源：' + (source.fromDb ? 'seed_baseline@' + source.version : 'seed_data.js 文件') + '）');
   console.log('[seed] 数据库文件：' + require('./db').DB_FILE);
   console.log('[seed] 初始密码：' + INITIAL_PASSWORD);
   console.log('[seed] 账号列表：');
   const rows = db.prepare('SELECT u.username,u.name,r.name AS role FROM users u JOIN roles r ON r.id=u.role_id ORDER BY u.id').all();
   rows.forEach(function (r) { console.log('        ' + r.username.padEnd(16) + r.name + ' · ' + r.role); });
   const counts = {};
-  ['users','roles','scenarios','script_nodes','knowledge','projects','tasks','messages','chat_messages'].forEach(function (t) {
+  ['users','roles','scenarios','script_nodes','knowledge','dict','sim_data'].forEach(function (t) {
     try { counts[t] = db.prepare('SELECT COUNT(*) c FROM ' + t).get().c; } catch (e) {}
   });
   console.log('[seed] 数据概览：' + JSON.stringify(counts));
@@ -184,8 +346,64 @@ function run() {
 
 /* 当前演练中的项目 id */
 function activeProjectId() {
-  const p = (SD.PROJECTS || []).filter(function (x) { return x.status === '演练中'; })[0];
-  return p ? p.id : ((SD.PROJECTS && SD.PROJECTS[0]) ? SD.PROJECTS[0].id : '');
+  const SDx = loadSeedSource().seedData;
+  const p = (SDx.PROJECTS || []).filter(function (x) { return x.status === '演练中'; })[0];
+  return p ? p.id : ((SDx.PROJECTS && SDx.PROJECTS[0]) ? SDx.PROJECTS[0].id : '');
 }
 
-run();
+/* 系统初始化状态（供 /api/system/status 使用） */
+function status() {
+  try {
+    const users = db.prepare('SELECT COUNT(*) c FROM users').get().c;
+    const scenarios = db.prepare('SELECT COUNT(*) c FROM scenarios').get().c;
+    const nodes = db.prepare('SELECT COUNT(*) c FROM script_nodes').get().c;
+    const roleCount = db.prepare('SELECT COUNT(*) c FROM roles').get().c;
+    const projCount = db.prepare('SELECT COUNT(*) c FROM projects').get().c;
+    const brand = {};
+    db.prepare('SELECT key,value FROM settings').all().forEach(function (r) { brand[r.key] = r.value; });
+    let seedVersion = null;
+    try {
+      const b = db.prepare('SELECT version FROM seed_baseline ORDER BY id DESC LIMIT 1').get();
+      if (b) seedVersion = b.version;
+    } catch (e) {}
+    return {
+      initialized: isSeeded(),
+      userCount: users,
+      roleCount: roleCount,
+      scenarioCount: scenarios,
+      nodeCount: nodes,
+      projectCount: projCount,
+      brand_version: brand.brand_version || 'unknown',
+      initialized_at: brand.initialized_at || null,
+      seedVersion: seedVersion,
+      hasBaseline: hasBaseline()
+    };
+  } catch (e) {
+    return { initialized: false, error: e.message };
+  }
+}
+
+/* 系统重置：清空并重新初始化（供 /api/system/reset 使用） */
+function resetAll() {
+  const ts = nowSec();
+  migrate();
+  clearAll();
+  run();
+  const users = db.prepare('SELECT COUNT(*) c FROM users').get().c;
+  return { userCount: users, resetAt: ts };
+}
+
+/* 命令行执行 */
+if (require.main === module) {
+  migrate();
+  if (RESET) {
+    clearAll();
+    run();
+  } else if (isSeeded()) {
+    console.log('[seed] 数据库已初始化，跳过。如需重建请执行：node src/seed.js --reset');
+  } else {
+    run();
+  }
+}
+
+module.exports = { status: status, resetAll: resetAll, exportBaseline: exportBaseline, loadSeedSource: loadSeedSource, hasBaseline: hasBaseline };

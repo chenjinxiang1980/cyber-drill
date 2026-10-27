@@ -49,9 +49,9 @@ router.post('/messages', auth.requireAuth, function (req, res) {
   }
   const seq = db.prepare('SELECT COALESCE(MAX(seq),0)+1 AS n FROM messages').get().n;
   const id = 'M' + Date.now();
-  db.prepare('INSERT INTO messages (id,time,level,source,text,targets,seq) VALUES (?,?,?,?,?,?,?)')
+  db.prepare('INSERT INTO messages (id,time,level,source,text,targets,seq,project_id) VALUES (?,?,?,?,?,?,?,?)')
     .run(id, hhmm(), String(b.level || 'P2'), String(b.source || (req.user.name + '（人工触发）')),
-      String(b.text || ''), JSON.stringify(b.targets || ['*']), seq);
+      String(b.text || ''), JSON.stringify(b.targets || ['*']), seq, activeProjectId());
   auth.audit(req, '发布消息：' + String(b.text || '').slice(0, 60));
   res.json({ ok: true, id: id });
 });
@@ -76,25 +76,32 @@ router.post('/notifs/read', auth.requireAuth, function (req, res) {
   res.json({ ok: true });
 });
 
-/* ---------- 演练导调中心：院内演练会商 / 院外上报沟通 ---------- */
-const CHAT_ACCESS = {
-  inner: {
-    label: '院内演练会商',
-    roles: ['duty', 'netsec', 'sysadmin', 'medlead', 'clinical', 'itlead', 'commander']
-  },
-  external: {
-    label: '院外上报沟通',
-    roles: ['healthbureau', 'cac', 'cyberpolice', 'itlead', 'commander']
-  }
-};
+/* ---------- 演练导调中心：频道权限真源为 dict 表 chat_channels ---------- */
+/* 流程字典页维护 chat_channels，每个频道 { label, roles:[...] }；不存在或为空视为无频道可用 */
+function loadChatAccess() {
+  try {
+    const row = db.prepare("SELECT value FROM dict WHERE key='chat_channels'").get();
+    if (!row || !row.value) return {};
+    const v = JSON.parse(row.value);
+    if (v && typeof v === 'object' && Object.keys(v).length) {
+      Object.keys(v).forEach(function (k) {
+        if (!v[k].label) v[k].label = k;
+        if (!Array.isArray(v[k].roles)) v[k].roles = [];
+      });
+      return v;
+    }
+  } catch (e) { /* malformed JSON → 返回空对象 */ }
+  return {};
+}
 
 function canAccessChat(roleId, key) {
-  const ch = CHAT_ACCESS[key];
-  return !!ch && ch.roles.indexOf(roleId) >= 0;
+  const ch = loadChatAccess()[key];
+  return !!ch && Array.isArray(ch.roles) && ch.roles.indexOf(roleId) >= 0;
 }
 
 function channelOfKey(req, res, key) {
-  const ch = CHAT_ACCESS[key];
+  const access = loadChatAccess();
+  const ch = access[key];
   if (!ch) {
     res.status(400).json({ error: '会商频道不存在' });
     return null;
@@ -126,13 +133,14 @@ function chatDto(c) {
 
 router.get('/chat/channels', auth.requireAuth, function (req, res) {
   const rid = req.user.role.id;
-  const out = Object.keys(CHAT_ACCESS).filter(function (k) {
+  const access = loadChatAccess();
+  const out = Object.keys(access).filter(function (k) {
     return canAccessChat(rid, k);
   }).map(function (k) {
     const last = db.prepare('SELECT text,time,sender FROM chat_messages WHERE grp=? ORDER BY id DESC LIMIT 1').get(k) || null;
     if (last) last.time = fullTime(last.time);
     return {
-      key: k, label: CHAT_ACCESS[k].label,
+      key: k, label: access[k].label,
       count: db.prepare('SELECT COUNT(*) AS n FROM chat_messages WHERE grp=?').get(k).n,
       last: last
     };
@@ -171,8 +179,8 @@ router.post('/chat/:group', auth.requireAuth, function (req, res) {
   const att = b.att ? String(b.att).slice(0, 200) : null;
   const filePath = b.filePath ? String(b.filePath).slice(0, 300) : null;
   if (!text && !att) return res.status(400).json({ error: '消息内容不能为空' });
-  const r = db.prepare('INSERT INTO chat_messages (grp,sender,role_id,user_id,time,text,att,file_path) VALUES (?,?,?,?,?,?,?,?)')
-    .run(ch.key, req.user.name, req.user.role.id, req.user.id, now().slice(0, 16), text, att, filePath);
+  const r = db.prepare('INSERT INTO chat_messages (grp,sender,role_id,user_id,time,text,att,file_path,project_id) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(ch.key, req.user.name, req.user.role.id, req.user.id, now().slice(0, 16), text, att, filePath, activeProjectId());
   /* 会商附件同步归档至取证模块，便于复盘追溯 */
   if (att && filePath) {
     const id = 'E' + Date.now() + Math.floor(Math.random() * 100);
@@ -347,13 +355,29 @@ router.post('/scenarios', auth.requireAuth, function (req, res) {
 /* ---------- 剧本节点保存（可视化编排） ---------- */
 router.get('/script-nodes', auth.requireAuth, function (req, res) {
   res.json(db.prepare('SELECT * FROM script_nodes ORDER BY scenario_id,seq').all().map(function (n) {
-    return { id: n.id, scenarioId: n.scenario_id, type: n.type, title: n.title, target: n.target, timeout: n.timeout, form: n.form || undefined, att: n.att || undefined, desc: n.descr, branches: parseJson(n.branches, []), guide: n.guide || '', keywords: n.keywords || '', action: n.action || '', required: n.required !== 0, wrong: parseJson(n.wrong, []), evidenceReq: parseJson(n.evidence_req, []), flowType: n.flow_type === 'distractor' ? 'distractor' : 'correct', score: Number(n.score || 0), receiver: n.receiver || '', deps: parseDeps(n.deps), posX: n.pos_x === null || n.pos_x === undefined ? null : Number(n.pos_x), posY: n.pos_y === null || n.pos_y === undefined ? null : Number(n.pos_y) };
+    return { id: n.id, scenarioId: n.scenario_id, type: n.type, title: n.title, target: n.target, timeout: n.timeout, form: n.form || undefined, att: n.att || undefined, desc: n.descr, branches: parseJson(n.branches, []), parallelDesc: n.parallel_desc || undefined, guide: n.guide || '', keywords: n.keywords || '', action: n.action || '', required: n.required !== 0, wrong: parseJson(n.wrong, []), evidenceReq: parseJson(n.evidence_req, []), flowType: n.flow_type === 'distractor' ? 'distractor' : 'correct', score: Number(n.score || 0), receiver: n.receiver || '', deps: parseDeps(n.deps), posX: n.pos_x === null || n.pos_x === undefined ? null : Number(n.pos_x), posY: n.pos_y === null || n.pos_y === undefined ? null : Number(n.pos_y) };
   }));
 });
 
 function bumpVersion(v) {
   const m = /^v(\d+)\.(\d+)$/.exec(String(v || 'v1.0'));
   return m ? 'v' + m[1] + '.' + (Number(m[2]) + 1) : 'v1.1';
+}
+function resolveVersion(req, currentV) {
+  /* 支持两种传参方式：version（直接指定新版本）或 versionBump（'none'/'major'/'minor'/'patch'） */
+  const body = req.body || {};
+  const incoming = typeof body.version === 'string' ? body.version.trim() : '';
+  if (incoming && /^v?\d+\.\d+$/.test(incoming)) {
+    return incoming.startsWith('v') ? incoming : ('v' + incoming);
+  }
+  const bump = (typeof body.versionBump === 'string' ? body.versionBump : 'minor').toLowerCase();
+  const m = /^v(\d+)\.(\d+)$/.exec(String(currentV || 'v1.0'));
+  if (!m) return 'v1.0';
+  const major = Number(m[1]), minor = Number(m[2]);
+  if (bump === 'none' || bump === 'keep') return 'v' + major + '.' + minor;
+  if (bump === 'major') return 'v' + (major + 1) + '.0';
+  /* minor / patch 以及默认 */
+  return 'v' + major + '.' + (minor + 1);
 }
 
 /* 依赖图拓扑排序（稳定，按数组原顺序出队）：无环返回节点 ID 顺序，有环返回 null */
@@ -396,7 +420,7 @@ router.post('/script-nodes', auth.requireAuth, function (req, res) {
   const sceneNodes = nodes.filter(function (n) { return !n.scenarioId || String(n.scenarioId) === scenario; });
 
   /* 节点 ID 唯一性校验（依赖关系以节点 ID 为键） */
-  const byId = {}, seen = {};
+  let byId = {}, seen = {};
   for (let i = 0; i < sceneNodes.length; i++) {
     const id = String(sceneNodes[i].id || '');
     if (!id) return res.status(400).json({ error: '节点 ID 不能为空' });
@@ -408,6 +432,90 @@ router.post('/script-nodes', auth.requireAuth, function (req, res) {
     seen[id] = true;
     byId[id] = sceneNodes[i];
   }
+
+  /* ---------- 重编号：确保主流节点为 {SID}-{N}，混淆为 DS{SID}-{role}-{n} ----------
+   * 空号优先复用：如 S01 已有 1-7,9-12,14-15，则新增节点先占 8、13，再从 16 起递增
+   * 同时更新 deps 引用，生成 idMap[oldId]=newId 给后续流程使用
+   */
+  const correctNodes_pre = sceneNodes.filter(function (n) { return n.flowType !== 'distractor'; });
+  const distractors_pre = sceneNodes.filter(function (n) { return n.flowType === 'distractor'; });
+  const MAIN_ID_RE = new RegExp('^' + scenario.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-(\\d+)$');
+
+  /* Step 1: 收集已有规范主流编号，计算空号和 max */
+  const existingMainNums = [];
+  correctNodes_pre.forEach(function (n) {
+    const m = MAIN_ID_RE.exec(String(n.id));
+    if (m) existingMainNums.push(Number(m[1]));
+  });
+  existingMainNums.sort(function (a, b) { return a - b; });
+  const mainMax = existingMainNums.length ? Math.max.apply(null, existingMainNums) : 0;
+  const mainGaps = [];
+  if (existingMainNums.length) {
+    for (let i = 1; i <= mainMax; i++) {
+      if (existingMainNums.indexOf(i) < 0) mainGaps.push(i);
+    }
+  }
+
+  /* Step 2: 为主流节点分配编号（已规范的保留，非规范的优先填空号） */
+  let gapIdx = 0, nextNew = mainMax + 1;
+  const idMap = {};
+  correctNodes_pre.forEach(function (n) {
+    const oldId = String(n.id);
+    const m = MAIN_ID_RE.exec(oldId);
+    if (m) {
+      idMap[oldId] = oldId; /* 已规范，保留 */
+    } else {
+      const num = (gapIdx < mainGaps.length) ? mainGaps[gapIdx++] : nextNew++;
+      idMap[oldId] = scenario + '-' + num;
+    }
+  });
+
+  /* Step 3: 混淆节点重编号（已有 DS{SID}-{role}-{n} 的 role-n 组合保留，否则重新分配） */
+  const DIST_ID_RE = new RegExp('^DS' + scenario.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-(.+?)-(\\d+)$');
+  /* role → 已使用编号集合 */
+  const distRoleUsed = {};
+  distractors_pre.forEach(function (n) {
+    const m = DIST_ID_RE.exec(String(n.id));
+    if (m) {
+      const role = m[1];
+      distRoleUsed[role] = distRoleUsed[role] || [];
+      distRoleUsed[role].push(Number(m[2]));
+    }
+  });
+  distractors_pre.forEach(function (n) {
+    const oldId = String(n.id);
+    const m = DIST_ID_RE.exec(oldId);
+    if (m) {
+      idMap[oldId] = oldId; /* 已规范 */
+    } else {
+      /* 按 target 角色命名，同角色递增编号 */
+      const roleName = String(n.target || 'other').replace(/[^a-zA-Z0-9\\u4e00-\\u9fa5]/g, '').slice(0, 6) || 'other';
+      distRoleUsed[roleName] = distRoleUsed[roleName] || [];
+      let num = 1;
+      while (distRoleUsed[roleName].indexOf(num) >= 0) num++;
+      distRoleUsed[roleName].push(num);
+      idMap[oldId] = 'DS' + scenario + '-' + roleName + '-' + num;
+    }
+  });
+
+  /* Step 4: 应用 idMap 到 sceneNodes 的 id 和 deps */
+  sceneNodes.forEach(function (n) {
+    const oldId = String(n.id);
+    if (idMap[oldId] && idMap[oldId] !== oldId) {
+      n.id = idMap[oldId];
+    }
+    if (Array.isArray(n.deps)) {
+      n.deps = n.deps.map(function (d) {
+        const s = String(d || '');
+        return (idMap[s] && idMap[s] !== s) ? idMap[s] : s;
+      });
+    }
+  });
+  /* 更新 byId（后续依赖清洗要用） */
+  const byId_new = {};
+  sceneNodes.forEach(function (n) { byId_new[String(n.id)] = n; });
+  byId = byId_new;
+  /* ---------- 重编号结束 ---------- */
 
   /* 依赖清洗：仅允许引用同场景、非自身、非混淆流程、非结束节点的前置 */
   const correctNodes = sceneNodes.filter(function (n) { return n.flowType !== 'distractor'; });
@@ -441,7 +549,7 @@ router.post('/script-nodes', auth.requireAuth, function (req, res) {
   const name = req.body && typeof req.body.name === 'string' ? String(req.body.name).trim().slice(0, 60) : '';
 
   const del = db.prepare('DELETE FROM script_nodes WHERE scenario_id=?');
-  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,receiver,deps,pos_x,pos_y) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,receiver,deps,pos_x,pos_y,parallel_desc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
   const plan = require('../evidence_plan');
   tx(function () {
     del.run(scenario);
@@ -467,10 +575,11 @@ router.post('/script-nodes', auth.requireAuth, function (req, res) {
         '', n.timeout || null, String(n.form || ''), String(n.att || ''), String(n.desc || ''),
         JSON.stringify(n.branches || []), i, String(n.guide || ''), String(n.keywords || ''),
         String(n.action || ''), JSON.stringify(wrong), JSON.stringify(evReq), n.required === false ? 0 : 1,
-        flowType, scoreVal, receiver, JSON.stringify(flowType === 'distractor' ? [] : depMap[id]), px, py);
+        flowType, scoreVal, receiver, JSON.stringify(flowType === 'distractor' ? [] : depMap[id]), px, py,
+        String(n.parallel_desc || ''));
     });
     /* 同步场景剧本库：名称、节点数、版本号、更新时间、故障通报 */
-    const version = bumpVersion(sc.version);
+    const version = resolveVersion(req, sc.version);
     const updated = now().slice(0, 10);
     const alertText = (req.body && typeof req.body.alert === 'string') ? String(req.body.alert).slice(0, 1000) : (sc.alert || '');
     const finalName = name || sc.name;
@@ -543,7 +652,9 @@ router.post('/projects', auth.requireAuth, function (req, res) {
   });
   const id = 'P' + year + '-' + String(maxSeq + 1).padStart(3, '0');
 
-  const units = Array.isArray(b.units) && b.units.length ? b.units : ['盘州市人民医院'];
+  const brandRow = db.prepare("SELECT value FROM settings WHERE key='brand_unit_name'").get();
+  const defaultUnit = (brandRow && brandRow.value) || '盘州市人民医院';
+  const units = Array.isArray(b.units) && b.units.length ? b.units : [defaultUnit];
   const members = Array.isArray(b.members) ? b.members : [];
   const observers = Array.isArray(b.observers) ? b.observers : [];
   db.prepare('INSERT INTO projects (id,name,type,date,scenario_id,level,status,target,units,members,observers,mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
@@ -596,7 +707,14 @@ router.delete('/projects/:id', auth.requireAuth, function (req, res) {
   db.prepare('SELECT file_path FROM evidence WHERE project_id=? OR task_id IN (SELECT id FROM tasks WHERE project_id=?)').all(p.id, p.id)
     .forEach(function (e) { if (e.file_path) files.push(e.file_path); });
 
+  const likeName = '%' + String(p.name || '').replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
   tx(function () {
+    /* 全局表（无 project_id 列）仅按项目名 LIKE 兜底匹配，避免误删 */
+    db.prepare('DELETE FROM notif_reads WHERE notif_id IN (SELECT id FROM notifs WHERE title LIKE ? OR descr LIKE ?)').run(likeName, likeName);
+    db.prepare('DELETE FROM notifs WHERE title LIKE ? OR descr LIKE ?').run(likeName, likeName);
+    db.prepare('DELETE FROM messages WHERE text LIKE ?').run(likeName);
+    db.prepare('DELETE FROM chat_messages WHERE text LIKE ?').run(likeName);
+    /* impact 为全局影响面快照，不按项目删除 */
     db.prepare('DELETE FROM task_attachments WHERE task_id IN (SELECT id FROM tasks WHERE project_id=?)').run(p.id);
     db.prepare('DELETE FROM form_submissions WHERE task_id IN (SELECT id FROM tasks WHERE project_id=?)').run(p.id);
     db.prepare('DELETE FROM evidence WHERE project_id=? OR task_id IN (SELECT id FROM tasks WHERE project_id=?)').run(p.id, p.id);
@@ -698,14 +816,12 @@ router.post('/evaluation/scores', auth.requireAuth, function (req, res) {
     up.run(String(s.itemId), pid, Number(s.score) || 0, Number(s.max) || 10, String(s.note || ''), ts);
   });
   auth.audit(req, '执行系统自动考评（' + items.length + ' 项指标）');
-  /* 站内消息：自动考评合计得分 */
+  /* 站内消息：自动考评完成（模板驱动） */
   const sum = items.reduce(function (a, s) { return a + (Number(s.score) || 0); }, 0);
   const max = items.reduce(function (a, s) { return a + (Number(s.max) || 0); }, 0);
   notify.push({
-    title: '系统自动考评完成',
-    desc: '已更新 ' + items.length + ' 项考评指标，合计得分 ' + sum + (max ? '/' + max : '') + '。',
-    level: 'P1',
-    source: '系统考评'
+    event: 'auto_eval',
+    vars: { count: items.length, sum: sum, max: max ? '/' + max : '' }
   });
   res.json({ ok: true, time: ts });
 });

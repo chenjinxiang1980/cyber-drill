@@ -15,55 +15,118 @@
 document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
+  var proj = API.activeProject();
 
-  /* 频道权限：院内角色仅院内会商；院外单位仅院外上报；信息科负责人与指挥部可使用两部分 */
-  var CHAT_ACCESS = {
-    inner: { roles:['duty','netsec','sysadmin','medlead','clinical','itlead','commander'] },
-    external: { roles:['healthbureau','cac','cyberpolice','itlead','commander'] }
-  };
-  function canUseChat(k){ return !!(CHAT_ACCESS[k] && CHAT_ACCESS[k].roles.indexOf(role.id)>=0); }
-  var ALL_GROUPS = [
-    { key:'inner', label:'院内演练会商', icon:'hospital', desc:'院内参演角色之间同步研判结论、处置进展与资源需求；院外单位不可见本频道。' },
-    { key:'external', label:'院外上报沟通', icon:'building', desc:'向市卫健局、市网信办、市网安大队报送材料与进展，并接收上级反馈意见。' }
-  ];
-  var GROUPS = ALL_GROUPS.filter(function(g){ return canUseChat(g.key); });
-  var curGroup = canUseChat('inner') ? 'inner' : (GROUPS[0] ? GROUPS[0].key : '');
+  /* ---------- 无演练项目：展示待机空态 ---------- */
+  if (!proj) {
+    Promise.all([API.getScenarios(), API.getProjects(), API.getDict('chat_channels')]).then(function(r){
+      var scens = Array.isArray(r[0]) ? r[0] : [];
+      var projs = Array.isArray(r[1]) ? r[1] : [];
+      var chMeta = r[2] && r[2].value;
+      var chCount = 0;
+      if (chMeta) { try { chCount = Object.keys(JSON.parse(typeof chMeta === 'string' ? chMeta : JSON.stringify(chMeta))).length; } catch(e) {} }
+      page.innerHTML =
+        '<div class="standby-hero">'
+        + '<div class="sb-icon" style="background:rgba(88,166,255,.14);border-color:rgba(88,166,255,.3);color:var(--info)">'+App.icon('screen')+'</div>'
+        + '<div class="sb-body">'
+        +   '<span class="sb-tag"><span class="dot"></span>COMMAND CENTER · 待启动演练</span>'
+        +   '<h2>演练导调中心待机中</h2>'
+        +   '<div class="sb-sub">当前无进行中的演练项目，导调中心处于待命状态。院内会商频道与院外上报频道均未激活；请先创建演练项目并启动推演，系统将自动激活频道并载入节点操作情况。</div>'
+        +   '<div class="sb-acts">'
+        +     '<a class="btn primary" href="projects.html">'+App.icon('projects')+'创建演练项目</a>'
+        +     '<a class="btn" href="scenarios.html">'+App.icon('scenarios')+'选择剧本启动推演</a>'
+        +     '<a class="btn" href="dictionary.html">'+App.icon('dictionary')+'查看频道权限配置</a>'
+        +   '</div>'
+        +   '<div class="sb-meta">'
+        +     '<div class="m-item"><b>'+scens.length+'</b>内置场景</div>'
+        +     '<div class="m-item"><b>'+projs.length+'</b>历史项目</div>'
+        +     '<div class="m-item"><b>'+chCount+'</b>已配置频道</div>'
+        +   '</div>'
+        + '</div></div>'
+        + '<div class="card"><div class="card-title">'+App.icon('screen')+'导调中心功能概览</div>'
+        +   '<div class="small" style="line-height:2">演练导调中心提供<b>两频道一盘面</b>协同能力：<br>'
+        +   '<b>· 院内演练会商频道</b>：值守员、网安管理员、系统管理员、医务处、临床科室、信息科负责人、院应急指挥部等院内角色之间同步研判结论、处置进展与资源需求。<br>'
+        +   '<b>· 院外上报沟通频道</b>：向市卫健局、市网信办、市网安大队报送材料与进展，并接收上级反馈意见。<br>'
+        +   '<b>· 节点操作情况盘面</b>：实时显示各角色在剧本节点上的处置状态（未处置 / 处置中 / 已完成 / 超时），导调组可据此调度资源、督导关键节点。<br>'
+        +   '频道访问权限由「流程字典 → 角色映射与权限矩阵 → 会商频道配置」统一维护；消息与附件写入演练数据库并记入审计日志，聊天附件自动归档至取证模块。</div>'
+        + '</div>';
+    }).catch(function(){
+      page.innerHTML = '<div class="forbidden">'+App.icon('alert')+'<h2>数据加载失败</h2><p>请检查网络或联系管理员</p></div>';
+    });
+    return;
+  }
+
+  /* 频道列表 + 权限：**全部**来自流程字典 chat_channels；无硬编码 fallback */
+  var esc = App.esc; /* 本地别名，文件内大量复用 */
+  var CHAT_ACCESS = {}; /* 运行时字典：{ inner:{label, roles:[...]}, external:{label, roles:[...]} } */
+  var GROUPS = [], curGroup = ''; /* GROUPS：当前角色可访问的频道 {key, label}  */
+  function canUseChat(k){ return !!(CHAT_ACCESS[k] && CHAT_ACCESS[k].roles && CHAT_ACCESS[k].roles.indexOf(role.id)>=0); }
+  function groupOf(k){ return CHAT_ACCESS[k] ? { key:k, label: CHAT_ACCESS[k].label||k } : { key:k, label:k }; }
   var pendingAtt = null;
   var channelInfo = {};
   var pollTimer = null;
   var lastCount = 0;
 
-  if(!GROUPS.length){
-    page.innerHTML = '<div class="page-head"><div><h1>演练导调中心</h1><div class="sub">院内演练会商与院外上报沟通</div></div></div>'
-      + '<div class="embed" style="min-height:320px">'
-      + '<div class="empty">'+App.icon('lock')+'<div>当前角色「'+App.esc(role.name)+'」未开通演练导调中心频道权限</div>'
-      + '<div class="tiny dim mt2">院内会商面向应急处置角色，院外上报面向外部单位；如需使用请联系演练导调组授权。</div></div></div>';
-    return;
+  /* 从 dict 表加载频道配置；字典不存在/为空/格式异常视为无频道 */
+  function loadChatAccess() {
+    return API.getDict('chat_channels').then(function(res){
+      var v = res && res.value;
+      if(!v || typeof v !== 'object' || !Object.keys(v).length){ CHAT_ACCESS = {}; return; }
+      Object.keys(v).forEach(function(k){
+        if(!v[k].label) v[k].label = k;
+        if(!Array.isArray(v[k].roles)) v[k].roles = [];
+      });
+      CHAT_ACCESS = v;
+    }).catch(function(){ CHAT_ACCESS = {}; });
+  }
+
+  loadChatAccess().then(draw);
+
+  function draw(){
+    var allKeys = Object.keys(CHAT_ACCESS);
+    GROUPS = allKeys.filter(function(k){ return canUseChat(k); }).map(function(k){ return { key:k, label: CHAT_ACCESS[k].label||k }; });
+    curGroup = (canUseChat('inner') ? 'inner' : (GROUPS[0] ? GROUPS[0].key : ''));
+
+    if(!GROUPS.length){
+      var noAccess = allKeys.length > 0;
+      page.innerHTML = '<div class="page-head"><div><h1>演练导调中心</h1><div class="sub">院内演练会商与院外上报沟通</div></div></div>'
+        + '<div class="embed" style="min-height:320px">'
+        + '<div class="empty">'+App.icon('lock')
+        + (noAccess
+          ? '<div>当前角色「'+App.esc(role.name)+'」未开通任何演练导调中心频道权限</div><div class="tiny dim mt2">频道权限由流程字典维护，请联系演练导调组授权。</div>'
+          : '<div>系统尚未配置会商频道</div><div class="tiny dim mt2">请到「流程字典 → 角色映射与权限矩阵 → 会商频道配置」添加频道。</div>')
+        + '<div class="tiny dim mt3">点击左侧「流程字典」→ 会商频道配置 → 编辑「roles」数组，把需要授权的角色 id 加进去即可。</div></div></div>';
+      return;
+    }
+
+    page.innerHTML =
+      '<div class="page-head"><div><h1>演练导调中心</h1>'
+      +   '<div class="sub">院内演练会商与院外上报沟通 · 消息实时同步、附件真实上传并留痕归档</div></div>'
+      +   '<div class="acts"><span class="tag green" id="liveTag">● 实时同步中</span>'
+      +   '<button class="btn" id="btnReload">'+App.icon('refresh')+'刷新消息</button></div></div>'
+      + '<div class="sim-banner">'+App.icon('archive')+'<span>当前角色可用频道：<b>'+GROUPS.map(function(g){ return g.label; }).join('、')+'</b>。频道权限由「流程字典 → 会商频道配置」统一维护，可按角色细化授权。消息与附件写入演练数据库并记入审计日志；聊天附件自动归档至取证模块。演练数据均为模拟，不得发送真实患者信息或恶意样本。</span></div>'
+      + '<div class="tabs" id="chatTabs"></div>'
+      + '<div class="card" style="padding:0;overflow:hidden">'
+      +   '<div class="collab-split">'
+      +     '<div class="prog-panel">'
+      +       '<div class="prog-head">'+App.icon('tasks')+'<b>演练节点操作情况</b><span class="tiny dim" id="progSub"></span></div>'
+      +       '<div class="prog-list" id="progList"><div class="tiny dim" style="padding:10px">加载中…</div></div>'
+      +     '</div>'
+      +     '<div id="chatPanel" style="display:flex;flex-direction:column;flex:1;min-width:0;height:620px"></div>'
+      +   '</div>'
+      + '</div>';
+
+    document.getElementById('btnReload').onclick = function(){ loadChat(true); loadProgress(); App.toast('消息与节点操作情况已刷新','ok'); };
+
+    loadChannelInfo();
+    renderTabs();
+    renderPanel();
+    startPolling();
   }
 
   function ic(n,s){ return '<svg viewBox="0 0 24 24" style="width:'+s+'px;height:'+s+'px;flex:none">'+(App.ICONS[n]||App.ICONS.file)+'</svg>'; }
   function roleName(id){ var r = (MOCK.ROLES||[]).filter(function(x){ return x.id===id; })[0]; return r ? r.name : (id==='sys'?'系统':id); }
   function roleColor(id){ var r = (MOCK.ROLES||[]).filter(function(x){ return x.id===id; })[0]; return r ? r.color : '#5c7396'; }
-  function groupOf(k){ return GROUPS.filter(function(g){ return g.key===k; })[0]; }
-  function isImage(name,url){ return /\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(String(url||name||'')); }
-  function esc(s){ return App.esc(s); }
-
-  page.innerHTML =
-    '<div class="page-head"><div><h1>演练导调中心</h1>'
-    +   '<div class="sub">院内演练会商与院外上报沟通 · 消息实时同步、附件真实上传并留痕归档</div></div>'
-    +   '<div class="acts"><span class="tag green" id="liveTag">● 实时同步中</span>'
-    +   '<button class="btn" id="btnReload">'+App.icon('refresh')+'刷新消息</button></div></div>'
-    + '<div class="sim-banner">'+App.icon('archive')+'<span>当前角色可用频道：<b>'+GROUPS.map(function(g){ return g.label; }).join('、')+'</b>。院外单位仅可使用「院外上报沟通」，院内应急处置角色仅可使用「院内演练会商」，信息科负责人与院应急指挥部可使用两部分。消息与附件写入演练数据库并记入审计日志；聊天附件自动归档至取证模块。演练数据均为模拟，不得发送真实患者信息或恶意样本。</span></div>'
-    + '<div class="tabs" id="chatTabs"></div>'
-    + '<div class="card" style="padding:0;overflow:hidden">'
-    +   '<div class="collab-split">'
-    +     '<div class="prog-panel">'
-    +       '<div class="prog-head">'+App.icon('tasks')+'<b>演练节点操作情况</b><span class="tiny dim" id="progSub"></span></div>'
-    +       '<div class="prog-list" id="progList"><div class="tiny dim" style="padding:10px">加载中…</div></div>'
-    +     '</div>'
-    +     '<div id="chatPanel" style="display:flex;flex-direction:column;flex:1;min-width:0;height:620px"></div>'
-    +   '</div>'
-    + '</div>';
 
   function renderTabs(){
     var tabs = GROUPS.map(function(g){
@@ -93,7 +156,7 @@ document.addEventListener('app:ready', function(e){
     var g = groupOf(curGroup);
     panel.innerHTML =
         '<div class="flex" style="justify-content:space-between;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--elev)">'
-      +   '<div class="small" style="color:var(--text2)">'+ic(g.icon,14)+' <b style="color:var(--text)">'+g.label+'</b> · '+esc(g.desc)+'</div>'
+      +   '<div class="small" style="color:var(--text2)"><b style="color:var(--text)">'+esc(g.label)+'</b> · '+esc(g.key)+' 频道</div>'
       +   '<span class="tiny dim" id="chatHint">正在加载…</span>'
       + '</div>'
       + '<div class="chat grow" id="chatBox" style="flex:1;overflow-y:auto"></div>'
@@ -273,14 +336,6 @@ document.addEventListener('app:ready', function(e){
       if(!document.hidden) { loadChat(false); loadProgress(); }
     });
   }
-
-  var btnReload = document.getElementById('btnReload');
-  if(btnReload) btnReload.onclick = function(){ loadChat(true); loadProgress(); App.toast('消息与节点操作情况已刷新','ok'); };
-
-  loadChannelInfo();
-  renderTabs();
-  renderPanel();
-  startPolling();
 });
 App.boot('collab');
 </script>

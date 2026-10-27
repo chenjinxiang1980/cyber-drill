@@ -218,7 +218,6 @@ body::before{
       <span class="live"><span class="live-dot"></span>LIVE</span>
       <div class="h-clock"><span id="clkTime">--:--:--</span><span id="clkDate">----</span></div>
       <button class="h-btn" id="btnFull">全屏</button>
-      <button class="h-btn" id="btnBack">返回</button>
     </div>
   </header>
 
@@ -575,9 +574,6 @@ body::before{
     if(document.fullscreenElement){ document.exitFullscreen(); }
     else if(document.documentElement.requestFullscreen){ document.documentElement.requestFullscreen(); }
   };
-  /* 大屏为免登录公开页，返回统一回到登录页 */
-  $('btnBack').onclick = function(){ location.href = 'index.html'; };
-
   load();
 })();
 </script>

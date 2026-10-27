@@ -81,7 +81,6 @@ function icon(name, cls){ return '<svg viewBox="0 0 24 24" class="'+(cls||'')+'"
 var NAV_GROUPS = [
   { title:'演练执行', items:[
     {key:'dashboard', icon:'dashboard', label:'态势总看板', href:'dashboard.html'},
-    {key:'screen', icon:'screen', label:'演练监视大屏', href:'screen.html'},
     {key:'workbench', icon:'workbench', label:'角色工作台', href:'workbench.html'},
     {key:'collab', icon:'chat', label:'演练导调中心', href:'collab.html'}
   ]},
@@ -147,6 +146,7 @@ function mountShell(pageKey){
   html += '<div class="main-wrap"><header class="topbar">'
     + '<span class="proj-sel" onclick="App.switchProject()">'+icon('projects')+'<b id="topProj"></b><span class="dim">切换 ▾</span></span>'
     + '<span id="topLive"></span>'
+    + '<span class="tb-center" onclick="App.openScreen()">'+icon('screen')+'<span>演练监视大屏</span></span>'
     + '<span class="right tb-clock" id="topClock"></span>'
     + '<span class="bell" onclick="App.showNotifs()">'+icon('bell')+'<span class="n" id="bellN" style="display:none">0</span></span>'
     + '<span class="bell voice-btn" id="voiceBtn" onclick="App.toggleVoice()" title="语音播报"></span>'
@@ -245,15 +245,20 @@ function refreshNotifBadge(){
     MOCK.NOTIFS = ns;
     var unread = ns.filter(function(x){ return !x.read; });
     setBell(unread.length);
-    /* 语音提醒：未读站内消息不受语音开关限制；新到达的消息实时播报 */
-    if(seenNotif === null){
-      if(unread.length) voiceSpeak('您有 '+unread.length+' 条未读站内消息，请查看', { always:true, force:true });
-    } else {
-      var fresh = unread.filter(function(x){ return !seenNotif[x.id]; });
-      if(fresh.length){
-        var lead = fresh.length > 1 ? '有 '+fresh.length+' 条新消息，最新一条：' : '新消息：';
-        voiceSpeak(lead+fresh[0].title+'。'+fresh[0].desc, { always:true, force:true });
-      }
+    /* 语音提醒：新未读消息直接朗读 title+desc 内容，不受语音开关限制 */
+    var fresh = unread.filter(function(x){ return !seenNotif || !seenNotif[x.id]; });
+    if(fresh.length){
+      /* 最多朗读最新 3 条，避免密集时刷屏 */
+      var toSpeak = fresh.slice(0, 3);
+      var queue = toSpeak.map(function(n, i){
+        var head = fresh.length > 1 ? ('第'+(i+1)+'条，') : '';
+        return head + (n.desc || n.title || '');
+      });
+      if(fresh.length > 3) queue.push('另外还有 '+(fresh.length-3)+' 条未读消息');
+      /* 每条之间停顿 600ms，queue:true 让 speechSynthesis 自然串行 */
+      queue.forEach(function(t, i){
+        voiceSpeak(t, { always:true, force:true, queue:i>0 });
+      });
     }
     seenNotif = {};
     ns.forEach(function(x){ seenNotif[x.id] = 1; });
@@ -434,8 +439,23 @@ function boot(pageKey){
   });
 }
 
+/* 演练监视大屏：弹出独立窗口（无边框、全屏体验） */
+function openScreen(){
+  var w = 1680, h = 960;
+  var left = Math.max(0, Math.floor((screen.availWidth - w) / 2));
+  var top = Math.max(0, Math.floor((screen.availHeight - h) / 2));
+  var feat = 'width='+w+',height='+h+',left='+left+',top='+top+',menubar=no,toolbar=no,location=no,status=no,scrollbars=no,resizable=yes';
+  var win = window.open('screen.html', 'pzy_screen', feat);
+  if(!win){
+    /* 被浏览器拦截时 fallback：同标签页跳转 */
+    location.href = 'screen.html';
+    return;
+  }
+  try { win.focus(); } catch(e){}
+}
+
 window.App = { boot:boot, icon:icon, ICONS:ICONS, toast:toast, modal:modal, drawer:drawer, confirmSim:confirmSim,
-  logout:logout, switchProject:switchProject, showNotifs:showNotifs, statusTag:statusTag, levelTag:levelTag,
+  logout:logout, switchProject:switchProject, showNotifs:showNotifs, openScreen:openScreen, statusTag:statusTag, levelTag:levelTag,
   refreshShell:refreshShell, renderLiveChip:renderLiveChip, toggleVoice:toggleVoice,
   voice:{ speak:voiceSpeak, stop:voiceStop, on:voiceOn, supported:voiceSupported, sync:syncVoiceBtn },
   barChart:barChart, hbar:hbar, donut:donut, curRole:curRole, curUser:curUser, esc:function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');} };

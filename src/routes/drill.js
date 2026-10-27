@@ -77,22 +77,9 @@ function nodesOf(scenarioId) {
   });
 }
 
-/* 可选接收角色（剧本责任角色 + target_role_aliases 所有 key，供实战版参演人员选择） */
+/* 可选接收角色（全部角色中文名，供实战版参演人员选择） */
 function receiverOptions() {
-  const names = db.prepare('SELECT name FROM roles ORDER BY seq').all().map(function (r) { return r.name; });
-  const aliases = drillDict.get(db, 'target_role_aliases', {
-    '院应急指挥部': 'commander', '信息科值班员': 'duty', '网络安全管理员': 'netsec',
-    '系统管理员': 'sysadmin', '信息科负责人': 'itlead',
-    '医务科主任': 'medlead', '医务部主任': 'medlead', '门诊部主任': 'medlead', '医务部/门诊部负责人': 'medlead',
-    '临床科室': 'clinical', '收费窗口': 'clinical', '临床科室/收费窗口': 'clinical',
-    '市卫生健康局': 'healthbureau', '卫健委': 'healthbureau',
-    '市委网信办': 'cac', '市网信办': 'cac',
-    '市网安大队': 'cyberpolice', '公安网安': 'cyberpolice'
-  });
-  Object.keys(aliases).forEach(function (x) {
-    if (names.indexOf(x) < 0) names.push(x);
-  });
-  return names;
+  return db.prepare('SELECT name FROM roles ORDER BY seq').all().map(function (r) { return r.name; });
 }
 
 /* 取证材料完成情况（全场景，用于「完成演练」前置校验） */
@@ -553,14 +540,17 @@ router.post('/skip', auth.requireAuth, function (req, res) {
       '流程「' + node.title + '」由参演人员判定不执行（跳过）', '', null);
   auth.audit(req, '实战版跳过流程 ' + node.id + '：' + node.title);
   const sc = score(p.id);
-  /* 站内消息：节点跳过情况与当前累计得分 */
+  /* 站内消息：节点跳过（模板驱动） */
   notify.push({
-    title: '节点处置 · ' + node.title,
-    desc: '演练项目「' + p.name + '」由 ' + req.user.name + ' 判定该流程不执行（跳过）；'
-      + (isCorrect ? '正确流程跳过，结束演练时将按该流程分值扣分' : '跳过混淆流程，奖励 +' + delta + ' 分')
-      + '；当前累计得分 ' + sc.score + ' 分。',
-    level: isCorrect ? 'P1' : 'P2',
-    source: '实战演练'
+    event: 'node_skip',
+    vars: {
+      title: node.title,
+      project: p.name,
+      user: req.user.name,
+      reason: isCorrect ? '正确流程跳过，结束演练时将按该流程分值扣分' : ('跳过混淆流程，奖励 +' + delta + ' 分'),
+      score: sc.score
+    },
+    level: isCorrect ? 'P1' : 'P2'
   });
   res.json({ ok: true, nodeId: node.id, skipped: true, stepTime: stepTime, delta: delta, score: sc });
 });
@@ -641,15 +631,18 @@ router.post('/decide', auth.requireAuth, function (req, res) {
     + (receiverOk ? '' : '（接收人选择错误）'));
 
   const sc = score(p.id);
-  /* 站内消息：节点处置结果、本次分值与当前累计得分 */
+  /* 站内消息：节点处置结果（模板驱动） */
   notify.push({
-    title: '节点处置 · ' + node.title,
-    desc: '演练项目「' + p.name + '」由 ' + req.user.name + ' 提交处置记录；'
-      + (isCorrect ? '正确流程，本节点得分 +' + delta : '混淆流程，扣分 ' + delta)
-      + (isCorrect && !receiverOk ? '（接收人选择错误，扣10%）' : '')
-      + '；当前累计得分 ' + sc.score + ' 分。',
-    level: isCorrect && receiverOk ? 'P2' : 'P1',
-    source: '实战演练'
+    event: 'node_submit',
+    vars: {
+      title: node.title,
+      project: p.name,
+      user: req.user.name,
+      correct: (isCorrect ? ('正确流程，本节点得分 +' + delta) : ('混淆流程，扣分 ' + delta))
+        + (isCorrect && !receiverOk ? '（接收人选择错误，扣10%）' : '')
+        + '；当前累计得分 ' + sc.score + ' 分'
+    },
+    level: isCorrect && receiverOk ? 'P2' : 'P1'
   });
 
   res.json({
@@ -685,13 +678,17 @@ router.post('/finish', auth.requireAuth, function (req, res) {
       '结束演练：已完成 ' + (s ? s.hit : 0) + '/' + (s ? s.total : 0) + ' 项正确流程，最终得分 ' + (s ? s.score : 0), 'P1', null);
   auth.audit(req, '结束演练 ' + p.id + '，综合得分 ' + (s ? s.score : 0));
   const finalScore = score(p.id);
-  /* 站内消息：演练结束综合得分与评级 */
+  /* 站内消息：演练结束综合得分（模板驱动） */
   notify.push({
-    title: '演练结束 · 综合得分 ' + finalScore.score + ' 分',
-    desc: '演练项目「' + p.name + '」（' + (p.mode || '基础版') + '）已结束；正确流程完成 '
-      + finalScore.hit + '/' + finalScore.total + ' 项，评级 ' + finalScore.grade + '。',
-    level: 'P1',
-    source: '演练调度'
+    event: 'drill_end_score',
+    vars: {
+      project: p.name,
+      mode: p.mode || '基础版',
+      score: finalScore.score,
+      hit: finalScore.hit,
+      total: finalScore.total,
+      grade: finalScore.grade
+    }
   });
   res.json({ ok: true, projectId: p.id, score: finalScore });
 });

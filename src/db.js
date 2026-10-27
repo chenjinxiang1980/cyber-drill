@@ -10,7 +10,29 @@ const DB_FILE = process.env.DRILL_DB || path.join(DATA_DIR, 'drill.db');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new DatabaseSync(DB_FILE);
+let _db = new DatabaseSync(DB_FILE);
+
+/* Proxy 包装：所有 db.prepare() / db.exec() 调用转发到当前实例，
+ * 支持 reload() 无缝替换底层连接（恢复/重置数据库文件后刷新） */
+const db = new Proxy({}, {
+  get(target, prop) {
+    if (typeof _db[prop] === 'function') {
+      return _db[prop].bind(_db);
+    }
+    return _db[prop];
+  },
+  has(target, prop) {
+    return prop in _db;
+  }
+});
+
+/* 关闭旧连接、打开新连接，文件被替换后调用 */
+function reload() {
+  try { _db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (e) {}
+  try { _db.close(); } catch (e) {}
+  _db = new DatabaseSync(DB_FILE);
+  console.log('[db] 数据库连接已刷新');
+}
 
 /* 建表（幂等） */
 function migrate() {
@@ -277,4 +299,4 @@ function backfillDeps(database) {
   return count;
 }
 
-module.exports = { db, migrate, isSeeded, tx, parseJson, DB_FILE, DATA_DIR };
+module.exports = { db, reload, migrate, isSeeded, tx, parseJson, DB_FILE, DATA_DIR };

@@ -39,7 +39,7 @@ function mapNode(r) {
   return {
     id: r.id, scenarioId: r.scenario_id, type: r.type, title: r.title, target: r.target,
     timeout: r.timeout, form: r.form || undefined, att: r.att || undefined,
-    desc: r.descr, branches: parseJson(r.branches, []),
+    desc: r.descr, branches: parseJson(r.branches, []), parallelDesc: r.parallel_desc || undefined,
     guide: r.guide || '', keywords: (r.keywords || '').split(',').filter(Boolean),
     action: r.action || '', required: r.required === undefined ? true : !!r.required,
     wrong: parseJson(r.wrong, []),
@@ -298,22 +298,25 @@ router.patch('/projects/:id/status', auth.requireAuth, function (req, res) {
   db.prepare('UPDATE projects SET status=?, started_at=?, paused_at=?, paused_sec=?, ended_at=? WHERE id=?')
     .run(status, started, pausedAt, pausedSec, endedAt, p.id);
   auth.audit(req, '更新项目 ' + p.id + ' 状态为「' + status + '」');
-  /* 站内消息：演练启动/继续、演练结束 */
+  /* 站内消息：演练启动/继续、演练结束（模板驱动） */
   const mode = p.mode || '基础版';
   if (status === '演练中' && prev !== '演练中') {
     const resume = prev === '暂停';
     notify.push({
-      title: (resume ? '演练继续' : '演练开始') + ' · ' + p.name,
-      desc: '演练项目「' + p.name + '」' + (resume ? '已恢复' : '已启动') + '（' + mode + '，' + (p.level || '较大') + '级事件）。请各参演角色进入角色工作台按预案处置。',
-      level: p.level === '重大' ? 'P0' : 'P1',
-      source: '演练调度'
+      event: 'drill_start',
+      vars: {
+        action: resume ? '演练继续' : '演练开始',
+        project: p.name,
+        resumed: resume ? '已恢复' : '已启动',
+        mode: mode,
+        level: p.level || '较大'
+      },
+      level: p.level === '重大' ? 'P0' : 'P1'
     });
   } else if (status === '已结束' && prev !== '已结束') {
     notify.push({
-      title: '演练结束 · ' + p.name,
-      desc: '演练项目「' + p.name + '」（' + mode + '）已结束，请前往复盘评估查看综合得分与考评结果。',
-      level: 'P1',
-      source: '演练调度'
+      event: 'drill_end',
+      vars: { project: p.name, mode: mode }
     });
   }
   res.json({ ok: true, project: mapProject(db.prepare('SELECT * FROM projects WHERE id=?').get(p.id)) });

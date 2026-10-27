@@ -101,22 +101,21 @@ router.post('/reset', auth.requireAuth, requireBrandAdmin, function (req, res) {
 
 /* === 处置流程字典维护 === */
 
-/* 字典 key 白名单（共 15 个：4 个 drill_* + 9 个业务字典 + 2 个 HTML 硬编码字典） */
+/* 字典 key 白名单 */
 const DRILL_DICT_KEYS = [
-  'drill_role_by_target',
   'drill_form_by_action',
   'drill_level_by_scenario',
   'drill_action_meta',
   'ev_types',
   'external_evidence_types',
-  'target_role_aliases',
   'fill_roles_by_role',
   'managed_roles_by_role',
   'chat_channels',
   'kb_edit_roles',
   'external_node_patterns',
   'role_feed_mapping',
-  'script_action_types'
+  'script_action_types',
+  'notif_templates'
 ];
 
 /* key → schema 校验器（可选，校验失败返回错误字符串） */
@@ -126,11 +125,7 @@ function validateDrillDict(key, value) {
   const forms = db.prepare('SELECT id FROM form_templates').all().map(function (r) { return r.id; });
   if (!value || typeof value !== 'object') return ['字典值必须是对象'];
 
-  if (key === 'drill_role_by_target' || key === 'target_role_aliases') {
-    Object.keys(value).forEach(function (k) {
-      if (!value[k] || roles.indexOf(value[k]) < 0) errors.push('「' + k + '」的角色 ID「' + value[k] + '」在 roles 表中不存在');
-    });
-  } else if (key === 'drill_form_by_action') {
+  if (key === 'drill_form_by_action') {
     Object.keys(value).forEach(function (k) {
       if (!value[k] || forms.indexOf(value[k]) < 0) errors.push('「' + k + '」的表单模板 ID「' + value[k] + '」在 form_templates 表中不存在');
     });
@@ -237,6 +232,30 @@ router.put('/dict/:key', auth.requireAuth, requireBrandAdmin, function (req, res
   } catch (e) {
     console.error('[dict]', e && e.stack ? e.stack : e);
     res.status(500).json({ error: '保存失败：' + (e.message || e) });
+  }
+});
+
+/* 种子基线版本列表 */
+router.get('/seed/baselines', auth.requireAuth, requireBrandAdmin, function (req, res) {
+  try {
+    const rows = db.prepare('SELECT DISTINCT version, created_at FROM seed_baseline ORDER BY id DESC').all();
+    res.json(rows);
+  } catch (e) {
+    res.json([]); /* seed_baseline 表不存在时返回空 */
+  }
+});
+
+/* 导出当前运行时为新种子基线（存入 seed_baseline） */
+router.post('/seed/export', auth.requireAuth, requireBrandAdmin, function (req, res) {
+  try {
+    const version = String((req.body && req.body.version) || '').trim();
+    const note = String((req.body && req.body.note) || '').trim().slice(0, 200);
+    const r = seed.exportBaseline(version || undefined, note || undefined);
+    auth.audit(req, '导出当前数据库为种子基线：' + r.version + (note ? '（' + note + '）' : ''));
+    res.json({ ok: true, version: r.version, created_at: r.created_at });
+  } catch (e) {
+    console.error('[seed/export]', e && e.stack ? e.stack : e);
+    res.status(500).json({ error: '导出失败：' + (e.message || e) });
   }
 });
 

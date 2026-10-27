@@ -99,13 +99,22 @@ document.addEventListener('app:ready', function(e){
     +       '<div class="flex gap3 mt4"><button class="btn danger" id="rsBtn" style="width:100%">'+App.icon('trash')+'重置系统为初始状态</button></div>'
     +       '<div class="tiny dim mt3" style="line-height:1.8">会清空：角色权限、账号、场景剧本、项目任务、会商/取证/台账/评分/审计日志、表单模板。<br><b style="color:var(--warn)">不会删除</b>：uploads/ 上传文件、data/backups/ 备份文件。<br>重置后当前登录态失效，需用初始密码重新登录。</div>'
     +     '</div>' : '')
-    +     '<div class="card"><div class="card-title">'+App.icon('db')+'数据备份</div>'
-    +       '<div class="kv"><span class="k">备份范围</span><span>账号配置 / 剧本库 / 台账 / 审计日志 / 取证档案索引</span>'
+    +     '<div class="card"><div class="card-title">'+App.icon('db')+'数据备份与恢复</div>'
+    +       '<div class="kv"><span class="k">备份范围</span><span>全量数据库快照（账号 / 剧本 / 台账 / 审计日志 / 取证索引）</span>'
     +       '<span class="k">上次备份</span><span class="mono" id="bkLast">读取中…</span>'
-    +       '<span class="k">保留策略</span><span>近 12 次演练档案</span></div>'
+    +       '<span class="k">恢复来源</span><span>从备份文件恢复（或上传 .db 文件）</span></div>'
     +       '<div class="progress mt3" id="bkProg" style="display:none"><div class="bar" id="bkBar" style="width:0%"></div></div>'
     +       '<div class="tiny dim mt2" id="bkPct"></div>'
-    +       '<button class="btn primary mt3" id="bkBtn">'+App.icon('archive')+'立即备份</button></div>'
+    +       '<div class="flex gap3 mt3" style="flex-wrap:wrap">'
+    +         '<button class="btn primary" id="bkBtn">'+App.icon('archive')+'立即备份</button>'
+    +         '<label class="btn" id="bkUploadBtn">'+App.icon('upload')+'上传备份恢复<input type="file" id="bkFile" accept=".db" style="display:none"></label>'
+    +       '</div>'
+    +       '<div class="tiny dim mt3" style="color:var(--warn)">恢复将覆盖当前数据库，操作前会自动备份当前状态（安全网）。恢复后所有用户需重新登录。</div>'
+    +       '<div class="mt4" style="border-top:1px solid var(--elev);padding-top:12px">'
+    +         '<div class="tiny dim mb2">备份文件列表</div>'
+    +         '<div id="bkList" class="bk-list"></div>'
+    +       '</div>'
+    +     '</div>'
     +   '</div>'
     + '</div>'
     + (BRAND_ADMIN ?
@@ -115,7 +124,7 @@ document.addEventListener('app:ready', function(e){
       +   '<div class="form-grid" style="grid-template-columns:1fr">'
       +     '<div class="form-row"><label class="f-label">系统名称 <span class="req">*</span></label><input class="input" id="bsName" maxlength="40" placeholder="如 网络安全应急演练系统"></div>'
       +     '<div class="form-row"><label class="f-label">单位名称 <span class="req">*</span></label><input class="input" id="bsUnit" maxlength="40" placeholder="如 盘州市人民医院"></div>'
-      +     '<div class="form-row"><label class="f-label">版本信息</label><input class="input" id="bsVer" maxlength="20" placeholder="如 v0.1.7"></div>'
+      +     '<div class="form-row"><label class="f-label">系统版本</label><input class="input" id="bsVer" disabled style="background:rgba(60,70,90,.3);cursor:not-allowed" title="版本号由系统自动维护，不可手动修改"></div>'
       +   '</div>'
       +   '<div class="flex gap3 mt4"><button class="btn primary" id="bsSaveBtn" style="flex:1">'+App.icon('check')+'保存设置</button><button class="btn" id="bsResetBtn">'+App.icon('refresh')+'恢复默认</button></div>'
       +   '<div class="tiny dim mt3">保存后同步到登录页、大屏与全部业务页面。</div>'
@@ -584,21 +593,54 @@ document.addEventListener('app:ready', function(e){
     renderAudit();
   });
 
-  /* ---------- e) 通知与备份：站内消息默认开启，无需配置 ---------- */
+  /* ---------- e) 数据备份与恢复 ---------- */
   document.getElementById('bkBtn').onclick = function(){
-    App.confirmSim('立即将演练数据库备份到服务器 data/backups 目录（不接触医院真实生产库）？', function(){
+    App.confirmSim('立即将演练数据库备份到服务器 data/backups 目录？', function(){
       var prog = document.getElementById('bkProg'), bar = document.getElementById('bkBar'), pctEl = document.getElementById('bkPct');
       prog.style.display = ''; bar.style.width = '30%'; pctEl.textContent = '正在备份：演练数据库 / 取证索引 / 审计日志…';
       API.backupData().then(function(r){
         bar.style.width = '100%';
         pctEl.textContent = '备份完成：'+r.file+'（'+Math.round((r.size||0)/1024)+' KB，'+r.time+'）';
         App.toast('数据备份完成：'+r.file,'ok');
+        renderBackupList();
+        loadLastBackup();
       }).catch(function(e){
         bar.style.width = '0%';
         pctEl.textContent = '备份失败：'+((e&&e.message)||'请检查目录写入权限');
       });
     });
   };
+
+  /* 上传 .db 备份文件恢复 */
+  var bkFileInput = document.getElementById('bkFile');
+  if (bkFileInput) {
+    bkFileInput.addEventListener('change', function(e){
+      var file = this.files && this.files[0];
+      if (!file) return;
+      if (!/\.db$/i.test(file.name)) {
+        App.toast('请选择 .db 格式的备份文件','err');
+        this.value = ''; return;
+      }
+      App.confirmSim(
+        '确认从上传的备份文件恢复？<br><b>'+file.name+'</b>（'+Math.round(file.size/1024)+' KB）<br><br>当前数据库将被替换为此备份版本。恢复前会自动创建当前数据库的备份。恢复后所有用户需重新登录。',
+        function(){
+          var prog = document.getElementById('bkProg'), bar = document.getElementById('bkBar'), pctEl = document.getElementById('bkPct');
+          prog.style.display = ''; bar.style.width = '20%'; pctEl.textContent = '正在上传备份文件…';
+          var fd = new FormData(); fd.append('file', file);
+          API.restoreFromUpload(fd).then(function(r){
+            bar.style.width = '100%';
+            pctEl.textContent = '恢复成功：'+r.file+'（安全网：'+r.preBackup+'）';
+            App.toast('恢复成功，请重新登录','ok');
+            setTimeout(function(){ location.href='index.html'; }, 1500);
+          }).catch(function(err){
+            bar.style.width = '0%';
+            pctEl.textContent = '恢复失败：'+((err&&err.message)||'请检查文件完整性');
+          });
+        }
+      );
+      this.value = '';
+    });
+  }
 
   function loadLastBackup(){
     API.listBackups().then(function(list){
@@ -607,10 +649,65 @@ document.addEventListener('app:ready', function(e){
     }).catch(function(){ var el=document.getElementById('bkLast'); if(el) el.textContent='暂无备份'; });
   }
 
+  function renderBackupList(){
+    var el = document.getElementById('bkList');
+    if (!el) return;
+    API.listBackups().then(function(list){
+      if (!list.length) { el.innerHTML = '<div class="tiny dim">暂无备份文件。点击「立即备份」创建第一个。</div>'; return; }
+      el.innerHTML = list.map(function(b){
+        var sz = b.size < 1024 ? b.size+' B' : b.size < 1024*1024 ? Math.round(b.size/1024)+' KB' : (b.size/1024/1024).toFixed(1)+' MB';
+        return '<div class="bk-item" data-file="'+App.esc(b.file)+'">'
+          + '<span class="mono" style="font-size:12px;word-break:break-all">'+App.esc(b.file)+'</span>'
+          + '<span class="tiny dim">'+b.time+' · '+sz+'</span>'
+          + '<div class="bk-actions">'
+          +   '<button class="btn tiny" data-act="restore">'+App.icon('refresh')+'恢复</button>'
+          +   '<button class="btn tiny" data-act="dl">'+App.icon('download')+'下载</button>'
+          +   '<button class="btn tiny danger" data-act="del">'+App.icon('trash')+'删</button>'
+          + '</div></div>';
+      }).join('');
+
+      el.querySelectorAll('.bk-item').forEach(function(row){
+        var file = row.getAttribute('data-file');
+        row.querySelector('[data-act="restore"]').onclick = function(){
+          App.confirmSim(
+            '确认从备份文件恢复？<br><b>'+App.esc(file)+'</b><br><br>当前数据库将被替换为此备份版本。恢复前会自动创建当前数据库的备份。恢复后所有用户需重新登录。',
+            function(){
+              var prog = document.getElementById('bkProg'), bar = document.getElementById('bkBar'), pctEl = document.getElementById('bkPct');
+              prog.style.display = ''; bar.style.width = '20%'; pctEl.textContent = '正在恢复 '+file+'…';
+              API.restoreFromBackup(file).then(function(r){
+                bar.style.width = '100%';
+                pctEl.textContent = '恢复成功：'+r.file+'（安全网：'+r.preBackup+'）';
+                App.toast('恢复成功，请重新登录','ok');
+                setTimeout(function(){ location.href='index.html'; }, 1500);
+              }).catch(function(err){
+                bar.style.width = '0%';
+                pctEl.textContent = '恢复失败：'+((err&&err.message)||'操作失败');
+              });
+            }
+          );
+        };
+        row.querySelector('[data-act="dl"]').onclick = function(){
+          window.location.href = '/api/admin/backups/'+encodeURIComponent(file);
+        };
+        row.querySelector('[data-act="del"]').onclick = function(){
+          App.confirmSim('确认删除备份文件？<br><b>'+App.esc(file)+'</b>', function(){
+            API.deleteBackup(file).then(function(){
+              App.toast('已删除','ok');
+              renderBackupList();
+              loadLastBackup();
+            });
+          });
+        };
+      });
+    }).catch(function(err){
+      el.innerHTML = '<div class="tiny dim">加载失败：'+((err&&err.message)||err)+'</div>';
+    });
+  }
+
   /* ---------- f) 系统设置（仅平台管理员） ---------- */
   var BRAND_DEFAULTS = {
     systemName:'网络安全应急演练系统', unitName:'盘州市人民医院', logo:'img/logo.png',
-    version:'v0.1.7', github:'https://github.com/chenjinxiang1980/cyber-drill', gitee:'https://gitee.com/habeas/cyber-drill'
+    github:'https://github.com/chenjinxiang1980/cyber-drill', gitee:'https://gitee.com/habeas/cyber-drill'
   };
   var brandLogoUrl = 'img/logo.png';
 
@@ -647,7 +744,6 @@ document.addEventListener('app:ready', function(e){
       var payload = {
         systemName: document.getElementById('bsName').value.trim(),
         unitName: document.getElementById('bsUnit').value.trim(),
-        version: document.getElementById('bsVer').value.trim(),
         logo: brandLogoUrl,
         github: document.getElementById('bsGh').value.trim(),
         gitee: document.getElementById('bsGe').value.trim()
@@ -725,7 +821,7 @@ document.addEventListener('app:ready', function(e){
   }
 
 
-  renderUsers(); renderForms(); renderAudit(); loadLastBackup();
+  renderUsers(); renderForms(); renderAudit(); loadLastBackup(); renderBackupList();
   if(BRAND_ADMIN){ initBrand(); initReset(); }
 });
 App.boot('admin');
