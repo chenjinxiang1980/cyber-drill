@@ -172,6 +172,7 @@ document.addEventListener('app:ready', function(e){
   }
   /* 控件类型：模板显式指定优先，否则按字段名识别 */
   function wizType(f){
+    if(f.type==='multiselect' && f.options && f.options.length) return 'multiselect';
     if(f.type==='select' && f.options && f.options.length) return 'select';
     if(f.type==='textarea' || f.type==='text' || f.type==='datetime') return f.type;
     if(/时间$|日期$/.test(f.label)) return 'datetime';
@@ -288,6 +289,17 @@ document.addEventListener('app:ready', function(e){
         ctl = '<select class="input" id="wzInp"><option value="">请选择</option>'
           + f.options.map(function(o){ return '<option value="'+App.esc(o)+'"'+(val===o?' selected':'')+'>'+App.esc(o)+'</option>'; }).join('')
           + '</select>';
+      } else if(type === 'multiselect'){
+        /* 下拉多选：渲染为 checkbox 列表，值用顿号分隔存储 */
+        var picked = val ? val.split(/[、,，]/).map(function(x){ return x.trim(); }).filter(Boolean) : [];
+        ctl = '<div id="wzInp"><label class="tiny dim" style="margin-bottom:6px;display:block">请勾选可多选（按 Ctrl 或 Command 可多选）</label>'
+          + '<div class="wz-chkbox" style="display:flex;flex-wrap:wrap;gap:6px">'
+          + f.options.map(function(o){
+              var checked = picked.indexOf(o) >= 0 ? ' checked' : '';
+              return '<label style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;font-size:13px">'
+                + '<input type="checkbox" data-o="'+App.esc(o)+'"'+checked+'>'+App.esc(o)+'</label>';
+            }).join('')
+          + '</div></div>';
       } else if(type === 'datetime'){
         ctl = '<input class="input" id="wzInp" type="datetime-local" step="60" value="'+App.esc(val)+'">'
           + '<div class="tiny dim mt2">'+App.icon('clock')+' 使用日期时间选择器填写，统一为 YYYY-MM-DD HH:mm 格式</div>';
@@ -310,6 +322,15 @@ document.addEventListener('app:ready', function(e){
       if(inp){
         inp.oninput = function(){ s.values[f.label] = inp.value; };
         if(type === 'select' || type === 'datetime') inp.onchange = function(){ s.values[f.label] = inp.value; };
+        if(type === 'multiselect'){
+          inp.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+            cb.onchange = function(){
+              var arr = [];
+              inp.querySelectorAll('input[type=checkbox]:checked').forEach(function(c){ arr.push(c.dataset.o); });
+              s.values[f.label] = arr.join('、');
+            };
+          });
+        }
       }
 
       /* 打开流程/切换字段后延时 0.5 秒再朗读，避免语音被页面渲染打断导致播报不全 */
@@ -321,9 +342,16 @@ document.addEventListener('app:ready', function(e){
       host.querySelector('[data-sim]').onclick = function(){
         fields.forEach(function(x){
           var v = String(simValue(x.label, opts.t, opts.node)||'');
-          /* 下拉控件必须落在选项范围内，避免生成非法值 */
-          if(wizType(x) === 'select' && x.options.length && x.options.indexOf(v) < 0){
+          var wt = wizType(x);
+          if(wt === 'select' && x.options.length && x.options.indexOf(v) < 0){
             v = fitOption(x.options, v) || x.options[0];
+          } else if(wt === 'multiselect' && x.options.length){
+            /* 多选：随机选 1-2 个，顿号拼接 */
+            var pool = x.options.slice();
+            var n = Math.min(pool.length, 1 + Math.floor(Math.random()*2));
+            var picks = [];
+            for(var k=0; k<n; k++){ var idx = Math.floor(Math.random()*pool.length); picks.push(pool.splice(idx,1)[0]); }
+            v = picks.join('、');
           }
           s.values[x.label] = v;
         });
@@ -333,8 +361,14 @@ document.addEventListener('app:ready', function(e){
       var prev = host.querySelector('[data-prev]');
       if(prev) prev.onclick = function(){ if(s.step>0){ s.step--; paint(); } };
       host.querySelector('[data-next]').onclick = function(){
-        var v = String(s.values[f.label]||'').trim();
-        if(f.required && !v){ App.toast('请填写「'+f.label+'」后再继续','err'); return; }
+        var cur = f.label;
+        var v = String(s.values[cur]||'').trim();
+        if(wizType(f) === 'multiselect' && cur === f.label){
+          /* 多选必填：检查至少勾了一个 */
+          if(f.required && !v){ App.toast('请至少勾选一项「'+cur+'」','err'); return; }
+        } else {
+          if(f.required && !v){ App.toast('请填写「'+cur+'」后再继续','err'); return; }
+        }
         if(s.step < fields.length-1){ s.step++; paint(); }
         else { s.done = true; paint(); }
       };
@@ -938,7 +972,7 @@ document.addEventListener('app:ready', function(e){
           + '<div class="form-row span2"><label class="f-label">处置结果 <span class="req">*</span></label><input class="input" id="flResult" placeholder="如：已隔离2台主机，业务验证恢复正常"></div>'
           + '<div class="form-row span2"><label class="f-label">证据材料说明 <span class="tiny dim">（可选）</span></label><input class="input" id="flEvidence" placeholder="如：已截图并归档至取证模块"></div>'
           + '</div>'
-          + '<div class="tiny dim mt2">实战版不提供预填数据与正确流程提示：请自行研判该流程是否属于本岗正确处置动作。误选混淆流程按该流程分值直接扣分；正确流程超时完成按分值的 90% 计分。表单可按字段说明逐项填写，也可一键生成模拟数据后核对修改。</div>');
+          + '<div class="tiny dim mt2">实战版不提供预填数据与正确流程提示：请自行研判该流程是否属于本岗正确处置动作。误选混淆流程按该流程分值直接扣分；正确流程超时完成扣本节点分值的 10%。表单可按字段说明逐项填写，也可一键生成模拟数据后核对修改。</div>');
         var btn = ov.querySelector('#wbFlowSubmit');
         btn.onclick = function(){
           var forms = {}, missing = [];
@@ -1046,7 +1080,7 @@ document.addEventListener('app:ready', function(e){
       host.innerHTML = '<div class="tiny dim" style="margin-bottom:10px">本角色候选处置流程 <b>'+flows.length+'</b> 个（待处置 <b style="color:var(--err)">'+pending+'</b> 个'
         + (lockedCount?'，前置未完成 <b>'+lockedCount+'</b> 个':'')+'）· 点击列表行填写完整处置表单，判定不属于本岗动作可点「跳过（不执行）」</div>'
         + '<div class="task-nav">'+flows.map(flowRow).join('')+'</div>'
-        + '<div class="tiny dim mt2">列表同时包含正确处置流程与混淆流程，外观一致、不提示属性：误选混淆流程按该流程分值直接扣分；正确流程超时完成按 90% 计分；跳过混淆流程可加少量分，跳过正确流程则在结束演练时按该流程分值扣分。未满足前置条件的流程会置灰锁定，前置完成后自动开放。</div>';
+        + '<div class="tiny dim mt2">列表同时包含正确处置流程与混淆流程，外观一致、不提示属性：误选混淆流程按该流程分值直接扣分；正确流程超时完成扣本节点分值的 10%；跳过混淆流程无扣分无奖励，跳过正确流程则在结束演练时按该流程分值扣分。未满足前置条件的流程会置灰锁定，前置完成后自动开放。</div>';
       host.querySelectorAll('[data-flow]').forEach(function(row){
         row.onclick = function(){
           var d = flows.filter(function(x){ return String(x.nodeId)===String(row.dataset.flow); })[0];
@@ -1079,14 +1113,14 @@ document.addEventListener('app:ready', function(e){
       if(!isPractical){
         el.innerHTML = '<div class="kpi info" style="margin-bottom:10px"><div class="k-label">剧本流程得分</div><div class="k-value">'+s.score+'<span class="small dim">分</span></div><div class="k-foot">'+App.esc(s.grade||'—')+' · 正确流程满分 '+s.maxScore+'</div></div>'
           + '<div class="tiny">正确流程 <b>'+s.hit+'</b>/'+s.total+' · 超时完成 <b style="color:var(--err)">'+(s.late||0)+'</b>'+(s.missed?(' · 未完成 <b style="color:var(--err)">'+s.missed+'</b>'):'')+'</div>'
-          + '<div class="tiny dim mt2">基础版按剧本正确流程的分值累计得分，超时完成按分值的 90% 计分；演练结束时未完成的正确流程扣该流程全部分值。</div>'
+          + '<div class="tiny dim mt2">扣分制：起始 100 分。超时完成扣本节点分值的 10%；演练结束时未完成的正确流程扣该流程全部分值。</div>'
           + (ded.length?'<div class="tiny dim mt2">'+ded.slice(0,4).map(function(x){ return App.esc(x.title)+' '+x.point+'分（'+App.esc(x.type)+'）'; }).join('；')+(ded.length>4?' 等':'')+'</div>':'');
         return;
       }
       var items = ded.concat(s.bonuses||[]);
       el.innerHTML = '<div class="kpi info" style="margin-bottom:10px"><div class="k-label">即时评分</div><div class="k-value">'+s.score+'<span class="small dim">分</span></div><div class="k-foot">'+App.esc(s.grade||'—')+' · 正确流程满分 '+s.maxScore+'</div></div>'
         + '<div class="tiny">正确流程 <b>'+s.hit+'</b>/'+s.total+' · 待处置 <b>'+(s.pending||0)+'</b> · 已跳过 <b>'+(s.skipped||0)+'</b> · 混淆流程误选 <b style="color:var(--err)">'+(s.wrong||0)+'</b> · 超时完成 <b style="color:var(--err)">'+(s.late||0)+'</b>'+(s.missed?(' · 未完成 <b style="color:var(--err)">'+s.missed+'</b>'):'')+'</div>'
-        + '<div class="tiny dim mt2">实战版计分：正确流程按设置分值得分，超时完成按 90% 计；接收人与剧本预设不一致按 90% 计；混淆流程按分值扣分；跳过混淆流程 +2 分；跳过正确流程在结束演练时扣该流程全部分值。</div>'
+        + '<div class="tiny dim mt2">扣分制：起始 100 分。超时完成扣本节点分值的 10%；接收人与剧本预设不一致扣本节点分值的 10%；执行混淆流程扣该混淆节点全部分值；跳过正确流程在结束演练时扣该流程全部分值。</div>'
         + (items.length?'<div class="tiny dim mt2">'+items.slice(0,4).map(function(x){ return App.esc(x.title)+' '+(x.point>0?'+':'')+x.point+'分（'+App.esc(x.type)+'）'; }).join('；')+(items.length>4?' 等':'')+'</div>':'<div class="tiny dim mt2">尚无扣分项</div>');
     }).catch(function(){ el.innerHTML = '<div class="tiny dim">评分加载失败</div>'; });
   }

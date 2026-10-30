@@ -81,7 +81,11 @@ function userByToken(token) {
 function tokenOf(req) {
   const h = req.headers['authorization'] || '';
   if (h.indexOf('Bearer ') === 0) return h.slice(7).trim();
-  return req.headers['x-drill-token'] || '';
+  const x = req.headers['x-drill-token'] || '';
+  if (x) return x;
+  /* query string fallback：供文件下载场景（<a download> 无法带 Authorization header） */
+  if (req.query && req.query.t) return String(req.query.t).trim();
+  return '';
 }
 
 /* 认证中间件 */

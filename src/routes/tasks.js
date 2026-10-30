@@ -273,6 +273,81 @@ router.post('/:id/forms', auth.requireAuth, loadTask, function (req, res) {
     .run(t.project_id, hhmm(), req.user.name, req.user.role.id, '提交表单',
       '《' + tpl.name + '》' + (firstTwo ? ('：' + firstTwo) : ''), '', nextSeq(t.project_id));
   auth.audit(req, '提交表单《' + tpl.name + '》（任务 ' + t.id + '）');
+
+  /* ---- F1 → impact 联动：受影响系统 → state=故障 ---- */
+  if (formId === 'F1') {
+    const raw = data['受影响系统'];
+    if (raw) {
+      /* 系统名归一化：历史数据/自由填写的别名 → 标准 6 系统名 */
+      const SYS_ALIAS = {
+        'his收费系统': 'HIS收费系统', 'his收费': 'HIS收费系统',
+        'his住院系统': 'HIS收费系统', 'his住院': 'HIS收费系统',
+        '门诊收费系统': 'HIS收费系统', '门诊收费': 'HIS收费系统',
+        '收费系统': 'HIS收费系统', 'his': 'HIS收费系统',
+        '医护工作站系统': '医护工作站', '护士工作站': '医护工作站', '医生工作站': '医护工作站',
+        '电子病历系统': '电子病历系统', '电子病历': '电子病历系统', 'emr': '电子病历系统',
+        '临床检验系统': '临床检验系统', '检验系统': '临床检验系统', 'lis': '临床检验系统',
+        '医学影像系统': '医学影像系统', '影像系统': '医学影像系统', 'pacs': '医学影像系统',
+        '办公oa系统': '办公OA系统', 'oa系统': '办公OA系统', '办公系统': '办公OA系统'
+      };
+      const STANDARD_SYSS = ['HIS收费系统','医护工作站','电子病历系统','临床检验系统','医学影像系统','办公OA系统'];
+      const normalize = function (s) {
+        const key = String(s).trim().toLowerCase();
+        if (!key) return null;
+        /* 先查别名表 */
+        if (SYS_ALIAS[key]) return SYS_ALIAS[key];
+        /* 已是标准名 */
+        if (STANDARD_SYSS.indexOf(s.trim()) >= 0) return s.trim();
+        /* 子串模糊匹配：自由填写可能只写了一部分 */
+        for (let i = 0; i < STANDARD_SYSS.length; i++) {
+          if (STANDARD_SYSS[i].indexOf(s.trim()) >= 0 || s.trim().indexOf(STANDARD_SYSS[i]) >= 0) {
+            return STANDARD_SYSS[i];
+          }
+        }
+        return null;
+      };
+      const arr = String(raw).split(/[、,，|｜\s]+/).map(normalize).filter(Boolean);
+      /* 去重 */
+      const uniq = arr.filter(function (v, i, a) { return a.indexOf(v) === i; });
+      const upd = db.prepare('UPDATE impact SET state=\'故障\', pct=30 WHERE sys=?');
+      uniq.forEach(function (sys) { try { upd.run(sys); } catch (e) {} });
+      if (arr.length) {
+        try {
+          db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')
+            .run(t.project_id, hhmm(), '系统', null, '业务影响自动变更',
+              '依据《事件初步核实单》自动标记为故障：' + arr.join('、'), 'P1', nextSeq(t.project_id));
+        } catch (e) {}
+      }
+    }
+  }
+
+  /* ---- F7 → impact 联动：各系统状态下拉 → 对应 state ---- */
+  if (formId === 'F7') {
+    const SYS_STATE_FIELDS = [
+      { label: 'HIS收费系统状态', sys: 'HIS收费系统' },
+      { label: '医护工作站状态', sys: '医护工作站' },
+      { label: '电子病历系统状态', sys: '电子病历系统' },
+      { label: '临床检验系统状态', sys: '临床检验系统' },
+      { label: '医学影像系统状态', sys: '医学影像系统' },
+      { label: '办公OA系统状态', sys: '办公OA系统' }
+    ];
+    const upd = db.prepare('UPDATE impact SET state=? WHERE sys=?');
+    SYS_STATE_FIELDS.forEach(function (f) {
+      const v = String(data[f.label] || '').trim();
+      if (v) { try { upd.run(v, f.sys); } catch (e) {} }
+    });
+    /* 检查是否全系统已恢复 */
+    try {
+      const all = db.prepare('SELECT sys,state FROM impact ORDER BY seq').all();
+      const allOk = all.length > 0 && all.every(function (x) { return x.state === '已恢复' || x.state === '正常'; });
+      if (allOk) {
+        db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')
+          .run(t.project_id, hhmm(), '系统', null, '业务全部恢复',
+            '依据《业务恢复确认单》全部系统状态已恢复正常，演练业务兜底流程结束', '', nextSeq(t.project_id));
+      }
+    } catch (e) {}
+  }
+
   res.json({ ok: true, submissionId: Number(r.lastInsertRowid) });
 });
 

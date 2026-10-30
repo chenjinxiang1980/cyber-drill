@@ -13,7 +13,8 @@
   --sp1:4px; --sp2:8px; --sp3:12px; --sp4:16px; --sp5:24px; --sp6:32px;
   --shadow:0 8px 24px rgba(0,0,0,.35);
   --font:"Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;
-  --mono:Consolas,"Courier New",monospace;
+  /* mono 加入中文 fallback，避免中文回退到系统宋体 */
+  --mono:Consolas,"Microsoft YaHei","PingFang SC","Courier New",monospace;
   --sidebar-w:232px; --topbar-h:56px;
 }
 *{margin:0;padding:0;box-sizing:border-box}

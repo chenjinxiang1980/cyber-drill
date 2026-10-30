@@ -215,6 +215,54 @@ function migrate() {
   } catch (e) {
     console.warn('[migrate] 反馈单绑定跳过：', e.message);
   }
+  /* 剧本节点 form 与 tasks.forms 对齐（剧本修改后旧项目 tasks 不同步问题） */
+  try {
+    require('./drill_plan').backfillTaskForms(db);
+  } catch (e) {
+    console.warn('[migrate] 剧本/任务表单同步跳过：', e.message);
+  }
+  /* 旧库升级：演练项目删除需级联清理，补齐 project_id 关联列 */
+  addColumn('notifs', 'project_id', 'TEXT');
+  addColumn('notif_reads', 'project_id', 'TEXT');
+  addColumn('messages', 'project_id', 'TEXT');
+  addColumn('chat_messages', 'project_id', 'TEXT');
+  addColumn('impact', 'project_id', 'TEXT');
+  /* 站内消息模板：首次写入 dict 表，补齐缺失 event */
+  try {
+    require('./notify').ensureTemplates();
+  } catch (e) {
+    console.warn('[migrate] 站内消息模板写入跳过：', e.message);
+  }
+  /* 业务影响系统名统一修正（6 标准系统 + 初始正常） */
+  try {
+    const { IMPACT } = require('./seed_data');
+    const flagRow = db.prepare("SELECT value FROM settings WHERE key='impact_sys_standard_v2'").get();
+    if (!flagRow) {
+      db.prepare('DELETE FROM impact').run();
+      const ins = db.prepare('INSERT INTO impact (sys,state,pct,seq) VALUES (?,?,?,?)');
+      IMPACT.forEach(function (r) { ins.run(r.sys, r.state, Number(r.pct), Number(r.seq)); });
+      db.prepare("INSERT INTO settings (key,value) VALUES ('impact_sys_standard_v2','1')").run();
+      console.log('[migrate] impact 表已重建为 6 标准系统');
+    }
+  } catch (e) {
+    console.warn('[migrate] impact 表修正跳过：', e.message);
+  }
+  /* F1/F7 表单模板强制更新（受影响系统 multiselect + 系统状态下拉） */
+  try {
+    const { FORM_TEMPLATES } = require('./seed_data');
+    const upd = db.prepare('UPDATE form_templates SET fields=? WHERE id=?');
+    let f1 = FORM_TEMPLATES.filter(function (t) { return t.id === 'F1'; })[0];
+    let f7 = FORM_TEMPLATES.filter(function (t) { return t.id === 'F7'; })[0];
+    if (f1) upd.run(JSON.stringify(f1.controls || f1.fields), 'F1');
+    if (f7) upd.run(JSON.stringify(f7.controls || f7.fields), 'F7');
+    console.log('[migrate] F1/F7 表单模板已更新');
+  } catch (e) {
+    console.warn('[migrate] F1/F7 模板更新跳过：', e.message);
+  }
+  /* sessions 过期清理 */
+  try {
+    db.prepare('DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at <= datetime(\'now\')').run();
+  } catch (e) {}
 }
 
 /* 幂等为指定角色补充菜单权限（角色尚未导入时跳过） */

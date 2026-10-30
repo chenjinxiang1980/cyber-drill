@@ -1703,42 +1703,12 @@ module.exports = {
     }
   ],
   "IMPACT": [
-    {
-      "sys": "门诊收费系统",
-      "state": "已恢复",
-      "pct": 100,
-      "seq": 0
-    },
-    {
-      "sys": "HIS住院系统",
-      "state": "已恢复",
-      "pct": 100,
-      "seq": 1
-    },
-    {
-      "sys": "电子病历EMR",
-      "state": "恢复验证中",
-      "pct": 85,
-      "seq": 2
-    },
-    {
-      "sys": "LIS检验系统",
-      "state": "正常",
-      "pct": 100,
-      "seq": 3
-    },
-    {
-      "sys": "PACS影像",
-      "state": "灾备切换",
-      "pct": 60,
-      "seq": 4
-    },
-    {
-      "sys": "办公OA",
-      "state": "隔离中",
-      "pct": 20,
-      "seq": 5
-    }
+    { "sys": "HIS收费系统", "state": "正常", "pct": 100, "seq": 0 },
+    { "sys": "医护工作站", "state": "正常", "pct": 100, "seq": 1 },
+    { "sys": "电子病历系统", "state": "正常", "pct": 100, "seq": 2 },
+    { "sys": "临床检验系统", "state": "正常", "pct": 100, "seq": 3 },
+    { "sys": "医学影像系统", "state": "正常", "pct": 100, "seq": 4 },
+    { "sys": "办公OA系统", "state": "正常", "pct": 100, "seq": 5 }
   ],
   "SCORES": [
     {
@@ -2398,9 +2368,17 @@ module.exports = {
         },
         {
           "label": "受影响系统",
-          "hint": "出现异常的业务系统名称，如 HIS、EMR、LIS、PACS。",
+          "hint": "勾选受到本次事件影响的业务系统，用于驱动业务影响看板变更。",
           "required": true,
-          "type": "text"
+          "type": "multiselect",
+          "options": [
+            "HIS收费系统",
+            "医护工作站",
+            "电子病历系统",
+            "临床检验系统",
+            "医学影像系统",
+            "办公OA系统"
+          ]
         },
         {
           "label": "IP/域名",
@@ -2783,28 +2761,52 @@ module.exports = {
       "name": "业务恢复确认单",
       "controls": [
         {
-          "label": "恢复系统清单",
-          "hint": "已完成恢复的系统清单。",
+          "label": "HIS收费系统状态",
+          "hint": "选择当前 HIS 收费系统的恢复状态。",
           "required": true,
-          "type": "textarea"
+          "type": "select",
+          "options": ["正常", "隔离中", "灾备切换中", "恢复验证中", "已恢复"]
         },
         {
-          "label": "数据完整性校验",
-          "hint": "备份校验方式、校验结果与 RPO 达成情况。",
+          "label": "医护工作站状态",
+          "hint": "选择当前医护工作站的恢复状态。",
           "required": true,
-          "type": "textarea"
+          "type": "select",
+          "options": ["正常", "隔离中", "灾备切换中", "恢复验证中", "已恢复"]
         },
         {
-          "label": "业务功能验证结果",
-          "hint": "逐项记录 HIS/EMR/LIS/PACS 验证结果。",
+          "label": "电子病历系统状态",
+          "hint": "选择当前电子病历系统的恢复状态。",
           "required": true,
-          "type": "textarea"
+          "type": "select",
+          "options": ["正常", "隔离中", "灾备切换中", "恢复验证中", "已恢复"]
         },
         {
-          "label": "恢复时间",
-          "hint": "业务恢复完成时间。",
+          "label": "临床检验系统状态",
+          "hint": "选择当前临床检验系统的恢复状态。",
           "required": true,
-          "type": "datetime"
+          "type": "select",
+          "options": ["正常", "隔离中", "灾备切换中", "恢复验证中", "已恢复"]
+        },
+        {
+          "label": "医学影像系统状态",
+          "hint": "选择当前医学影像系统的恢复状态。",
+          "required": true,
+          "type": "select",
+          "options": ["正常", "隔离中", "灾备切换中", "恢复验证中", "已恢复"]
+        },
+        {
+          "label": "办公OA系统状态",
+          "hint": "选择当前办公OA系统的恢复状态。",
+          "required": true,
+          "type": "select",
+          "options": ["正常", "隔离中", "灾备切换中", "恢复验证中", "已恢复"]
+        },
+        {
+          "label": "恢复情况说明",
+          "hint": "逐项说明各系统恢复过程、验证结果及遗留问题。",
+          "required": false,
+          "type": "textarea"
         },
         {
           "label": "确认人",

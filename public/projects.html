@@ -12,6 +12,30 @@
 .pj-ops{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .grp-kv{display:grid;grid-template-columns:88px 1fr;gap:8px 14px;font-size:13px;margin-top:14px}
 .grp-kv .k{color:var(--text3)}
+.script-body{max-height:70vh;overflow-y:auto}
+.script-section{margin-bottom:18px}
+.script-section h3{font-size:14px;font-weight:600;margin-bottom:8px;color:var(--text1);display:flex;align-items:center;gap:6px}
+.script-section h3::before{content:'';width:3px;height:14px;background:var(--primary);border-radius:2px}
+.script-node{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:var(--bg2)}
+.script-node.basic{border-left:3px solid var(--green,#22a06b)}
+.script-node .sn-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.script-node .sn-title{font-weight:600;font-size:13.5px}
+.script-node .sn-meta{display:flex;gap:10px;font-size:12px;color:var(--text3);flex-wrap:wrap}
+.script-node .sn-meta span{display:inline-flex;align-items:center;gap:2px}
+.script-node .sn-desc{font-size:13px;color:var(--text2);line-height:1.6;margin-top:6px}
+.script-node .sn-guide{margin-top:8px;padding:8px 10px;background:rgba(52,152,219,.08);border-radius:6px;font-size:12.5px;color:#2c3e50;border-left:2px solid #3498db}
+.script-node .sn-guide .sn-guide-label{font-weight:600;color:#3498db;margin-right:4px}
+.script-node .sn-action{margin-top:4px;font-size:12px;color:var(--text3)}
+.script-node .sn-score{font-size:12px;color:#e67e22;font-weight:600}
+.script-instructions{background:linear-gradient(135deg,rgba(52,152,219,.08),rgba(46,204,113,.06));border:1px solid rgba(52,152,219,.2);border-radius:8px;padding:14px 16px;margin-bottom:18px}
+.script-instructions h4{margin:0 0 8px;font-size:13px;color:#2c3e50}
+.script-instructions ul{margin:0;padding-left:18px;font-size:12.5px;color:var(--text2);line-height:1.8}
+.script-members{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.script-members .sm-chip{background:rgba(79,124,255,.1);color:var(--primary);padding:3px 10px;border-radius:12px;font-size:12px}
+.notice-preview{background:rgba(46,204,113,.06);border:1px solid rgba(46,204,113,.25);border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px;line-height:1.7}
+.notice-preview .np-title{font-weight:600;margin-bottom:4px;color:#2c3e50}
+.notice-preview .np-body{color:var(--text2)}
+.notice-sent{background:rgba(46,204,113,.08);border:1px solid rgba(46,204,113,.3);border-radius:6px;padding:10px 12px;font-size:13px;color:#16a085;display:flex;align-items:center;gap:8px}
 </style>
 </head>
 <body data-page="projects">
@@ -23,19 +47,10 @@ document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
   var canOp = !role.external && ['commander','itlead','platformadmin'].indexOf(role.id)>=0;
-  /* 删除演练项目：仅平台管理员 */
   var canDel = role.id === 'platformadmin';
 
   function projById(id){ return MOCK.PROJECTS.filter(function(p){ return p.id===id; })[0]; }
   function scenarioName(sid){ var s = MOCK.SCENARIOS.filter(function(x){ return x.id===sid; })[0]; return s?s.name:sid; }
-  function roleById(rid){ return MOCK.ROLES.filter(function(r){ return r.id===rid; })[0]; }
-  function projProgress(p){
-    if(p.status==='未开始') return 0;
-    if(p.status==='已结束'||p.status==='已归档') return 100;
-    var ts = MOCK.TASKS.filter(function(t){ return t.projectId===p.id; });
-    if(!ts.length) return 0;
-    return Math.round(ts.filter(function(t){ return t.status==='已完成'; }).length/ts.length*100);
-  }
 
   page.innerHTML =
     '<div class="page-head"><div><h1>演练项目管理</h1><div class="sub">演练项目全生命周期：未开始 → 演练中 → 暂停 → 已结束 → 已归档'+(canOp?'':' · 当前角色为查看权限')+'</div></div>'
@@ -46,15 +61,18 @@ document.addEventListener('app:ready', function(e){
     + '<div class="table-wrap"><table class="table"><thead><tr>'
     + '<th>项目编号</th><th>项目名称</th><th>演练类型</th><th>演练模式</th><th>关联剧本</th><th>参演单位</th><th>计划日期</th><th>状态</th><th>当前进度</th><th style="text-align:right">操作</th>'
     + '</tr></thead><tbody id="pjBody"></tbody></table></div>'
-    + '<div class="tiny dim mt3">进度依据项目任务完成情况自动计算 · 已归档项目为只读台账，不可再变更状态。</div>';
+    + '<div class="tiny dim mt3">进度依据实际演练数据自动计算 · 脚本已自动屏蔽所有混淆节点与终止节点。</div>';
 
   function opsHtml(p){
     var del = canDel ? '<button class="btn sm danger" data-act="del" data-id="'+p.id+'">'+App.icon('trash')+'删除</button>' : '';
+    var scriptBtn = '<button class="btn sm" data-act="script" data-id="'+p.id+'">'+App.icon('file-text')+'脚本</button>';
+    var notifyBtn = canOp ? '<button class="btn sm" data-act="notify" data-id="'+p.id+'">'+App.icon('bell')+'通知</button>' : '';
     if(!canOp || p.status==='已归档'){
       return '<button class="btn sm" data-act="grp" data-id="'+p.id+'">'+App.icon('user')+'编组</button>'
+      + scriptBtn + notifyBtn
       + (p.status==='已归档'?'<span class="tag gray">只读</span>':'') + del;
     }
-    var b = '<button class="btn sm" data-act="grp" data-id="'+p.id+'">'+App.icon('user')+'编组</button>';
+    var b = '<button class="btn sm" data-act="grp" data-id="'+p.id+'">'+App.icon('user')+'编组</button>' + scriptBtn + notifyBtn;
     if(p.status==='未开始') b += '<button class="btn sm" data-act="rehearse" data-id="'+p.id+'">'+App.icon('eye')+'预演</button><button class="btn sm primary" data-act="start" data-id="'+p.id+'">'+App.icon('play')+'启动演练</button>';
     else if(p.status==='演练中') b += '<button class="btn sm" data-act="pause" data-id="'+p.id+'">'+App.icon('pause')+'暂停</button><button class="btn sm ok" data-act="end" data-id="'+p.id+'">'+App.icon('power')+'结束</button>';
     else if(p.status==='暂停') b += '<button class="btn sm primary" data-act="resume" data-id="'+p.id+'">'+App.icon('play')+'继续</button><button class="btn sm ok" data-act="end" data-id="'+p.id+'">'+App.icon('power')+'结束</button>';
@@ -63,17 +81,23 @@ document.addEventListener('app:ready', function(e){
   }
 
   function render(){
+    API.getProjects().then(function(list){
+      MOCK.PROJECTS = list || [];
+      renderTable();
+    }).catch(function(){ renderTable(); });
+  }
+  function renderTable(){
     document.getElementById('pjBody').innerHTML = MOCK.PROJECTS.map(function(p){
-      var pct = projProgress(p);
+      var pct = (typeof p.progress === 'number') ? p.progress : 0;
       return '<tr data-row="'+p.id+'">'
       + '<td class="mono">'+p.id+'</td>'
-      + '<td><div class="bold">'+App.esc(p.name)+'</div><div class="tiny dim">'+p.members.length+' 名参演成员 · 目标：'+App.esc(p.target)+'</div></td>'
+      + '<td><div class="bold">'+App.esc(p.name)+'</div><div class="tiny dim">'+(p.members?p.members.length:0)+' 名参演角色 · 目标：'+App.esc(p.target||'—')+'</div></td>'
       + '<td>'+p.type+'</td>'
       + '<td>'+(p.mode==='实战版'
           ? '<span class="tag red">实战版</span><div class="tiny dim">仅显示已发现故障</div>'
           : '<span class="tag green">基础版</span><div class="tiny dim">任务中心逐步提示</div>')+'</td>'
-      + '<td><span class="t-link" data-act="script" data-id="'+p.scenarioId+'">'+scenarioName(p.scenarioId)+'</span></td>'
-      + '<td class="small">'+p.units.join('<br>')+'</td>'
+      + '<td><span class="t-link" data-act="script-edit" data-id="'+p.scenarioId+'">'+scenarioName(p.scenarioId)+'</span></td>'
+      + '<td class="small">'+(p.units?p.units.join('<br>'):'—')+'</td>'
       + '<td class="mono small">'+p.date+'</td>'
       + '<td data-st="'+p.id+'">'+App.statusTag(p.status)+'</td>'
       + '<td><div class="pj-prog"><div class="progress"><div class="bar '+(pct>=100?'ok':pct>0?'':'')+'" style="width:'+pct+'%"></div></div><span class="mono tiny dim">'+pct+'%</span></div></td>'
@@ -82,29 +106,151 @@ document.addEventListener('app:ready', function(e){
     page.querySelectorAll('[data-act]').forEach(function(b){
       b.onclick = function(){
         var id = b.dataset.id;
-        if(b.dataset.act==='script'){ location.href='scenarios.html?edit=1&scenario='+id; return; }
+        if(b.dataset.act==='script-edit'){ location.href='scenarios.html?edit=1&scenario='+id; return; }
+        if(b.dataset.act==='script'){ openScript(projById(id)); return; }
+        if(b.dataset.act==='notify'){ openNotify(projById(id)); return; }
         if(b.dataset.act==='grp'){ openGroup(projById(id)); return; }
         var p = projById(id);
         if(b.dataset.act==='del'){ confirmDelete(p); return; }
         if(b.dataset.act==='rehearse'){ App.toast('演练模拟：预演推演已发起，按剧本时序校验节点可达性','ok'); return; }
-        if(b.dataset.act==='start') changeStatus(p,'演练中','启动演练项目《'+p.name+'》。系统将按剧本推送首个节点并自动下发参演任务（演练模拟）。');
-        if(b.dataset.act==='pause') changeStatus(p,'暂停','暂停演练《'+p.name+'》。计时与节点推送挂起，参演任务保留（演练模拟）。');
-        if(b.dataset.act==='resume') changeStatus(p,'演练中','恢复演练《'+p.name+'》，从暂停时刻继续推演（演练模拟）。');
-        if(b.dataset.act==='end') changeStatus(p,'已结束','结束演练《'+p.name+'》。状态将进入复盘评估与材料归档阶段（演练模拟）。');
-        if(b.dataset.act==='archive') changeStatus(p,'已归档','归档演练《'+p.name+'》。归档后项目转为只读台账，不可再变更（演练模拟）。');
+        if(b.dataset.act==='start') changeStatus(p,'演练中','启动演练项目《'+p.name+'》');
+        if(b.dataset.act==='pause') changeStatus(p,'暂停','暂停演练《'+p.name+'》');
+        if(b.dataset.act==='resume') changeStatus(p,'演练中','恢复演练《'+p.name+'》');
+        if(b.dataset.act==='end') changeStatus(p,'已结束','结束演练《'+p.name+'》');
+        if(b.dataset.act==='archive') changeStatus(p,'已归档','归档演练《'+p.name+'》');
       };
     });
   }
 
-  function syncTopbar(){
-    /* 顶栏演练计时由 App 全局每秒按真实起止时刻刷新 */
-    App.renderLiveChip();
+  /* ===== 演练脚本（仅 Word 导出） ===== */
+  function openScript(p){
+    if(!p){ App.toast('演练项目不存在','err'); return; }
+    if(!p.scenarioId){ App.toast('该项目未关联剧本','warn'); return; }
+    App.modal({ title:'演练脚本 · '+App.esc(p.name)+'（'+p.mode+'）', wide:true, body:'<div id="scriptBody" class="script-body"><div class="center dim">加载中…</div></div>',
+      foot:'<button class="btn" id="scClose">关闭</button>'
+        + '<a class="btn ok" id="scWord" style="text-decoration:none" target="_blank">'+App.icon('download')+'导出 Word</a>',
+      onOpen:function(ov){
+        ov.querySelector('#scClose').onclick = ov.close;
+        ov.querySelector('#scWord').href = API.exportProjectScriptUrl(p.id);
+        API.getProjectScript(p.id).then(function(data){
+          try { renderScriptBody(ov.querySelector('#scriptBody'), data, p); }
+          catch(err) { console.error('[projects.html] renderScriptBody error:', err); ov.querySelector('#scriptBody').innerHTML = '<div class="center dim" style="color:#e74c3c">渲染异常：' + err.message + '<br>请刷新页面重试</div>'; }
+        }).catch(function(err){
+          console.error('[projects.html] getProjectScript error:', err);
+          ov.querySelector('#scriptBody').innerHTML = '<div class="center dim" style="color:#e74c3c">加载失败：' + ((err&&err.message)||'未知错误') + '<br>请检查登录状态或刷新页面</div>';
+        });
+      } });
+  }
+  function renderScriptBody(container, data, p){
+    if(!data || !data.ok){ container.innerHTML = '<div class="center dim">脚本数据异常</div>'; return; }
+    var mode = data.mode;
+    /* 前端二次过滤（绝对保险）：即便后端漏了，也绝不展示混淆节点和终止节点 */
+    var safeList = (data.script || []).filter(function(n){
+      if(n.type === 'end') return false;          /* 终止节点不展示 */
+      if(n.flowType === 'distractor') return false; /* 混淆节点不展示 */
+      return true;
+    });
+    /* 验证过滤是否生效：如果后端漏了混淆节点，前端拦截并警告 */
+    var leaked = (data.script || []).length - safeList.length;
+    if(leaked > 0){
+      console.warn('[projects.html] 前端二次过滤拦截了 '+leaked+' 个不应展示的节点（已屏蔽）');
+    }
+
+    var instructionsHtml = data.instructions.map(function(s){ return '<li>'+App.esc(s)+'</li>'; }).join('');
+    var membersHtml = (data.members || []).map(function(m){ return '<span class="sm-chip">'+App.esc(m.name)+'</span>'; }).join('');
+
+    var nodesHtml = safeList.map(function(n, idx){
+      var roleTags = n.role ? App.esc(n.role) : '—';
+      var typeLabel = ({alert:'告警节点',parallel:'并行节点',task:'处置节点',report:'上报节点',decision:'决策节点'})[n.type] || '节点';
+      var timeoutTag = n.timeout ? (n.timeout + ' 分钟') : '未设置';
+      var extras = '';
+      if(mode === '基础版'){
+        if(n.guide) extras += '<div class="sn-guide"><span class="sn-guide-label">演练提示：</span>'+App.esc(n.guide)+'</div>';
+        if(n.desc) extras += '<div class="sn-desc">'+App.esc(n.desc)+'</div>';
+        if(n.score) extras += '<div class="sn-score">分值 '+n.score+' 分</div>';
+      }
+      return '<div class="script-node basic">'
+        + '<div class="sn-head"><span class="sn-title">'+(idx+1)+'. '+App.esc(n.title)+'</span></div>'
+        + '<div class="sn-meta">'
+        +   '<span>'+typeLabel+'</span>'
+        +   '<span>责任角色：'+roleTags+'</span>'
+        +   '<span>处置时长：'+timeoutTag+'</span>'
+        +   (n.action ? '<span>动作：'+App.esc(n.action)+'</span>' : '')
+        + '</div>'
+        + extras
+        + '</div>';
+    }).join('');
+
+    container.innerHTML =
+      '<div class="script-instructions"><h4>'+App.esc(mode)+'演练脚本说明</h4><ul>'+instructionsHtml+'</ul>'
+      + '<div class="tiny dim mt2" style="color:#16a085;margin-top:8px">✅ 已自动过滤全部混淆节点与终止节点，仅展示主流处置流程</div>'
+      + '</div>'
+      + '<div class="script-section"><h3>演练概览</h3>'
+      +   '<div class="grp-kv" style="margin-top:6px">'
+      +     '<span class="k">项目编号</span><span>'+App.esc(data.projectId)+'</span>'
+      +     '<span class="k">项目名称</span><span>'+App.esc(data.projectName)+'</span>'
+      +     '<span class="k">演练模式</span><span>'+(mode==='实战版'?'<span class="tag red">实战版</span>':'<span class="tag green">基础版</span>')+'</span>'
+      +     '<span class="k">关联剧本</span><span>'+(data.scenario?App.esc(data.scenario.name):'—')+'</span>'
+      +     '<span class="k">剧本类型</span><span>'+(data.scenario?App.esc(data.scenario.type):'—')+'</span>'
+      +     '<span class="k">当前状态</span><span>'+App.statusTag(data.status)+'</span>'
+      +     '<span class="k">事件等级</span><span>'+App.esc(data.level)+'</span>'
+      +   '</div>'
+      + '</div>'
+      + '<div class="script-section"><h3>参演角色（'+(data.members?data.members.length:0)+' 人）</h3>'
+      +   (membersHtml ? '<div class="script-members">'+membersHtml+'</div>' : '<div class="tiny dim">尚未添加参演角色</div>')
+      + '</div>'
+      + '<div class="script-section"><h3>演练流程（'+safeList.length+' 个主流节点）</h3>'
+      + nodesHtml
+      + '</div>';
   }
 
-  /* 删除演练项目（平台管理员）：清除项目及其全部关联数据，不可恢复 */
+  /* ===== 演练通知（手动生成 + Word 导出） ===== */
+  function openNotify(p){
+    if(!p){ App.toast('演练项目不存在','err'); return; }
+    if(!canOp){ App.toast('无权限生成演练通知','err'); return; }
+    App.modal({ title:'演练通知 · '+App.esc(p.name), body:
+      '<div class="notice-sent" style="margin-bottom:14px">'+App.icon('bell')+' <strong>演练通知已在创建项目时自动推送</strong>，可手动再次推送或导出 Word。</div>'
+      + '<div class="script-section">'
+      +   '<h3>通知内容预览</h3>'
+      +   '<div class="notice-preview">'
+      +     '<div class="np-title">演练项目「'+App.esc(p.name)+'」已创建</div>'
+      +     '<div class="np-body">'
+      +       '演练模式：'+App.esc(p.mode)+'<br>'
+      +       '关联剧本：'+App.esc(scenarioName(p.scenarioId))+'<br>'
+      +       '计划日期：'+App.esc(p.date)+'<br>'
+      +       '参演角色：'+(p.members?p.members.length:0)+' 个<br>'
+      +       '事件等级：'+App.esc(p.level||'一般')
+      +     '</div>'
+      +   '</div>'
+      + '</div>'
+      + '<div class="script-section">'
+      +   '<h3>可用操作</h3>'
+      +   '<div class="tiny dim">手动推送会再次发送站内消息给所有参演角色；导出为 Word 可打印分发。</div>'
+      + '</div>',
+      foot:'<button class="btn" id="npClose">关闭</button>'
+        + '<button class="btn" id="npGen">'+App.icon('bell')+'手动推送</button>'
+        + '<a class="btn ok" id="npWord" style="text-decoration:none" target="_blank">'+App.icon('download')+'导出 Word</a>',
+      onOpen:function(ov){
+        ov.querySelector('#npClose').onclick = ov.close;
+        ov.querySelector('#npWord').href = API.exportProjectNotifyUrl(p.id);
+        ov.querySelector('#npGen').onclick = function(){
+          var btn = ov.querySelector('#npGen');
+          btn.disabled = true; btn.textContent = '推送中…';
+          API.generateProjectNotify(p.id).then(function(){
+            btn.disabled = false; btn.textContent = '手动推送通知';
+            App.toast('演练通知已推送至所有参演角色的站内消息','ok');
+          }).catch(function(err){
+            btn.disabled = false; btn.textContent = '手动推送通知';
+            App.toast((err&&err.message)||'推送失败','err');
+          });
+        };
+      } });
+  }
+
+  /* ===== 删除 / 状态变更 / 编组 ===== */
   function confirmDelete(p){
     App.modal({ title:'删除演练项目 · '+App.esc(p.name), body:
-      '<div class="sim-banner">'+App.icon('alert')+'<span>删除后不可恢复：该项目的任务、表单提交、附件、取证材料、实战处置记录、时序台账、评分与快照将一并清除。</span></div>'
+      '<div class="sim-banner">'+App.icon('alert')+'<span>删除后不可恢复。</span></div>'
       + '<p style="font-size:13.5px">确认删除演练项目「'+App.esc(p.name)+'」（'+p.id+'）？</p>',
       foot:'<button class="btn" id="pjDelNo">取消</button><button class="btn danger" id="pjDelYes">确认删除</button>',
       onOpen:function(ov){
@@ -113,95 +259,77 @@ document.addEventListener('app:ready', function(e){
           var btn = ov.querySelector('#pjDelYes');
           btn.disabled = true; btn.textContent = '删除中…';
           API.deleteProject(p.id).then(function(){
-            ov.close(); render(); syncTopbar(); App.refreshShell();
-            App.toast('演练项目「'+p.name+'」及其关联数据已删除','ok');
+            ov.close(); render(); App.refreshShell();
+            App.toast('演练项目「'+p.name+'」已删除','ok');
           }).catch(function(err){
             btn.disabled = false; btn.textContent = '确认删除';
-            App.toast((err && err.message) ? err.message : '删除失败，请稍后重试','err');
+            App.toast((err && err.message) ? err.message : '删除失败','err');
           });
         };
       } });
   }
-
   function changeStatus(p, to, msg){
     App.confirmSim(msg, function(){
       API.updateProjectStatus(p.id, to).then(function(){
-        render(); syncTopbar(p);
-        API.addAudit('演练模拟：项目 '+p.id+' 状态变更为「'+to+'」');
+        render();
         App.toast('演练模拟：项目状态已变更为「'+to+'」','ok');
       });
     });
   }
 
-  /* ===== 编组抽屉 ===== */
   function openGroup(p){
-    var ov = App.drawer({ title:'编组管理 · '+App.esc(p.name), body:'<div id="grpBody"></div>', onOpen:function(o){ refreshGrp(o, p); } });
+    App.drawer({ title:'编组管理 · '+App.esc(p.name), body:'<div id="grpBody"></div>', onOpen:function(o){ refreshGrp(o, p); } });
   }
   function refreshGrp(ov, p){
     var body = ov.querySelector('#grpBody');
     body.innerHTML =
-      '<div class="flex gap2" style="justify-content:space-between"><div class="section-title" style="margin-bottom:0">参演编组（按角色添加）</div>'
-      + (canOp?'<button class="btn sm" id="addMem">'+App.icon('plus')+'添加参演角色</button>':'')+'</div>'
-      + '<div class="table-wrap mt3"><table class="table"><thead><tr><th>参演角色</th><th>参演方式</th><th>职责</th></tr></thead><tbody>'
-      + (p.members.length?p.members.map(function(m){ var r = roleById(m.role); return '<tr><td class="bold">'+(r?r.name:m.role)+'</td><td class="small">该角色演练账号登录参演<br><span class="tiny dim">无需指定具体人员</span></td><td class="tiny dim">'+(r?App.esc(r.desc):'')+'</td></tr>'; }).join('')
-          :'<tr><td colspan="3" class="dim small">尚未添加参演角色</td></tr>')
-      + '</tbody></table></div>'
-      + '<div class="grp-kv"><span class="k">观察员</span><span>'+App.esc((p.observers&&p.observers.length)?p.observers.join('、'):'—')+'</span>'
-      + '<span class="k">考评方式</span><span>系统自动考评（按演练数据计算）</span>'
-      + '<span class="k">参演单位</span><span>'+App.esc(p.units.join('、'))+'</span></div>'
-      + '<div class="sim-banner mt3" style="margin-bottom:0">'+App.icon('lock')+'<span>编组以角色为单位，凡使用该角色演练账号登录均视为该角色参演；外部单位角色仅可查看报送材料。</span></div>';
+      '<div class="flex gap2" style="justify-content:space-between"><div class="section-title" style="margin-bottom:0">参演编组</div>'
+      + (canOp?'<button class="btn sm" id="addMem">'+App.icon('plus')+'添加</button>':'')+'</div>'
+      + '<div class="table-wrap mt3"><table class="table"><thead><tr><th>参演角色</th><th>职责</th></tr></thead><tbody>'
+      + ((p.members&&p.members.length)?p.members.map(function(m){ var r = MOCK.ROLES.filter(function(x){ return x.id===m.role; })[0]; return '<tr><td class="bold">'+(r?r.name:m.role)+'</td><td class="tiny dim">'+(r?App.esc(r.desc):'')+'</td></tr>'; }).join('')
+          :'<tr><td colspan="2" class="dim small">尚未添加参演角色</td></tr>')
+      + '</tbody></table></div>';
     var btn = body.querySelector('#addMem');
-    if(btn) btn.onclick = function(){ addMember(ov, p); };
-  }
-  function addMember(ov, p){
-    var used = p.members.map(function(m){ return m.role; });
-    var avail = MOCK.ROLES.filter(function(r){ return used.indexOf(r.id)<0; });
-    if(!avail.length){ App.toast('全部角色已在编组中','warn'); return; }
-    App.modal({ title:'添加参演角色', body:'<div class="form-row"><label class="f-label">参演角色</label><select class="select" id="amRole">'
-        + avail.map(function(r){ return '<option value="'+r.id+'">'+r.name+'（'+App.esc(r.short)+'）</option>'; }).join('')+'</select></div>'
-      + '<div class="tiny dim">按角色添加，不指定具体人员：使用该角色演练账号登录即可参演。</div>',
-      foot:'<button class="btn" id="amNo">取消</button><button class="btn primary" id="amYes">加入编组</button>',
-      onOpen:function(m){
-        m.querySelector('#amNo').onclick = m.close;
-        m.querySelector('#amYes').onclick = function(){
-          var rid = m.querySelector('#amRole').value;
-          if(p.members.filter(function(x){ return x.role===rid; }).length){ App.toast('该角色已在编组中','warn'); return; }
-          var btn2 = m.querySelector('#amYes');
-          btn2.disabled = true; btn2.textContent = '保存中…';
-          var next = p.members.map(function(x){ return { role:x.role }; }).concat([{ role:rid }]);
-          API.updateProjectMembers(p.id, next).then(function(){
-            p.members = next;
-            m.close(); refreshGrp(ov, p); render();
-            App.toast('演练模拟：角色「'+(roleById(rid)||{}).name+'」已加入编组','ok');
-          }).catch(function(err){
-            btn2.disabled = false; btn2.textContent = '加入编组';
-            App.toast((err&&err.message)||'编组保存失败','err');
-          });
-        };
-      } });
+    if(btn) btn.onclick = function(){
+      var used = (p.members||[]).map(function(m){ return m.role; });
+      var avail = MOCK.ROLES.filter(function(r){ return used.indexOf(r.id)<0; });
+      if(!avail.length){ App.toast('全部角色已在编组中','warn'); return; }
+      App.modal({ title:'添加参演角色', body:'<div class="form-row"><label class="f-label">参演角色</label><select class="select" id="amRole">'
+        + avail.map(function(r){ return '<option value="'+r.id+'">'+r.name+'</option>'; }).join('')+'</select></div>',
+        foot:'<button class="btn" id="amNo">取消</button><button class="btn primary" id="amYes">加入</button>',
+        onOpen:function(m){
+          m.querySelector('#amNo').onclick = m.close;
+          m.querySelector('#amYes').onclick = function(){
+            var rid = m.querySelector('#amRole').value;
+            var next = (p.members||[]).map(function(x){ return { role:x.role }; }).concat([{ role:rid }]);
+            API.updateProjectMembers(p.id, next).then(function(){
+              p.members = next;
+              m.close(); refreshGrp(ov, p); render();
+              App.toast('角色已加入编组','ok');
+            });
+          };
+        } });
+    };
   }
 
   /* ===== 新建项目向导 ===== */
-  var unitSet = [];
-  MOCK.PROJECTS.forEach(function(p){ p.units.forEach(function(u){ if(unitSet.indexOf(u)<0) unitSet.push(u); }); });
   var enabledScs = MOCK.SCENARIOS.filter(function(s){ return s.status==='启用'; });
 
   var nb = document.getElementById('btnNew');
   if(nb) nb.onclick = function(){
     App.modal({ title:'新建演练项目', wide:true, body:'<div class="form-grid">'
-      + '<div class="form-row span2"><label class="f-label">项目名称<span class="req">*</span></label><input class="input" id="npName" placeholder="如：2026年数据泄露桌面推演"></div>'
+      + '<div class="form-row span2"><label class="f-label">项目名称<span class="req">*</span></label><input class="input" id="npName" placeholder="如：2026年勒索病毒应急演练"></div>'
       + '<div class="form-row"><label class="f-label">演练类型</label><select class="select" id="npType">'+MOCK.DICT.projTypes.map(function(t){ return '<option>'+t+'</option>'; }).join('')+'</select></div>'
       + '<div class="form-row"><label class="f-label">关联剧本</label><select class="select" id="npSc">'+enabledScs.map(function(s){ return '<option value="'+s.id+'">'+s.id+' · '+App.esc(s.name)+'（'+s.level+'）</option>'; }).join('')+'</select></div>'
       + '<div class="form-row span2"><label class="f-label">演练模式<span class="req">*</span></label><div class="flex gap3 wrap">'
-      +   '<label class="check"><input type="radio" name="npMode" value="基础版" checked>基础版（任务中心按剧本逐步提示操作）</label>'
-      +   '<label class="check"><input type="radio" name="npMode" value="实战版">实战版（任务中心仅显示已发现故障，工作台自主处置）</label>'
-      + '</div><div class="tiny dim" style="margin-top:4px">两种模式共用同一套剧本基线；基础版仅按时限评分，实战版按与剧本基线偏离、处置超时、未处置扣分。创建后不可切换。</div></div>'
-      + '<div class="form-row"><label class="f-label">考评规则</label><select class="select" id="npRule"><option value="all">综合考评体系（'+MOCK.SCORE_ITEMS.length+'项全量）</option>'+MOCK.SCORE_ITEMS.map(function(k){ return '<option value="'+k.id+'">单项：'+k.name+'（权重'+k.weight+'）</option>'; }).join('')+'</select></div>'
+      +   '<label class="check"><input type="radio" name="npMode" value="基础版" checked>基础版（按剧本提示逐步操作）</label>'
+      +   '<label class="check"><input type="radio" name="npMode" value="实战版">实战版（自主选择处置方案）</label>'
+      + '</div><div class="tiny dim" style="margin-top:4px">基础版仅时限评分，实战版按偏离/超时/未完成扣分。</div></div>'
       + '<div class="form-row"><label class="f-label">计划日期<span class="req">*</span></label><input class="input" id="npDate" type="date" value="2026-11-20"></div>'
-      + '<div class="form-row span2"><label class="f-label">参演角色（多选，按角色添加，无需指定人员）</label><div class="flex gap3 wrap" id="npRoles">'
+      + '<div class="form-row span2"><label class="f-label">参演角色</label><div class="flex gap3 wrap" id="npRoles">'
       +   MOCK.ROLES.map(function(r){ return '<label class="check"><input type="checkbox" value="'+r.id+'"'+(r.id==='commander'?' checked':'')+'>'+r.name+'</label>'; }).join('')
-      + '</div><div class="tiny dim" style="margin-top:4px">凡使用该角色演练账号登录的用户均视为该角色参演；添加后可在编组管理中继续维护。</div></div>'
-      + '</div><div class="tiny dim">创建后状态为「未开始」，可在列表中启动演练或先发起预演（演练模拟）。</div>',
+      + '</div></div>'
+      + '</div>',
       foot:'<button class="btn" id="npNo">取消</button><button class="btn primary" id="npYes">创建项目</button>',
       onOpen:function(ov){ ov.querySelector('#npNo').onclick=ov.close; ov.querySelector('#npYes').onclick=function(){
         var name = ov.querySelector('#npName').value.trim();
@@ -219,16 +347,38 @@ document.addEventListener('app:ready', function(e){
           name:name, type:ov.querySelector('#npType').value, date:date, mode:mode,
           scenarioId:sc?sc.id:'', level:sc?sc.level:'一般',
           units:undefined, members:members,
-          target:'（演练模拟）验证'+ov.querySelector('#npType').value+'流程与协同时效'
+          target:'验证'+ov.querySelector('#npType').value+'流程与协同时效'
         }).then(function(res){
-          ov.close(); render(); App.refreshShell();
-          App.toast('演练模拟：项目「'+res.project.name+'」已创建（'+res.id+' · '+mode+' · 未开始）'+(res.taskCount?('，已下发 '+res.taskCount+' 项节点任务'):''),'ok');
+          ov.close();
+          MOCK.PROJECTS.unshift(res.project);
+          render();
+          showPostCreateActions(res.project);
         }).catch(function(err){
           btn.disabled = false; btn.textContent = '创建项目';
-          App.toast((err && err.message) ? err.message : '创建失败，请稍后重试','err');
+          App.toast((err && err.message) ? err.message : '创建失败','err');
         });
       }; } });
   };
+
+  function showPostCreateActions(p){
+    App.modal({
+      title:'演练项目创建成功',
+      body:
+        '<div class="notice-sent" style="margin-bottom:14px">'+App.icon('check-circle')+' 演练项目「'+App.esc(p.name)+'」已创建（'+p.id+'）</div>'
+        + '<div class="script-section" style="margin-bottom:14px"><h3>下一步</h3>'
+        +   '<div class="notice-preview"><div class="np-title">'+App.icon('bell')+' 演练通知已自动生成</div><div class="np-body">所有参演角色登录后可通过站内消息查收。可手动再次推送或导出为 HTML 打印分发。</div></div>'
+        +   '<div class="notice-preview" style="margin-top:10px"><div class="np-title">'+App.icon('file-text')+' 演练脚本已就绪</div><div class="np-body">'+(p.mode==='实战版'?'实战版仅展示主流节点流程，混淆节点已屏蔽。':'基础版含完整主流节点与演练提示信息。')+'</div></div>'
+        + '</div>',
+      foot:'<button class="btn" id="pcaClose">返回列表</button>'
+        + '<button class="btn" id="pcaNotify">'+App.icon('bell')+'通知</button>'
+        + '<button class="btn primary" id="pcaScript">'+App.icon('file-text')+'查看脚本</button>',
+      onOpen:function(ov){
+        ov.querySelector('#pcaClose').onclick = ov.close;
+        ov.querySelector('#pcaNotify').onclick = function(){ ov.close(); openNotify(p); };
+        ov.querySelector('#pcaScript').onclick = function(){ ov.close(); openScript(p); };
+      }
+    });
+  }
 
   render();
 });

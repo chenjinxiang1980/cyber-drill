@@ -280,6 +280,48 @@ function backfillFeedbackForm(db) {
   return { nodes: nodes, tasks: tasks };
 }
 
+/* 旧库升级：剧本节点表单与任务表单同步
+ * 剧本节点 form 修改后，已存在项目的 tasks.forms 不会自动更新，
+ * 本函数扫描所有活跃项目，确保 tasks.forms = script_nodes.form 的一对一映射
+ * （仅修正已存在的不同步，不破坏 script_nodes.form 为空的兜底场景）
+ */
+function backfillTaskForms(db) {
+  let fixed = 0, checked = 0;
+  const projs = db.prepare("SELECT * FROM projects WHERE status NOT IN ('已归档','已结束') AND scenario_id IS NOT NULL").all();
+  projs.forEach(function (p) {
+    const nodes = db.prepare("SELECT id, form FROM script_nodes WHERE scenario_id=? AND COALESCE(flow_type,'correct')!='distractor'").all(p.scenario_id);
+    const nodeFormMap = {};
+    nodes.forEach(function (n) { nodeFormMap[n.id] = String(n.form || '').trim(); });
+    const tasks = db.prepare('SELECT * FROM tasks WHERE project_id=? AND node_id IS NOT NULL').all(p.id);
+    const upd = db.prepare('UPDATE tasks SET forms=? WHERE id=?');
+    tasks.forEach(function (t) {
+      checked++;
+      const nodeForm = nodeFormMap[t.node_id] || '';
+      let curForms = [];
+      try { curForms = JSON.parse(t.forms || '[]'); } catch (e) { curForms = []; }
+      if (!Array.isArray(curForms)) curForms = [];
+
+      let targetForms;
+      if (nodeForm) {
+        // 剧本节点有明确 form → 一对一覆盖（修复 backfillFeedbackForm 等历史追加问题）
+        targetForms = [nodeForm];
+      } else {
+        // 剧本节点没 form → 保留当前值
+        targetForms = curForms.slice();
+      }
+
+      const oldStr = curForms.slice().sort().join(',');
+      const newStr = targetForms.slice().sort().join(',');
+      if (oldStr !== newStr) {
+        upd.run(JSON.stringify(targetForms), t.id);
+        fixed++;
+      }
+    });
+  });
+  console.log(`[migrate] 剧本/任务表单同步: 检查 ${checked} 条 tasks，修正 ${fixed} 条`);
+  return { checked: checked, fixed: fixed };
+}
+
 /* 导出的字典快照（兼容层，只读）
  * 注意：这个是运行时快照，缓存 30s。如需写操作请走 dict 表 + drillDict.invalidate() */
 function FORM_BY_ACTION(_db) { return dict(_db || require('./db').db, 'drill_form_by_action', S.DICT.drill_form_by_action); }
@@ -291,6 +333,6 @@ module.exports = {
   LEVEL_BY_SCENARIO: LEVEL_BY_SCENARIO,
   ACTION_META: ACTION_META,
   buildDecision, canHandle, ensureBasicTasks, backfillBasicTasks,
-  defaultScores, ensureDistractors, backfillFlowScores, backfillReceivers, backfillFeedbackForm,
+  defaultScores, ensureDistractors, backfillFlowScores, backfillReceivers, backfillFeedbackForm, backfillTaskForms,
   parseDeps, basicNodeAvailability
 };

@@ -15,76 +15,68 @@
 document.addEventListener('app:ready', function(e){
   var role = e.detail.role;
   var page = document.getElementById('page');
-  var proj = API.activeProject();
   /* 监视大屏：指挥部 / 平台管理员 / 信息科负责人 */
   var canScreen = ['commander','platformadmin','itlead'].indexOf(role.id)>=0;
+  var ROLE_NAME = (e.detail.role && e.detail.role.name) || '';
 
   /* ---------- 无演练：展示空态 ---------- */
-  if (!proj) {
-    Promise.all([API.getScenarios(), API.getProjects(), API.getScriptNodes()]).then(function(r){
-      var scens = Array.isArray(r[0]) ? r[0] : [];
-      var projs = Array.isArray(r[1]) ? r[1] : [];
-      var nodes = Array.isArray(r[2]) ? r[2] : [];
-      page.innerHTML =
-        '<div class="standby-hero">'
-        + '<div class="sb-icon">'+App.icon('shield')+'</div>'
-        + '<div class="sb-body">'
-        +   '<span class="sb-tag"><span class="dot"></span>SYSTEM STANDBY · 待机模式</span>'
-        +   '<h2>当前无进行中的安全演练</h2>'
-        +   '<div class="sb-sub">系统已就绪，所有剧本节点、流程字典、模拟场景均已加载。请先创建演练项目或从剧本库选择场景启动推演。</div>'
-        +   '<div class="sb-acts">'
-        +     '<a class="btn primary" href="projects.html">'+App.icon('projects')+'创建演练项目</a>'
-        +     '<a class="btn" href="scenarios.html">'+App.icon('scenarios')+'浏览剧本库</a>'
-        +     '<a class="btn" href="knowledge.html">'+App.icon('knowledge')+'查阅应急预案</a>'
-        +   '</div>'
-        +   '<div class="sb-meta">'
-        +     '<div class="m-item"><b>'+scens.length+'</b>内置场景</div>'
-        +     '<div class="m-item"><b>'+nodes.length+'</b>剧本节点</div>'
-        +     '<div class="m-item"><b>'+projs.length+'</b>历史项目</div>'
-        +   '</div>'
-        + '</div></div>'
-        + '<div class="card"><div class="card-title">'+App.icon('flow')+'快速预览：场景剧本库</div><div id="sensList" class="scroll-panel"></div></div>';
-      var box = document.getElementById('sensList');
-      if (!scens.length) { box.innerHTML = '<div class="empty"><p>暂无场景数据</p></div>'; return; }
-      box.innerHTML = scens.slice(0, 6).map(function(s){
-        return '<div class="file-chip" style="display:flex;margin-bottom:10px;width:100%"><span class="tag blue">'+App.esc(s.id)+'</span><span class="grow ellip" style="margin-left:10px">'+App.esc(s.name)+'</span><span class="fc-size">'+(s.nodes||0)+' 节点 · '+(s.level||'一般')+'级</span></div>';
-      }).join('');
-    }).catch(function(){
-      page.innerHTML = '<div class="forbidden">'+App.icon('alert')+'<h2>数据加载失败</h2><p>请检查网络或联系管理员</p></div>';
-    });
-    return;
+  function showStandby(){
+    page.innerHTML =
+      '<div class="standby-hero">'
+      + '<div class="sb-icon">'+App.icon('shield')+'</div>'
+      + '<div class="sb-body">'
+      +   '<span class="sb-tag"><span class="dot"></span>SYSTEM STANDBY · 待机模式</span>'
+      +   '<h2>当前无进行中的安全演练</h2>'
+      +   '<div class="sb-sub">系统已就绪，所有剧本节点、流程字典、模拟场景均已加载。请先创建演练项目或从剧本库选择场景启动推演。</div>'
+      +   '<div class="sb-acts">'
+      +     '<a class="btn primary" href="projects.html">'+App.icon('projects')+'创建演练项目</a>'
+      +     '<a class="btn" href="scenarios.html">'+App.icon('scenarios')+'浏览剧本库</a>'
+      +     '<a class="btn" href="knowledge.html">'+App.icon('knowledge')+'查阅应急预案</a>'
+      +   '</div>'
+      + '</div></div>';
   }
 
-  page.innerHTML =
-    '<div class="page-head"><div><h1>演练态势总看板</h1><div class="sub">'+proj.name+' · '+proj.type+' · 参演单位：'+proj.units.join('、')+'</div></div>'
-    + '<div class="acts">'
-    + (canScreen ? '<button class="btn" id="btnScreen">'+App.icon('screen')+'演练监视大屏</button>' : '')
-    + '<select class="select" id="autoSel" style="width:132px" title="自动刷新间隔">'
-    +   '<option value="0">手动刷新</option>'
-    +   '<option value="10">每 10 秒</option>'
-    +   '<option value="30" selected>每 30 秒</option>'
-    +   '<option value="60">每 60 秒</option>'
-    +   '<option value="120">每 2 分钟</option>'
-    + '</select>'
-    + '<button class="btn" id="btnSnap">'+App.icon('camera')+'关键节点快照</button>'
-    + '<button class="btn primary" id="btnRefresh">'+App.icon('refresh')+'刷新态势</button></div></div>'
-    + '<div class="sim-banner">'+App.icon('alert')+'<span>本看板所有告警、事件、系统状态均为<b>演练模拟数据</b>，与医院真实生产环境无关，系统不操作任何生产网络与设备。</span></div>'
-    + '<div class="grid grid-4" id="kpis"></div>'
-    + '<div class="grid mt4" style="grid-template-columns:1.5fr 1fr;margin-top:16px">'
-    +   '<div class="card"><div class="card-title">'+App.icon('flow')+'剧本时序进度<span class="more" onclick="location.href=\'scenarios.html?edit=1\'">查看剧本 ▸</span></div>'
-    +     '<div class="scroll-panel" id="scriptBox"></div></div>'
-    +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色任务完成状态<span class="more dim tiny">悬停暂停滚动</span></div>'
-    +     '<div class="scroll-panel" id="roleBox"></div></div>'
-    + '</div>'
-    + '<div class="grid mt4" style="grid-template-columns:1fr 1.2fr 1fr;gap:16px;margin-top:16px">'
-    +   '<div class="card"><div class="card-title">'+App.icon('file')+'已上报文书清单</div><div id="docs" class="doc-list"></div></div>'
-    +   '<div class="card"><div class="card-title">'+App.icon('bell')+'消息通知流</div><div class="timeline scroll-panel" id="msgFlow" style="padding-left:22px;height:300px;overflow-y:auto"></div></div>'
-    +   '<div class="card"><div class="card-title">'+App.icon('hospital')+'业务影响范围</div><div id="impact" class="doc-list"></div></div>'
-    + '</div>';
+  /* ---------- 构建页面骨架 ---------- */
+  function buildSkeleton(projectName, projectId){
+    page.innerHTML =
+      '<div class="page-head"><div><h1>演练态势总看板</h1><div class="sub" id="d-sub">'+App.esc(projectName)+'</div></div>'
+      + '<div class="acts">'
+      + (canScreen ? '<button class="btn" id="btnScreen">'+App.icon('screen')+'演练监视大屏</button>' : '')
+      + '<select class="select" id="autoSel" style="width:132px" title="自动刷新间隔">'
+      +   '<option value="0">手动刷新</option>'
+      +   '<option value="10">每 10 秒</option>'
+      +   '<option value="30" selected>每 30 秒</option>'
+      +   '<option value="60">每 60 秒</option>'
+      +   '<option value="120">每 2 分钟</option>'
+      + '</select>'
+      + '<button class="btn" id="btnSnap">'+App.icon('camera')+'关键节点快照</button>'
+      + '<button class="btn primary" id="btnRefresh">'+App.icon('refresh')+'刷新态势</button></div></div>'
+      + '<div class="sim-banner">'+App.icon('alert')+'<span>本看板所有告警、事件、系统状态均为<b>演练模拟数据</b>，与医院真实生产环境无关。</span></div>'
+      + '<div class="grid grid-4" id="kpis"></div>'
+      + '<div class="grid mt4" style="grid-template-columns:1.5fr 1fr;margin-top:16px">'
+      +   '<div class="card"><div class="card-title">'+App.icon('flow')+'剧本时序进度</div>'
+      +     '<div class="scroll-panel" id="scriptBox"></div></div>'
+      +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色任务完成状态</div>'
+      +     '<div class="scroll-panel" id="roleBox"></div></div>'
+      + '</div>'
+      + '<div class="grid mt4" style="grid-template-columns:1fr 1.2fr 1fr;gap:16px;margin-top:16px">'
+      +   '<div class="card"><div class="card-title">'+App.icon('file')+'已上报文书清单</div><div id="docs" class="doc-list"></div></div>'
+      +   '<div class="card"><div class="card-title">'+App.icon('bell')+'消息通知流</div><div class="timeline scroll-panel" id="msgFlow" style="padding-left:22px;height:300px;overflow-y:auto"></div></div>'
+      +   '<div class="card"><div class="card-title">'+App.icon('hospital')+'业务影响范围</div><div id="impact" class="doc-list"></div></div>'
+      + '</div>';
+    if(canScreen){ var sb=document.getElementById('btnScreen'); if(sb) sb.onclick=function(){ location.href='screen.html?projectId='+encodeURIComponent(projectId); }; }
+    var snap = document.getElementById('btnSnap');
+    if(snap) snap.onclick = function(){
+      App.modal({ title:'创建复盘快照', body:'<div class="form-row"><label class="f-label">快照名称</label><input class="input" value="当前态势快照"></div><div class="form-row"><label class="f-label">备注</label><textarea class="textarea" placeholder="记录当前关键状态…"></textarea></div>',
+        foot:'<button class="btn" id="c1">取消</button><button class="btn primary" id="c2">保存快照</button>',
+        onOpen:function(ov){ ov.querySelector('#c1').onclick=ov.close; ov.querySelector('#c2').onclick=function(){ API.addSnapshot('当前态势快照','看板手动创建'); App.toast('快照已保存','ok'); ov.close(); }; } });
+    };
+    document.getElementById('btnRefresh').onclick = function(){ refreshAll(false); };
+  }
 
-  /* ---------- 自动上滚：内容超高时复制一份并匀速上滚，不足高时静止 ---------- */
+  /* ---------- 自动上滚 ---------- */
   function autoScroll(box, html){
-    /* 内容未变化时不重建，避免自动刷新打断滚动位置 */
+    if(!box) return;
     if(box.getAttribute('data-sig') === html) return;
     box.setAttribute('data-sig', html);
     box.innerHTML = '<div class="scroll-track">'+html+'</div>';
@@ -95,127 +87,155 @@ document.addEventListener('app:ready', function(e){
       if(h <= box.clientHeight + 4) return;
       track.innerHTML = html + html;
       track.classList.remove('static');
-      /* 22px/秒 的匀速滚动 */
       track.style.animationDuration = Math.max(12, Math.round(h / 22)) + 's';
     });
   }
 
-  /* ---------- 数据快照（刷新时由接口返回值覆盖） ---------- */
-  var DATA = {
-    tasks: MOCK.TASKS || [], msgs: MOCK.MESSAGES || [], ev: MOCK.EVIDENCE || [],
-    imp: MOCK.IMPACT || [], nodes: MOCK.SCRIPT_NODES || []
-  };
-  function pick(v, fb){ return Array.isArray(v) ? v : fb; }
+  /* ---------- 渲染各区块 ---------- */
+  var CUR = null;
 
-  /* ---------- 各区块渲染 ---------- */
+  function stateTag(s){
+    var cls = 'gray';
+    if(s==='已完成') cls = 'green';
+    else if(s==='超时完成') cls = 'red';
+    else if(s==='处置中') cls = 'yellow';
+    else if(s==='已执行') cls = 'red';
+    else if(s==='已跳过') cls = 'gray';
+    return '<span class="tag '+cls+'">'+s+'</span>';
+  }
+
   function renderKpis(){
-    var allTasks = DATA.tasks.filter(function(t){ return t.projectId===proj.id; });
-    var overdue = allTasks.filter(function(t){ return t.status==='超时'; }).length;
+    var st = CUR.stats || {};
+    var project = CUR.project || {};
+    var now = Date.now();
+    var elapsed = '';
+    if(project.startedAt){
+      var stMs = new Date(project.startedAt).getTime();
+      if(isNaN(stMs)) stMs = Date.now();
+      var diff = Math.max(0, Math.floor((now - stMs)/1000));
+      elapsed = 'T+' + String(Math.floor(diff/3600)).padStart(2,'0') + ':' + String(Math.floor((diff%3600)/60)).padStart(2,'0') + ':' + String(diff%60).padStart(2,'0');
+    }
+    var scoreTxt = st.score !== null && st.score !== undefined ? (st.score + ' 分 · ' + (st.grade||'')) : '—';
     var k = [
-      { l:'当前事件等级', v:proj.level, cls:'err', f:'依据剧本S01研判', ic:'alert' },
-      { l:'待办任务', v:allTasks.filter(function(t){return t.status!=='已完成';}).length, cls:'warn', f:'超时 '+overdue+' 项', ic:'tasks' },
-      { l:'参演角色在线', v:proj.members.length, cls:'info', f:'观察员 '+proj.observers.length+' 人', ic:'user' },
-      { l:'演练已进行', v:API.drillElapsed(), cls:'ok', f:(proj.startedAt?'启动于 '+String(proj.startedAt).slice(0,16):'项目状态：'+(proj.status||'未开始')), ic:'clock', id:'d-elapsed' }
+      { l:'当前事件等级', v: project.level || '—', cls:'err', f: (project.mode||'') + ' 模式', ic:'alert' },
+      { l:'待办任务', v: st.pendingTasks || 0, cls:'warn', f:'超时 '+(st.overdueTasks||0)+' 项', ic:'tasks' },
+      { l:'参演角色在线', v: st.onlineActors || 0, cls:'info', f:'启用账号 '+(st.totalActors||0)+' 人', ic:'user' },
+      { l:'演练已进行', v: elapsed || '—', cls:'ok', f:'综合得分 ' + scoreTxt, ic:'clock' }
     ];
     document.getElementById('kpis').innerHTML = k.map(function(x){
-      return '<div class="kpi '+x.cls+'"'+(x.id?' id="'+x.id+'"':'')+'><div class="k-label">'+App.icon(x.ic)+x.l+'</div><div class="k-value">'+x.v+'</div><div class="k-foot">'+x.f+'</div></div>';
+      return '<div class="kpi '+x.cls+'"><div class="k-label">'+App.icon(x.ic)+x.l+'</div><div class="k-value">'+x.v+'</div><div class="k-foot">'+x.f+'</div></div>';
     }).join('');
+    document.getElementById('d-sub').textContent = (project.name || '') + ' · ' + (project.mode || '');
   }
-  /* 每秒本地推算真实计时 */
-  setInterval(function(){
-    var el = document.querySelector('#d-elapsed .k-value');
-    if(el) el.textContent = API.drillElapsed();
-  }, 1000);
+  /* 每秒更新计时 */
+  setInterval(function(){ if(CUR && CUR.project && CUR.project.startedAt) renderKpis(); }, 1000);
 
   function renderScript(){
-    var nodes = DATA.nodes || [];
+    var nodes = CUR.seqFlow || [];
     if(!nodes.length){ autoScroll(document.getElementById('scriptBox'), '<div class="tiny dim">当前剧本暂无节点</div>'); return; }
     var html = '<div class="timeline">' + nodes.map(function(n, i){
-      var icon = n.type==='alert'?'bell':n.type==='parallel'?'flow':n.type==='report'?'send':n.type==='end'?'power':'tasks';
-      return '<div class="tl-item gray"><span class="tl-dot"></span><div class="flex gap2"><span class="tl-time">第 '+(i+1)+' 节点</span></div><div class="tl-title">'+App.icon(icon)+' '+n.title+'</div><div class="tl-desc">接收：'+n.target+(n.form?' · 需提交：'+(MOCK.FORM_TEMPLATES.filter(function(f){return f.id===n.form;})[0]||{}).name:'')+(n.timeout?' · 处置时长 '+n.timeout+' 分钟':'')+'</div></div>';
+      var icon = n.flowType==='distractor' ? 'alert' : 'tasks';
+      var ct = '';
+      if(n.completedAt) ct = '<span class="dim tiny"> · 完成于 '+App.esc(n.completedAt)+'</span>';
+      var deductTxt = n.deduct ? ('<span class="dim tiny"> · 扣 '+n.deduct+' 分</span>') : '';
+      return '<div class="tl-item '+(n.flowType==='distractor'?'err':'')+'"><span class="tl-dot"></span>'
+        + '<div class="tl-time">'+n.id+' · '+stateTag(n.state)+'</div>'
+        + '<div class="tl-title">'+App.icon(icon)+' '+App.esc(n.title)+ct+deductTxt+'</div>'
+        + '<div class="tl-desc tiny dim">接收：'+App.esc(n.role)+' · 分值 '+n.score+'</div>'
+        + '</div>';
     }).join('') + '</div>';
     autoScroll(document.getElementById('scriptBox'), html);
   }
 
   function renderRoles(){
-    var rows = proj.members.map(function(m){
-      var r = MOCK.ROLES.filter(function(x){ return x.id===m.role; })[0] || { name:m.role };
-      var ts = DATA.tasks.filter(function(t){ return t.projectId===proj.id && t.role===m.role; });
-      var done = ts.filter(function(t){ return t.status==='已完成'; }).length;
-      var od = ts.filter(function(t){ return t.status==='超时'; }).length;
-      var pct = ts.length? Math.round(done/ts.length*100):0;
-      return '<div style="margin-bottom:12px"><div class="flex small" style="justify-content:space-between"><span>'+r.name+'<span class="dim"> · '+(m.user||'按角色参演')+'</span></span><span class="mono dim">'+done+'/'+ts.length+(od?' <b style="color:var(--err)">超时'+od+'</b>':'')+'</span></div><div class="progress mt2"><div class="bar '+(od?'err':pct===100?'ok':'')+'" style="width:'+pct+'%"></div></div></div>';
+    var rows = CUR.roles || [];
+    if(!rows.length){ autoScroll(document.getElementById('roleBox'), '<div class="tiny dim">暂无参演角色数据</div>'); return; }
+    var html = rows.map(function(r){
+      var pct = r.total ? Math.round(r.done/r.total*100) : 0;
+      var err = r.overtime > 0 || r.wrong > 0;
+      return '<div style="margin-bottom:12px"><div class="flex small" style="justify-content:space-between">'
+        + '<span>'+App.icon('user')+' '+App.esc(r.roleName)+'</span>'
+        + '<span class="mono dim">'+r.done+'/'+r.total
+        + (r.overtime?' <b style="color:var(--err)">超时'+r.overtime+'</b>':'')
+        + (r.wrong?' <b style="color:var(--warn)">混淆'+r.wrong+'</b>':'')
+        + '</span></div>'
+        + '<div class="progress mt2"><div class="bar '+(err?'err':(pct===100?'ok':''))+'" style="width:'+pct+'%"></div></div></div>';
     }).join('');
-    autoScroll(document.getElementById('roleBox'), rows || '<div class="tiny dim">暂无参演角色</div>');
+    autoScroll(document.getElementById('roleBox'), html);
   }
 
   function renderDocs(){
-    var docs = DATA.ev.filter(function(e){ return e.type==='表单文书' || e.type==='处置记录'; });
+    var docs = CUR.docs || [];
     document.getElementById('docs').innerHTML = docs.map(function(d){
-      return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('file')+'<span class="grow ellip">'+d.name+'</span><span class="fc-size">'+d.time+' · '+d.uploader+'</span></div>';
-    }).join('') + '<div class="tiny dim mt2">文书共 '+docs.length+' 份 · 全部归档于取证模块，支持一键打包</div>';
+      return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'
+        + App.icon('file')+'<span class="grow ellip">'+App.esc(d.name)+'</span>'
+        + '<span class="fc-size">'+App.esc(d.time||'—')+' · '+App.esc(d.uploader||'')+'</span></div>';
+    }).join('') + (docs.length ? ('<div class="tiny dim mt2">文书共 '+docs.length+' 份 · 全部归档于取证模块</div>') : '<div class="tiny dim mt2">暂无已上报文书</div>');
   }
 
   function renderMsgs(){
-    var ms = (DATA.msgs||[]).slice().reverse();
+    var ms = (CUR.msgs||[]).slice();
     document.getElementById('msgFlow').innerHTML = ms.map(function(m){
-      return '<div class="tl-item '+(m.level==='P0'?'err':m.level==='P1'?'warn':'gray')+'"><span class="tl-dot"></span><div class="tl-time">'+m.time+' · '+m.source+'</div><div class="tl-desc">'+App.levelTag(m.level)+' '+m.text+'</div></div>';
+      var cls = m.level==='P0'?'err':m.level==='P1'?'warn':'gray';
+      return '<div class="tl-item '+cls+'"><span class="tl-dot"></span>'
+        + '<div class="tl-time">'+App.esc(m.time)+' · '+App.esc(m.actor||'系统')+'</div>'
+        + '<div class="tl-desc">'+App.levelTag(m.level||'')+' '+App.esc(m.action||'')
+        + (m.detail ? ('<div class="tiny dim mt1">'+App.esc(m.detail)+'</div>') : '')
+        + '</div></div>';
     }).join('') + (ms.length?'':'<div class="tiny dim">暂无消息</div>');
   }
 
   function renderImpact(){
-    document.getElementById('impact').innerHTML = (DATA.imp||[]).map(function(i){
+    var imp = CUR.impact || [];
+    document.getElementById('impact').innerHTML = imp.map(function(i){
       var c = i.pct>=100?'ok':i.pct>=60?'warn':'err';
       var tc = c==='ok'?'green':c==='warn'?'yellow':'red';
-      return '<div style="margin-bottom:10px"><div class="flex small" style="justify-content:space-between"><span>'+i.sys+'</span><span class="tag '+tc+'">'+i.state+'</span></div><div class="progress mt2"><div class="bar '+c+'" style="width:'+i.pct+'%"></div></div></div>';
-    }).join('');
+      return '<div style="margin-bottom:10px"><div class="flex small" style="justify-content:space-between"><span>'+App.icon('hospital')+' '+App.esc(i.sys)+'</span><span class="tag '+tc+'">'+App.esc(i.state)+'</span></div><div class="progress mt2"><div class="bar '+c+'" style="width:'+i.pct+'%"></div></div></div>';
+    }).join('') + (imp.length?'':'<div class="tiny dim">暂无业务系统</div>');
   }
 
-  /* 从服务端拉取最新数据后再渲染（MOCK 缓存由各接口回写） */
+  function renderAll(){
+    renderKpis(); renderScript(); renderRoles(); renderDocs(); renderMsgs(); renderImpact();
+  }
+
+  /* ---------- 拉取聚合数据 ---------- */
   function refreshAll(silent){
-    return Promise.all([API.getTasks(), API.getMessages(), API.getEvidence(), API.getImpact(), API.getScriptNodes()]).then(function(r){
-      DATA.tasks = pick(r[0], DATA.tasks);
-      DATA.msgs  = pick(r[1], DATA.msgs);
-      DATA.ev    = pick(r[2], DATA.ev);
-      DATA.imp   = pick(r[3], DATA.imp);
-      DATA.nodes = pick(r[4], DATA.nodes);
-      renderKpis(); renderScript(); renderRoles(); renderDocs(); renderMsgs(); renderImpact();
+    var pid = CUR && CUR.project && CUR.project.id;
+    if(!pid){ if(!silent) App.toast('当前无演练项目','err'); return; }
+    return DRILL.get('/content/dashboard?projectId=' + encodeURIComponent(pid)).then(function(data){
+      CUR = data;
+      renderAll();
       if(!silent) App.toast('态势数据已刷新','ok');
     }).catch(function(err){
       if(!silent) App.toast((err&&err.message)||'刷新失败','err');
     });
   }
 
-  /* ---------- 自动刷新 ---------- */
-  var timer = null;
-  var autoSel = document.getElementById('autoSel');
-  function applyAuto(){
-    if(timer){ clearInterval(timer); timer = null; }
-    var sec = parseInt(autoSel.value, 10) || 0;
-    if(sec > 0) timer = setInterval(function(){ refreshAll(true); }, sec*1000);
-  }
-  autoSel.onchange = function(){
+  /* ---------- 入口 ---------- */
+  DRILL.get('/content/projects').then(function(ps){
+    var list = Array.isArray(ps) ? ps : (ps && ps.projects) || [];
+    var active = list.filter(function(p){ return p.status === '演练中'; })[0] || list[0];
+    if(!active){ showStandby(); return; }
+    buildSkeleton(active.name, active.id);
+    /* 先塞一个临时 CUR 避免 CUR 为 null */
+    CUR = { project: active, stats:{}, seqFlow:[], roles:[], docs:[], msgs:[], impact:[] };
+    refreshAll(true);
+
+    /* 自动刷新 */
+    var timer = null;
+    var autoSel = document.getElementById('autoSel');
+    function applyAuto(){
+      if(timer){ clearInterval(timer); timer = null; }
+      var sec = parseInt(autoSel.value, 10) || 0;
+      if(sec > 0) timer = setInterval(function(){ refreshAll(true); }, sec*1000);
+    }
+    autoSel.onchange = function(){
+      applyAuto();
+      var sec = parseInt(autoSel.value, 10) || 0;
+      App.toast(sec ? ('已开启自动刷新：每 '+sec+' 秒') : '已关闭自动刷新', 'ok');
+    };
     applyAuto();
-    var sec = parseInt(autoSel.value, 10) || 0;
-    App.toast(sec ? ('已开启自动刷新：每 '+sec+' 秒') : '已关闭自动刷新', 'ok');
-  };
-
-  document.getElementById('btnRefresh').onclick = function(){ refreshAll(false); };
-
-  var screenBtn = document.getElementById('btnScreen');
-  /* 同标签页跳转：令牌存于 sessionStorage，新开标签页会丢失登录态 */
-  if(screenBtn) screenBtn.onclick = function(){
-    location.href = 'screen.html?projectId='+encodeURIComponent(proj.id);
-  };
-
-  document.getElementById('btnSnap').onclick = function(){
-    App.modal({ title:'创建复盘快照', body:'<div class="form-row"><label class="f-label">快照名称</label><input class="input" value="当前态势快照"></div><div class="form-row"><label class="f-label">备注</label><textarea class="textarea" placeholder="记录当前关键状态…"></textarea></div>',
-      foot:'<button class="btn" id="c1">取消</button><button class="btn primary" id="c2">保存快照</button>',
-      onOpen:function(ov){ ov.querySelector('#c1').onclick=ov.close; ov.querySelector('#c2').onclick=function(){ API.addSnapshot('当前态势快照','看板手动创建'); App.toast('快照已保存，用于复盘定格','ok'); ov.close(); }; } });
-  };
-
-  refreshAll(true);
-  applyAuto();
+  }).catch(function(){ showStandby(); });
 });
 App.boot('dashboard');
 </script>

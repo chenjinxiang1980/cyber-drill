@@ -44,6 +44,7 @@
 .dag-head:active{cursor:grabbing}
 .dag-ic{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:none}
 .dag-ic svg{width:14px;height:14px}
+.dag-head .dag-id{font-size:10px;color:var(--text3);font-family:monospace;background:rgba(255,255,255,.05);padding:1px 5px;border-radius:3px;border:1px solid var(--border);flex:none;white-space:nowrap}
 .dag-title{flex:1;min-width:0;font-size:12.5px;font-weight:600;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .dag-body{padding:8px 10px 9px}
 .dag-meta{font-size:10.5px;color:var(--text3);display:flex;gap:8px;flex-wrap:wrap}
@@ -419,8 +420,12 @@ document.addEventListener('app:ready', function(e){
       var el = root.querySelector('#seSum');
       if(!el) return;
       var total = scoreTotal();
-      var dis = nodes.filter(function(x){ return x.type!=='end' && x.flowType==='distractor'; }).length;
-      el.innerHTML = '正确流程合计 <b>'+total+'</b> / 100 分 · 混淆流程 <b>'+dis+'</b> 条'
+      var disNodes = nodes.filter(function(x){ return x.type!=='end' && x.flowType==='distractor'; });
+      var dis = disNodes.length;
+      /* 混淆节点分值：取第一个有效节点的 score 作为展示基准，未配置时默认 10 */
+      var disScore = 10;
+      if(disNodes.length){ disScore = Number(disNodes[0].score) || 10; }
+      el.innerHTML = '正确流程合计 <b>'+total+'</b> / 100 分 · 混淆流程 <b>'+dis+'</b> 条（每条 <b>'+disScore+'</b> 分 · 仅选错扣分，不计入总分）'
         + (total>100?'<br><span style="color:var(--err)">已超出 '+(total-100)+' 分，请下调各节点分值</span>'
                     :(total<100?'<br><span style="color:var(--warn)">未满 100 分，请分配剩余分值</span>'
                                :'<br><span style="color:var(--ok)">分值已满 100 分</span>'));
@@ -697,24 +702,27 @@ document.addEventListener('app:ready', function(e){
     }
 
     /* 均分分值：首节点不设分值（0），其余正确流程节点平均分 100 分
-       不够分配时（节点数>100），从第 2 个节点起依次多 1 分，直到分完 */
+       不够分配时（节点数>100），从第 2 个节点起依次多 1 分，直到分完
+       混淆流程节点统一 10 分（仅用于选错时扣分，不计入 100 分总分） */
     function autoSplitScore(){
       var correct = correctNodes().filter(function(n){ return n.flowType!=='distractor' && n.type!=='end'; });
+      /* 混淆节点统一 10 分（与主流节点赋分相互独立） */
+      var distractors = nodes.filter(function(n){ return n.flowType==='distractor'; });
+      distractors.forEach(function(n){ n.score = 10; });
       if(!correct.length){ App.toast('没有可分配分值的正确流程节点','err'); return 0; }
       var total = 100;
       /* 首节点固定 0 分（演练由其触发，不计入得分项） */
       correct[0].score = 0;
       var rest = correct.slice(1);
       if(!rest.length){
-        App.toast('首个正确流程节点已设为 0 分（演练起始不计分），无其他节点可分配','warn');
-        nodes.forEach(function(n){ if(n.flowType==='distractor') n.score = 0; });
+        App.toast('首个正确流程节点已设为 0 分（演练起始不计分），无其他节点可分配；混淆流程已统一 10 分/条','warn');
         return correct.length;
       }
       if(rest.length >= total){
         /* 节点数超过 100 时，从前往后依次给 1 分 */
         rest.forEach(function(n, idx){ n.score = (idx < total) ? 1 : 0; });
         var realTotal = rest.reduce(function(m,n){ return m + (Number(n.score)||0); }, 0);
-        App.toast('正确流程共 '+correct.length+' 个（首节点 0 分），剩余 '+rest.length+' 个节点超过 100 分总量，前 '+total+' 个各分配 1 分，后 '+(rest.length-total)+' 个 0 分（合计 '+realTotal+' 分）','warn');
+        App.toast('正确流程共 '+correct.length+' 个（首节点 0 分），剩余 '+rest.length+' 个节点超过 100 分总量，前 '+total+' 个各分配 1 分，后 '+(rest.length-total)+' 个 0 分（合计 '+realTotal+' 分）；混淆流程 '+distractors.length+' 条统一 10 分/条','warn');
       } else {
         /* 平均分配 + 余数顺序分配 */
         var per = Math.floor(total / rest.length);
@@ -722,10 +730,8 @@ document.addEventListener('app:ready', function(e){
         rest.forEach(function(n){ n.score = per; });
         for(var i=0; i<remainder; i++){ rest[i].score = (rest[i].score||0) + 1; }
         var realTotal = correct.reduce(function(m,n){ return m + (Number(n.score)||0); }, 0);
-        App.toast('已均分 100 分：首节点 0 分，其余 '+rest.length+' 个节点每节点 '+per+((remainder>0)?' 分（前 '+remainder+' 个 +1 分，合计 '+realTotal+'）':' 分（合计 '+realTotal+'）'),'ok');
+        App.toast('已均分 100 分：首节点 0 分，其余 '+rest.length+' 个节点每节点 '+per+((remainder>0)?' 分（前 '+remainder+' 个 +1 分，合计 '+realTotal+'）':' 分（合计 '+realTotal+'）；混淆流程 '+distractors.length+' 条统一 10 分/条'),'ok');
       }
-      /* 混淆流程节点置 0 分 */
-      nodes.forEach(function(n){ if(n.flowType==='distractor') n.score = 0; });
       return correct.length;
     }
 
@@ -750,8 +756,10 @@ document.addEventListener('app:ready', function(e){
       var cls = 'dag-node'+(n.type==='parallel'?' is-parallel':'');
       var styleAttr = inPool ? '' : ' style="left:'+(Number(n.posX)||0)+'px;top:'+(Number(n.posY)||0)+'px"';
       var ports = inPool ? '' : '<span class="dag-port in"></span><span class="dag-port out" data-src="'+App.esc(String(n.id))+'" title="按住拖拽到目标节点建立依赖"></span>';
+      var idLabel = inPool ? '' : '<span class="dag-id" title="节点编号（可在配置中修改）">'+App.esc(String(n.id))+'</span>';
       return '<div class="'+cls+'" data-id="'+App.esc(String(n.id))+'" data-i="'+i+'"'+styleAttr+'>'+ports
         + '<div class="dag-head"><span class="dag-ic" style="background:'+t.dim+';color:'+t.color+'">'+App.icon(t.icon)+'</span>'
+        + idLabel
         + '<span class="dag-title">'+App.esc(n.title)+'</span></div>'+body+'</div>';
     }
 
@@ -1135,7 +1143,8 @@ document.addEventListener('app:ready', function(e){
         targetOpts = '<option value="'+App.esc(n.target||'')+'" selected>'+App.esc(n.target||'（未指定）')+'</option>' + targetOpts;
       }
       var body =
-        '<div class="form-row"><label class="f-label">节点标题<span class="req">*</span></label><input class="input" id="ndTitle" value="'+App.esc(n.title||'')+'"></div>'
+        '<div class="form-row"><label class="f-label">节点编号<span class="req">*</span></label><input class="input mono" id="ndId" value="'+App.esc(String(n.id||''))+'" placeholder="如：S01-1 或 DS01-信息科-1"><div class="tiny dim" style="margin-top:4px">主流节点建议格式：{场景ID}-{序号}（如 S01-1）；混淆节点建议格式：DS{场景ID}-{角色}-{序号}（如 DS01-信息科-1）。修改后会自动更新所有依赖引用。</div></div>'
+        + '<div class="form-row"><label class="f-label">节点标题<span class="req">*</span></label><input class="input" id="ndTitle" value="'+App.esc(n.title||'')+'"></div>'
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">节点类型</label><select class="select" id="ndType">'+Object.keys(TYPES).map(function(k){ return '<option value="'+k+'"'+(n.type===k?' selected':'')+'>'+TYPES[k].label+'节点</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">接收角色</label><select class="select" id="ndTarget">'+targetOpts+'</select></div>'
@@ -1156,7 +1165,7 @@ document.addEventListener('app:ready', function(e){
         +   '<div class="tiny dim" style="margin-top:4px">也可在画布上按住节点右侧圆点拖拽连线到本节点建立依赖；勾选或取消勾选会实时更新画布上的连线。混淆流程不参与依赖图，多个前置需全部完成后本流程才开放。</div></div>'
         + '<div class="form-row"><label class="f-label">后继节点 <span class="tiny dim">（由依赖关系自动推导，无需手工填写）</span></label>'
         +   '<div class="tiny dim">'+(succOf(n.id).map(function(x){ return App.esc(x.title); }).join('、') || '无（本流程为末端流程）')+'</div></div>'
-        + '<div id="ndScoreTip" class="tiny dim mb2">正确流程完成按本分值得分（超时完成按 90% 计）；混淆流程被选中按本分值直接扣分，不计入满分。</div>'
+        + '<div id="ndScoreTip" class="tiny dim mb2">扣分制总分 100 起。正确流程按时完成无扣分，超时完成扣本节点分值的 10%；混淆流程被选中扣本节点全部分值（10 分），不计入 100 分总分。</div>'
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">动作类型</label><select class="select" id="ndAction"><option value="">— 未分类 —</option>'+ACTION_TYPES.map(function(a){ return '<option value="'+a+'"'+(n.action===a?' selected':'')+'>'+a+'</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">必经步骤</label><div class="flex gap2" style="align-items:center;min-height:34px"><label class="check"><input type="checkbox" id="ndRequired"'+(n.required===false?'':' checked')+'>实战版遗漏判定必查</label></div></div>'
@@ -1239,6 +1248,15 @@ document.addEventListener('app:ready', function(e){
         dv.querySelector('.d-body').insertAdjacentHTML('beforeend','<div class="mt4 flex gap2"><button class="btn grow" id="ndCancel">取消</button><button class="btn primary grow" id="ndSave">保存节点</button></div>');
         dv.querySelector('#ndCancel').onclick = dv.close;
         dv.querySelector('#ndSave').onclick = function(){
+          var newId = dv.querySelector('#ndId').value.trim();
+          if(!newId){ App.toast('节点编号不能为空','err'); return; }
+          newId = String(newId);
+          var oldId = String(n.id);
+          /* ID 冲突校验 */
+          if(newId !== oldId){
+            var dup = nodes.filter(function(x){ return String(x.id)===newId && x!==n; });
+            if(dup.length){ App.toast('节点编号 "'+newId+'" 已被其他节点占用','err'); return; }
+          }
           var title = dv.querySelector('#ndTitle').value.trim();
           if(!title){ App.toast('节点标题不能为空','err'); return; }
           var ty = dv.querySelector('#ndType').value;
@@ -1262,6 +1280,15 @@ document.addEventListener('app:ready', function(e){
           n.keywords = dv.querySelector('#ndKeywords').value.split(/[,，、;；\s]+/).filter(function(x){ return !!x; });
           if(ty==='parallel'){ var pv = dv.querySelector('#ndPD').value.trim(); n.parallelDesc = pv; n.parallel_desc = pv; delete n.branches; }
           else { delete n.parallelDesc; delete n.parallel_desc; delete n.branches; }
+          /* 若节点编号变更，更新所有节点 deps 中的引用 */
+          if(newId !== oldId){
+            nodes.forEach(function(x){
+              if(Array.isArray(x.deps)){
+                x.deps = x.deps.map(function(d){ return String(d)===oldId ? newId : d; });
+              }
+            });
+            n.id = newId;
+          }
           dv.close(); render();
           var tot = scoreTotal();
           App.toast(tot>100

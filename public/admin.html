@@ -422,7 +422,7 @@ document.addEventListener('app:ready', function(e){
       options:Array.isArray(x&&x.options)?x.options.slice():(typeof (x&&x.options)==='string'?x.options.split(/[、,，|｜]/).map(function(s){return s.trim();}).filter(Boolean):[])
     };
   }
-  var TYPE_OPTS = [['auto','自动识别'],['text','单行文本'],['textarea','多行文本'],['select','下拉选择'],['datetime','日期时间']];
+  var TYPE_OPTS = [['auto','自动识别'],['text','单行文本'],['textarea','多行文本'],['select','下拉选择'],['multiselect','下拉多选'],['datetime','日期时间']];
   function typeName(t){
     for(var i=0;i<TYPE_OPTS.length;i++) if(TYPE_OPTS[i][0]===t) return TYPE_OPTS[i][1];
     return '自动识别';
@@ -444,7 +444,7 @@ document.addEventListener('app:ready', function(e){
           '<div class="kv"><span class="k">模板编号</span><span class="mono">'+App.esc(f.id)+'</span><span class="k">模板名称</span><span>'+App.esc(f.name)+'</span><span class="k">字段数</span><span class="mono">'+nf.length+'</span></div>'
           + '<div class="section-title mt4">字段结构</div>'
           + '<table class="table"><thead><tr><th style="width:52px">序号</th><th style="width:140px">字段名</th><th>字段说明</th><th style="width:76px">必填</th><th style="width:88px">控件</th><th style="width:160px">下拉选项</th></tr></thead><tbody>'
-          + nf.map(function(x,i){ return '<tr><td class="mono">'+(i+1)+'</td><td>'+App.esc(x.label)+'</td><td class="dim">'+(x.hint?App.esc(x.hint):'—')+'</td><td>'+(x.required?'<span class="tag green">必填</span>':'<span class="tag">选填</span>')+'</td><td class="dim">'+typeName(x.type)+'</td><td class="tiny dim">'+(x.type==='select'?(x.options||[]).join('、'):'—')+'</td></tr>'; }).join('')
+          + nf.map(function(x,i){ return '<tr><td class="mono">'+(i+1)+'</td><td>'+App.esc(x.label)+'</td><td class="dim">'+(x.hint?App.esc(x.hint):'—')+'</td><td>'+(x.required?'<span class="tag green">必填</span>':'<span class="tag">选填</span>')+'</td><td class="dim">'+typeName(x.type)+'</td><td class="tiny dim">'+((x.type==='select'||x.type==='multiselect')?(x.options||[]).join('、'):'—')+'</td></tr>'; }).join('')
           + '</tbody></table>'
           + '<div class="tiny dim mt3">字段说明用于参演人员分步填表时的引导提示；下拉选择用于事件等级等标准化取值；日期时间控件支持选择或手动填写。可在「编辑」中逐项维护。</div>' });
       };
@@ -502,8 +502,9 @@ document.addEventListener('app:ready', function(e){
             seen[lb] = 1;
             var tp = editFields[i].type;
             var opts = (editFields[i].options||[]).map(function(s){ return String(s||'').trim(); }).filter(Boolean);
-            if(tp === 'select' && !opts.length){ App.toast('第 '+(i+1)+' 个字段为下拉选择，请填写选项','err'); return; }
-            fs.push({ label:lb, hint:String(editFields[i].hint||'').trim(), required:editFields[i].required !== false, type:tp, options:tp==='select'?opts:[] });
+            var hasOptsType = tp==='select' || tp==='multiselect';
+            if(hasOptsType && !opts.length){ App.toast('第 '+(i+1)+' 个字段为'+(tp==='multiselect'?'下拉多选':'下拉选择')+'，请填写选项','err'); return; }
+            fs.push({ label:lb, hint:String(editFields[i].hint||'').trim(), required:editFields[i].required !== false, type:tp, options:hasOptsType?opts:[] });
           }
           if(!fs.length){ App.toast('至少保留一个字段','err'); return; }
           API.updateFormTemplate(f.id, { name:nm, fields:fs }).then(function(r){

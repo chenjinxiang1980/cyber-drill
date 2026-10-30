@@ -44,8 +44,9 @@ function isLate(p, node, atMs) {
   return (end - start) / 60000 > Number(node.timeout);
 }
 
-/* 参演人员判定「不执行」跳过混淆流程时的少量奖励分 */
-const SKIP_BONUS = 2;
+/* 扣分制已移除奖励机制：跳过混淆流程不再给分
+ * SKIP_BONUS 保留 0 以兼容引用点 */
+const SKIP_BONUS = 0;
 
 /* 接收人支持多选：字符串（顿号/逗号分隔）或数组，统一转为去重排序的名称数组 */
 function parseReceivers(v) {
@@ -130,9 +131,13 @@ function matchNode(step, nodes) {
   return { node: best, score: bestScore };
 }
 
-/* 评分（每个流程独立分值，所有正确流程合计满分 100）
- * 基础版：正确流程完成得分；超时完成扣该流程分值的 10%；演练结束时未完成扣该流程全部分值
- * 实战版：额外选择混淆流程直接扣该流程分值；混淆流程不参与得分
+/* 评分（扣分制：总分 100 起，仅对违规行为扣分）
+ * 扣分规则：
+ *   1. 正确流程超时完成 → 扣本节点分值的 10%
+ *   2. 实战版选择混淆流程 → 扣混淆流程全部分值
+ *   3. 正确流程演练结束时未完成/跳过 → 扣本节点全部分值
+ *   4. 接收人选择错误（与剧本预设不完全一致） → 扣本节点分值的 10%
+ * 满分封顶 100，扣完 0 分为止；正确流程按时完成且无接收人错误则本节点无扣分
  */
 function score(projectId) {
   const p = projectOf(projectId);
@@ -145,14 +150,13 @@ function score(projectId) {
   const tasks = db.prepare('SELECT * FROM tasks WHERE project_id=?').all(projectId);
   const steps = db.prepare('SELECT * FROM drill_steps WHERE project_id=? ORDER BY step_time,id').all(projectId);
 
-  /* 基础版任务与剧本节点对应关系（历史任务可能未回填 node_id，按标题/描述兜底匹配） */
+  /* 基础版任务与剧本节点对应关系 */
   const taskByNode = {};
   tasks.forEach(function (t) {
     let node = t.node_id ? correct.filter(function (n) { return n.id === t.node_id; })[0] : null;
     if (!node) node = matchNode({ title: t.title, descr: t.descr, roleId: t.role_id }, correct).node;
     if (node && !taskByNode[node.id]) taskByNode[node.id] = t;
   });
-  /* 基础版任务完成时刻：优先完整日期时间；历史数据只有 HH:mm 时按完成先后滚动到次日 */
   const startMs = clock.parseLocal(p.started_at);
   const baseStart = isFinite(startMs) ? startMs : clock.parseLocal(String(p.date || now()));
   const doneCache = {};
@@ -168,7 +172,6 @@ function score(projectId) {
     const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), Number(m[1]), Number(m[2])).getTime();
     return at < anchor ? at + 86400000 : at;
   }
-  /* 基础版节点起算时刻：前置任务最晚完成时间；无前置时取演练真实开始时间 */
   function basicStartMs(node, seen) {
     seen = seen || {};
     if (seen[node.id]) return NaN;
@@ -194,7 +197,6 @@ function score(projectId) {
     return ms;
   }
 
-  /* 已完成流程：基础版取已完成任务，实战版取已提交且判定为正确流程的记录 */
   const hitMap = {};
   if (mode === '基础版') {
     tasks.forEach(function (t) {
@@ -221,7 +223,6 @@ function score(projectId) {
       hitMap[node.id] = { stepTime: s.step_time, late: Number(s.ontime) === 0, step: s };
     });
   }
-  /* 被选中的混淆流程 */
   const wrongPicked = {};
   if (mode !== '基础版') {
     steps.forEach(function (s) {
@@ -229,7 +230,6 @@ function score(projectId) {
       if (distractors.some(function (n) { return n.id === s.matched_node; })) wrongPicked[s.matched_node] = s;
     });
   }
-  /* 参演人员判定「不执行」跳过的流程 */
   const skipMap = {};
   if (mode !== '基础版') {
     steps.forEach(function (s) {
@@ -238,11 +238,14 @@ function score(projectId) {
     });
   }
 
+  /* ---------- 扣分制计算起点：100 分，逐项扣除 ---------- */
+  const DEDUCT_BASE = 100;
   const nodeResults = [];
   const deductions = [];
-  const bonuses = [];
-  let earned = 0;
+  let earned = DEDUCT_BASE;  /* 从 100 起，只减不增 */
   let skippedCorrect = 0, skippedDistract = 0;
+
+  /* 正确流程节点：按时完成无扣分，超时/接收错扣 10%，结束未完成扣全分 */
   correct.forEach(function (n) {
     const sc = n.score;
     const hit = hitMap[n.id];
@@ -250,26 +253,35 @@ function score(projectId) {
     if (!hit && skip) {
       skippedCorrect++;
       const missed = ended;
+      let deduct = 0;
       if (missed) {
+        deduct = sc;
         earned -= sc;
-        deductions.push({ nodeId: n.id, title: n.title, type: '正确流程未完成', point: -sc, skipped: true });
+        deductions.push({ nodeId: n.id, title: n.title, type: '正确流程跳过（演练结束扣全分）', point: -sc, skipped: true });
       }
       nodeResults.push({
         id: n.id, title: n.title, role: n.target,
         plan: planText(n),
         actual: missed ? '已跳过（演练结束，按未完成计）' : '已跳过（未执行）',
         required: true, submitted: false, hit: false, ontime: false, wrong: false, skipped: true,
-        score: sc, earned: 0, late: false, state: missed ? '遗漏' : '已跳过'
+        score: sc, earned: -deduct, late: false, state: missed ? '遗漏' : '已跳过'
       });
       return;
     }
     if (hit) {
-      /* 超时完成扣本流程 10%；下一节点接收人选择错误再扣本流程 10% */
       const recvBad = !!(hit.step && hit.step.receiver_ok === 0);
-      const got = Math.round(sc * (hit.late ? 0.9 : 1) * (recvBad ? 0.9 : 1) * 10) / 10;
-      earned += got;
-      if (hit.late) deductions.push({ nodeId: n.id, title: n.title, type: '超时完成（扣10%）', point: -(Math.round(sc * 0.1 * 10) / 10) });
-      if (recvBad) deductions.push({ nodeId: n.id, title: n.title, type: '接收人选择错误（扣10%）', point: -(Math.round(sc * 0.1 * 10) / 10) });
+      let deduct = 0;
+      if (hit.late) {
+        const d = Math.round(sc * 0.1 * 10) / 10;
+        deduct += d;
+        deductions.push({ nodeId: n.id, title: n.title, type: '超时完成（扣10%）', point: -d });
+      }
+      if (recvBad) {
+        const d = Math.round(sc * 0.1 * 10) / 10;
+        deduct += d;
+        deductions.push({ nodeId: n.id, title: n.title, type: '接收人选择错误（扣10%）', point: -d });
+      }
+      earned -= deduct;
       nodeResults.push({
         id: n.id, title: n.title, role: n.target,
         plan: planText(n),
@@ -277,52 +289,56 @@ function score(projectId) {
           ? ('完成于 ' + hit.stepTime + (hit.duration !== null && hit.duration !== undefined ? '（用时 ' + hit.duration + ' 分钟）' : ''))
           : '已完成',
         required: true, submitted: true, hit: true, ontime: !hit.late, wrong: false,
-        score: sc, earned: got, late: !!hit.late, receiver: (hit.step && hit.step.receiver) || '', receiverOk: !recvBad,
+        score: sc, earned: -deduct, late: !!hit.late, receiver: (hit.step && hit.step.receiver) || '', receiverOk: !recvBad,
         state: recvBad ? (hit.late ? '超时且接收人错误' : '接收人错误') : (hit.late ? '超时完成' : '已完成')
       });
       return;
     }
     const missed = ended;
+    let deduct = 0;
     if (missed) {
+      deduct = sc;
       earned -= sc;
-      deductions.push({ nodeId: n.id, title: n.title, type: '正确流程未完成', point: -sc });
+      deductions.push({ nodeId: n.id, title: n.title, type: '正确流程未完成（扣全分）', point: -sc });
     }
     nodeResults.push({
       id: n.id, title: n.title, role: n.target,
       plan: planText(n),
       actual: missed ? '未完成（演练结束）' : '待处置',
       required: true, submitted: false, hit: false, ontime: false, wrong: false,
-      score: sc, earned: 0, late: false, state: missed ? '遗漏' : '待处置'
+      score: sc, earned: -deduct, late: false, state: missed ? '遗漏' : '待处置'
     });
   });
+
+  /* 实战版：选了混淆流程 → 扣该混淆节点全部分值 */
   Object.keys(wrongPicked).forEach(function (nid) {
     const n = distractors.filter(function (x) { return x.id === nid; })[0];
     const s = wrongPicked[nid];
-    earned -= n.score;
-    deductions.push({ nodeId: n.id, title: n.title, type: '选择混淆流程', point: -n.score, distract: true });
+    const deduct = n.score;
+    earned -= deduct;
+    deductions.push({ nodeId: n.id, title: n.title, type: '执行混淆流程（扣全分）', point: -deduct, distract: true });
     nodeResults.push({
       id: n.id, title: n.title, role: n.target, plan: planText(n),
       actual: '已执行（' + (s.step_time || '—') + '）', required: false, submitted: true,
-      hit: false, ontime: false, wrong: true, distract: true, score: 0, earned: -n.score,
+      hit: false, ontime: false, wrong: true, distract: true, score: deduct, earned: -deduct,
       late: false, state: '决策偏离'
     });
   });
 
-  /* 跳过混淆流程：判定不执行可获得少量奖励分 */
+  /* 跳过混淆流程：扣分制下无奖励、无扣分（未执行即无违规） */
   Object.keys(skipMap).forEach(function (nid) {
     const n = distractors.filter(function (x) { return x.id === nid; })[0];
     if (!n) return;
     skippedDistract++;
-    earned += SKIP_BONUS;
-    bonuses.push({ nodeId: n.id, title: n.title, type: '跳过混淆流程（+' + SKIP_BONUS + '）', point: SKIP_BONUS, bonus: true });
     nodeResults.push({
       id: n.id, title: n.title, role: n.target, plan: planText(n),
       actual: '已跳过（未执行）', required: false, submitted: false,
-      hit: false, ontime: false, wrong: false, skipped: true, score: 0, earned: SKIP_BONUS,
+      hit: false, ontime: false, wrong: false, skipped: true, score: 0, earned: 0,
       late: false, state: '已跳过'
     });
   });
 
+  /* ---------- 汇总 ---------- */
   const total = correct.length;
   const hitCnt = nodeResults.filter(function (x) { return x.required && x.hit; }).length;
   const ontimeCnt = nodeResults.filter(function (x) { return x.required && x.hit && x.ontime; }).length;
@@ -331,7 +347,8 @@ function score(projectId) {
   const missedCnt = nodeResults.filter(function (x) { return x.required && !x.submitted && ended; }).length;
   const pendingCnt = nodeResults.filter(function (x) { return x.required && !x.submitted && !x.skipped && !ended; }).length;
   const maxScore = correct.reduce(function (a, n) { return a + n.score; }, 0);
-  const sc = Math.max(0, Math.min(100, Math.round(earned * 10) / 10));
+  const totalDeduct = DEDUCT_BASE - earned;
+  const sc = Math.max(0, Math.round(earned * 10) / 10);
   const completeness = total ? Math.round(hitCnt / total * 1000) / 10 : 0;
   const timeRate = total ? Math.round(ontimeCnt / total * 1000) / 10 : 0;
   return {
@@ -340,14 +357,13 @@ function score(projectId) {
     wrong: wrongCnt, late: lateCnt, maxScore: maxScore, distractors: distractors.length,
     skipped: skippedCorrect + skippedDistract, skippedCorrect: skippedCorrect, skippedDistract: skippedDistract,
     completeness: completeness, timeRate: timeRate,
-    score: sc, grade: gradeOf(sc), deductions: deductions, bonuses: bonuses,
-    formula: (mode === '实战版' ? '实战版' : '基础版')
-      + '：正确流程满分 ' + maxScore + ' 分'
-      + (hitCnt ? '，已完成 ' + hitCnt + '/' + total + ' 项（超时按 90% 计）' : '')
-      + (skippedDistract ? '，跳过混淆流程 ' + skippedDistract + ' 项 +' + (skippedDistract * SKIP_BONUS) + ' 分' : '')
-      + (skippedCorrect ? '，跳过正确流程 ' + skippedCorrect + ' 项' : '')
-      + (wrongCnt ? '，误选混淆流程 ' + wrongCnt + ' 项扣 ' + deductions.filter(function (d) { return d.distract; }).reduce(function (a, d) { return a - d.point; }, 0) + ' 分' : '')
-      + (missedCnt ? '，未完成 ' + missedCnt + ' 项扣 ' + deductions.filter(function (d) { return d.type === '正确流程未完成'; }).reduce(function (a, d) { return a - d.point; }, 0) + ' 分' : '')
+    score: sc, grade: gradeOf(sc), deductions: deductions, bonuses: [],
+    formula: '扣分制：起始 100 分'
+      + (hitCnt ? '，已完成正确流程 ' + hitCnt + '/' + total + ' 项' : '')
+      + (lateCnt ? '，超时 ' + lateCnt + ' 项（每项扣本节点 10%）' : '')
+      + (wrongCnt ? '，执行混淆流程 ' + wrongCnt + ' 项（各扣 ' + deductions.filter(function (d) { return d.distract; }).reduce(function (a, d) { return a - d.point; }, 0) + ' 分）' : '')
+      + (missedCnt ? '，未完成正确流程 ' + missedCnt + ' 项（扣 ' + deductions.filter(function (d) { return d.type.indexOf('未完成') >= 0 || d.skipped; }).reduce(function (a, d) { return a - d.point; }, 0) + ' 分）' : '')
+      + (totalDeduct ? '，合计扣 ' + totalDeduct + ' 分' : '，无扣分')
       + ' = ' + sc + ' 分',
     nodes: nodeResults, steps: steps, correctTotal: maxScore
   };
@@ -528,8 +544,9 @@ router.post('/skip', auth.requireAuth, function (req, res) {
   if (dup) return res.status(409).json({ error: '该流程已由 ' + dup.user + ' 处理，不可重复跳过' });
 
   const isCorrect = node.flowType !== 'distractor';
-  /* 不向前端下发流程属性，仅返回本次跳过带来的分值变化与最新得分 */
-  const delta = isCorrect ? 0 : SKIP_BONUS;
+  /* 不向前端下发流程属性，仅返回本次跳过带来的分值变化与最新得分
+   * 扣分制：跳过混淆流程无奖励无扣分；跳过正确流程结束时扣全分 */
+  const delta = 0;
   const stepTime = hhmm();
   db.prepare('INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,choice,correct,found_at,measure,result,forms,flow_type,score,receiver,receiver_ok,skipped,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(p.id, p.scenario_id, req.user.role.id, req.user.name, node.action || '', node.title,
@@ -547,7 +564,7 @@ router.post('/skip', auth.requireAuth, function (req, res) {
       title: node.title,
       project: p.name,
       user: req.user.name,
-      reason: isCorrect ? '正确流程跳过，结束演练时将按该流程分值扣分' : ('跳过混淆流程，奖励 +' + delta + ' 分'),
+      reason: isCorrect ? '正确流程跳过，结束演练时扣全部分值' : '混淆流程跳过，无扣分无奖励',
       score: sc.score
     },
     level: isCorrect ? 'P1' : 'P2'
@@ -606,9 +623,17 @@ router.post('/decide', auth.requireAuth, function (req, res) {
   }
   const receiver = recv.join('、');
   const receiverOk = !wantRecv.length ? 1 : (sameReceivers(wantRecv, recv) ? 1 : 0);
-  const delta = !isCorrect
-    ? -node.score
-    : Math.round(node.score * (ontime ? 1 : 0.9) * (receiverOk ? 1 : 0.9) * 10) / 10;
+  /* 扣分制 delta：表示本次操作对总分的扣分额度（0=无扣分，负数=扣分） */
+  let delta;
+  if (!isCorrect) {
+    /* 执行混淆流程：扣混淆节点全部分值 */
+    delta = -node.score;
+  } else {
+    /* 执行正确流程：无违规则 0，违规项单独扣 10% */
+    delta = 0;
+    if (!ontime) delta -= Math.round(node.score * 0.1 * 10) / 10;
+    if (!receiverOk) delta -= Math.round(node.score * 0.1 * 10) / 10;
+  }
   const formText = Object.keys(forms).map(function (k) { return k + '：' + String(forms[k]).slice(0, 80); }).join('；');
   const descr = (formText ? formText + '；' : '') + '措施：' + measure + '；结果：' + result + (found ? '；发现：' + found : '');
   const r = db.prepare('INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,choice,correct,found_at,found,measure,result,evidence,forms,flow_type,score,receiver,receiver_ok,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
@@ -621,13 +646,15 @@ router.post('/decide', auth.requireAuth, function (req, res) {
   const evName = '实战处置记录-' + node.id + '-' + req.user.name + (evidence ? '（' + evidence + '）' : '');
   db.prepare('INSERT INTO evidence (id,type,name,size,time,role_id,uploader,user_id,auto,task_id,project_id,url,file_path,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(evId, '处置记录', evName.slice(0, 180), '表单', stepTime, req.user.role.id, req.user.name, req.user.id, 0, null, p.id, null, null, nowSec());
+  const deductAbs = Math.abs(delta);
+  const deductText = delta < 0 ? ('扣分 ' + deductAbs + ' 分') : '无扣分';
   db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')
     .run(p.id, stepTime, req.user.name, req.user.role.id, isCorrect ? '执行正确处置流程' : '执行混淆处置流程',
-      '流程「' + node.title + '」；' + (isCorrect ? '得分 +' + delta : '扣分 ' + delta)
+      '流程「' + node.title + '」；' + (isCorrect ? deductText : ('扣分 ' + deductAbs + ' 分'))
         + (isCorrect && !receiverOk ? '；下一节点接收人选择错误（扣10%）' : '')
         + '；措施：' + measure.slice(0, 60),
-      isCorrect && receiverOk ? '' : 'P1', null);
-  auth.audit(req, '实战版处置流程 ' + node.id + '：' + (isCorrect ? '正确流程 +' + delta : '混淆流程 ' + delta) + ' 分'
+      isCorrect && receiverOk && delta === 0 ? '' : 'P1', null);
+  auth.audit(req, '实战版处置流程 ' + node.id + '：' + (isCorrect ? ('正确流程 ' + deductText) : ('混淆流程 扣 ' + deductAbs + ' 分'))
     + (receiverOk ? '' : '（接收人选择错误）'));
 
   const sc = score(p.id);
@@ -638,11 +665,11 @@ router.post('/decide', auth.requireAuth, function (req, res) {
       title: node.title,
       project: p.name,
       user: req.user.name,
-      correct: (isCorrect ? ('正确流程，本节点得分 +' + delta) : ('混淆流程，扣分 ' + delta))
+      correct: (isCorrect ? ('正确流程，' + deductText) : ('混淆流程，扣分 ' + deductAbs + ' 分'))
         + (isCorrect && !receiverOk ? '（接收人选择错误，扣10%）' : '')
         + '；当前累计得分 ' + sc.score + ' 分'
     },
-    level: isCorrect && receiverOk ? 'P2' : 'P1'
+    level: isCorrect && receiverOk && delta === 0 ? 'P2' : 'P1'
   });
 
   res.json({
@@ -741,4 +768,7 @@ router.post('/score/:projectId/recalc', auth.requireAuth, function (req, res) {
   res.json(s);
 });
 
+/* 供 content.js /dashboard 聚合接口复用评分计算 */
 module.exports = router;
+module.exports.score = score;
+module.exports.projectOf = projectOf;

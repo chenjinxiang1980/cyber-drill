@@ -9,6 +9,8 @@
 :root{
   --cy:#22d3ee; --bl:#3b82f6; --pu:#a371f7; --ok:#22c55e; --wn:#fbbf24; --er:#f43f5e;
   --tx:#d7efff; --tx2:#8db8d9; --dim:#517694; --line:rgba(34,211,238,.22);
+  /* mono 加入中文 fallback，避免中文回退到系统宋体 */
+  --mono:Consolas,"Microsoft YaHei","PingFang SC","Courier New",monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
@@ -69,9 +71,9 @@ body::before{
   border:1px solid rgba(34,197,94,.45);border-radius:3px;padding:3px 8px;background:rgba(34,197,94,.08)}
 .live-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 10px #22c55e;animation:blink 1.4s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
-.h-clock{text-align:right;font-family:Consolas,monospace}
-.h-clock #clkTime{display:block;font-size:19px;letter-spacing:1px;color:#9fe9ff}
-.h-clock #clkDate{display:block;font-size:10px;color:var(--dim);letter-spacing:1px}
+.h-clock{text-align:right;font-family:var(--mono);padding:4px 10px;border:1px solid rgba(34,211,238,.3);border-radius:4px;background:rgba(9,28,50,.6);line-height:1.4}
+.h-clock #clkTime{display:block;font-size:19px;font-weight:700;letter-spacing:1px;color:#9fe9ff;text-shadow:0 0 10px rgba(34,211,238,.5)}
+.h-clock #clkDate{display:block;font-size:11px;color:var(--tx2);letter-spacing:1px;margin-top:2px}
 .h-btn{background:rgba(34,211,238,.08);border:1px solid var(--line);color:#8fe1ff;font-size:12px;
   padding:5px 10px;border-radius:3px;cursor:pointer;letter-spacing:1px}
 .h-btn:hover{background:rgba(34,211,238,.2);border-color:var(--cy);box-shadow:0 0 12px rgba(34,211,238,.3)}
@@ -81,14 +83,15 @@ body::before{
 .panel{position:relative;display:flex;flex-direction:column;min-height:0;
   background:linear-gradient(180deg,rgba(13,34,60,.86),rgba(6,17,32,.92));
   border:1px solid var(--line);border-radius:5px;
-  box-shadow:inset 0 0 34px rgba(34,211,238,.05),0 6px 18px rgba(0,0,0,.45)}
+  box-shadow:inset 0 0 34px rgba(34,211,238,.05),0 6px 18px rgba(0,0,0,.45);
+  isolation:isolate}
 .panel::before,.panel::after{content:'';position:absolute;width:11px;height:11px;border:2px solid var(--cy);opacity:.7}
 .panel::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
 .panel::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
 .p-head{display:flex;align-items:center;gap:8px;padding:10px 12px;font-size:12.5px;letter-spacing:1.5px;
   color:#86dbff;border-bottom:1px dashed rgba(34,211,238,.18);flex:none}
 .p-dot{width:6px;height:6px;background:var(--cy);transform:rotate(45deg);box-shadow:0 0 8px var(--cy)}
-.p-badge{margin-left:auto;font-family:Consolas,monospace;font-size:11px;color:#6fd3f2;
+.p-badge{margin-left:auto;font-family:var(--mono);font-size:11px;color:#6fd3f2;
   border:1px solid rgba(34,211,238,.3);border-radius:3px;padding:1px 6px;background:rgba(34,211,238,.06)}
 .p-foot{flex:none;padding:6px 12px;font-size:10px;color:var(--dim);letter-spacing:1px;border-top:1px dashed rgba(34,211,238,.12)}
 .col-center{display:flex;flex-direction:column;gap:12px;min-height:0}
@@ -96,19 +99,28 @@ body::before{
 .col-right .panel{flex:1;min-height:0}
 
 /* KPI */
-.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;flex:none}
-.kpi{position:relative;padding:12px 14px;border:1px solid var(--line);border-radius:5px;overflow:hidden;
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;flex:none}
+.kpi{position:relative;padding:14px 16px;border:1px solid var(--line);border-radius:5px;overflow:hidden;
   background:linear-gradient(150deg,rgba(20,58,94,.75),rgba(7,20,38,.9))}
 .kpi::after{content:'';position:absolute;right:-28px;top:-28px;width:70px;height:70px;border:1px solid rgba(34,211,238,.22);
   border-radius:50%;animation:spin 9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.k-l{font-size:11px;color:var(--tx2);letter-spacing:1px}
-.k-v{font-size:clamp(22px,2vw,32px);font-weight:800;font-family:Consolas,monospace;margin-top:4px;line-height:1;
-  color:#8ff0ff;text-shadow:0 0 18px rgba(34,211,238,.45)}
+.k-l{font-size:12px;color:var(--tx2);letter-spacing:1px;font-weight:500}
+/* 数值区：中文元素（如事件等级）自动退回到默认字体栈，避免 Consolas 找不到字形回退宋体 */
+.k-v{font-size:clamp(22px,2vw,34px);font-weight:800;margin-top:6px;line-height:1;letter-spacing:1px;
+  color:#8ff0ff;text-shadow:0 0 18px rgba(34,211,238,.45);
+  /* 先尝试等宽字体渲染数字，找不到字形时自动回退到 Microsoft YaHei */
+  font-family:var(--mono)}
 .k-v.ok{color:#5ef2a6;text-shadow:0 0 18px rgba(34,197,94,.45)}
 .k-v.wn{color:#ffd76a;text-shadow:0 0 18px rgba(251,191,36,.45)}
 .k-v.er{color:#ff7b8f;text-shadow:0 0 18px rgba(244,63,94,.45)}
 .k-f{font-size:10.5px;color:var(--dim);margin-top:6px;letter-spacing:.5px}
+/* 事件等级 badge：特殊样式 + 等级徽章 */
+.kpi .level-badge{display:inline-flex;align-items:center;gap:6px}
+.kpi .level-badge .lv-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:800;line-height:1}
+.kpi .level-badge .lv-text{font-size:clamp(24px,2.2vw,36px);font-weight:800;
+  font-family:"Microsoft YaHei","PingFang SC",sans-serif}
 
 /* 节点列表 */
 .node-list{flex:1;overflow-y:auto;padding:10px 12px 8px}
@@ -119,19 +131,52 @@ body::before{
 .nd::before{content:'';position:absolute;left:-5px;top:12px;width:9px;height:9px;border-radius:50%;
   background:#0a1e34;border:1px solid #3d6d92}
 .nd.done::before{background:var(--ok);border-color:var(--ok);box-shadow:0 0 10px rgba(34,197,94,.8)}
+.nd.overdue::before{background:#fbbf24;border-color:#fbbf24;box-shadow:0 0 10px rgba(251,191,36,.85)}
+.nd.overdue{background:rgba(251,191,36,.08);border-radius:4px}
 .nd.doing::before{background:var(--wn);border-color:var(--wn);box-shadow:0 0 10px rgba(251,191,36,.9);animation:blink 1.2s infinite}
 .nd-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .nd-name{font-size:12.5px;font-weight:600;color:#dff4ff}
 .nd-state{font-size:10px;padding:1px 6px;border-radius:2px;flex:none}
 .nd-state.done{color:#5ef2a6;border:1px solid rgba(34,197,94,.45);background:rgba(34,197,94,.1)}
+.nd-state.overdue{color:#ffd76a;border:1px solid rgba(251,191,36,.55);background:rgba(251,191,36,.18);font-weight:700}
 .nd-state.doing{color:#ffd76a;border:1px solid rgba(251,191,36,.45);background:rgba(251,191,36,.1)}
 .nd-state.next{color:#7ea9c9;border:1px solid rgba(126,169,201,.32);background:rgba(126,169,201,.06)}
 .nd-meta{font-size:10.5px;color:var(--dim);margin-top:3px;letter-spacing:.5px}
 
 /* 链路 */
-.chain-panel{flex:1;min-height:0}
-.chain-wrap{flex:1;min-height:0;padding:4px 6px;display:flex;align-items:center}
-#chainSvg{width:100%;height:100%;min-height:150px;display:block}
+.chain-panel{flex:1;min-height:0;padding:6px 10px;overflow:hidden}
+.chain-wrap{flex:1;min-height:0;padding:4px 6px;display:flex;flex-direction:column;gap:3px;align-items:stretch;justify-content:stretch}
+.dag-svg{display:block;width:100%;height:100%;flex:1;min-height:0}
+.dag-svg .dag-edge-bg{filter:blur(.3px)}
+.dag-svg .dag-edge-fg{filter:drop-shadow(0 0 3px rgba(34,211,238,.25))}
+.dag-svg .dag-node.parallel circle{filter:drop-shadow(0 0 4px rgba(251,191,36,.35))}
+.dag-svg .dag-node.done circle{filter:drop-shadow(0 0 3px rgba(34,197,94,.3))}
+.dag-svg .dag-node.doing circle{filter:drop-shadow(0 0 5px rgba(251,191,36,.4))}
+.dag-svg .dag-node.overdue circle{filter:drop-shadow(0 0 6px rgba(244,63,94,.5))}
+/* 每行 SVG 用实际像素宽高，节点固定 14px */
+/* 评分 */
+.score-panel{flex:none;padding:6px 10px}
+.score-body{padding:6px 10px;font-size:11.5px}
+.sc-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.sc-score{font-size:28px;font-weight:900;font-family:var(--mono);letter-spacing:1px;line-height:1;color:#9fe9ff;text-shadow:0 0 14px #22d3ee55}
+.sc-grade{font-size:13px;padding:2px 8px;border-radius:2px;font-weight:700}
+.sc-good{color:#22c55e;border:1px solid #22c55e55;background:#22c55e15}
+.sc-mid{color:#fbbf24;border:1px solid #fbbf2455;background:#fbbf2415}
+.sc-bad{color:#f43f5e;border:1px solid #f43f5e55;background:#f43f5e15}
+.sc-bar{display:flex;gap:6px;margin-top:4px}
+.sc-bar .seg{flex:1;height:30px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-direction:column}
+.sc-bar .seg b{font-size:14px;font-weight:900;font-family:var(--mono)}
+.sc-deductions{margin-top:6px;border-top:1px dashed rgba(34,211,238,.15);padding-top:5px}
+.sc-deductions .sc-d-title{font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:3px}
+.sc-d-item{display:flex;gap:6px;padding:2px 0;font-size:11px;border-bottom:1px dashed rgba(34,211,238,.08)}
+.sc-d-item .pt{color:#f43f5e;font-family:var(--mono);font-weight:700;flex:none;width:44px;text-align:right}
+.sc-d-item .ty{color:#fbbf24;flex:none;width:76px;font-size:10px}
+.sc-d-item .ti{color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 链路横向填满：让每行 SVG 的 viewBox 宽度匹配容器 */
+.chain-wrap svg{display:block;margin:0 auto}
+
+/* 告警消息中扣分项的样式在 .msg 基础上 */
 .flow-dash{animation:dashMove 1.6s linear infinite}
 @keyframes dashMove{to{stroke-dashoffset:-32}}
 .node text{font-family:"Microsoft YaHei",sans-serif}
@@ -145,21 +190,30 @@ body::before{
 .td-bar span{height:100%;transition:width .8s ease}
 .td-legend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
 .td-item{border-left:2px solid;padding-left:8px}
-.td-item .n{font-size:19px;font-weight:700;font-family:Consolas,monospace}
+.td-item .n{font-size:19px;font-weight:700;font-family:var(--mono)}
 .td-item .l{font-size:10.5px;color:var(--dim);margin-top:2px}
 
 /* 角色 */
-.role-list{flex:1;overflow-y:auto;padding:10px 14px}
+.role-list{flex:1;overflow-y:auto;padding:10px 14px;scrollbar-gutter:stable}
+/* 大屏专属滚动条样式 */
+.role-list::-webkit-scrollbar,.impact-list::-webkit-scrollbar,
+.log-list::-webkit-scrollbar,.msg-list::-webkit-scrollbar{width:6px;height:6px}
+.role-list::-webkit-scrollbar-track,.impact-list::-webkit-scrollbar-track,
+.log-list::-webkit-scrollbar-track,.msg-list::-webkit-scrollbar-track{background:rgba(34,211,238,.06);border-radius:3px}
+.role-list::-webkit-scrollbar-thumb,.impact-list::-webkit-scrollbar-thumb,
+.log-list::-webkit-scrollbar-thumb,.msg-list::-webkit-scrollbar-thumb{background:rgba(34,211,238,.35);border-radius:3px}
+.role-list::-webkit-scrollbar-thumb:hover,.impact-list::-webkit-scrollbar-thumb:hover,
+.log-list::-webkit-scrollbar-thumb:hover,.msg-list::-webkit-scrollbar-thumb:hover{background:rgba(34,211,238,.6)}
 .rl{margin-bottom:12px}
 .rl-top{display:flex;align-items:center;justify-content:space-between;font-size:12px}
 .rl-top .nm{display:flex;align-items:center;gap:6px}
 .rl-top i{width:7px;height:7px;border-radius:50%;display:inline-block;box-shadow:0 0 8px currentColor}
-.rl-top .cnt{font-family:Consolas,monospace;font-size:11px;color:var(--tx2)}
+.rl-top .cnt{font-family:var(--mono);font-size:11px;color:var(--tx2)}
 .rl-bar{height:5px;margin-top:5px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden}
 .rl-bar span{display:block;height:100%;border-radius:3px;transition:width .8s ease}
 
 /* 业务影响 */
-.impact-list{flex:1;overflow-y:auto;padding:10px 14px}
+.impact-list{flex:1;overflow-y:auto;padding:10px 14px;scrollbar-gutter:stable}
 .if{margin-bottom:12px}
 .if-top{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:5px}
 .if-top .st{font-size:10px;padding:1px 6px;border-radius:2px}
@@ -172,19 +226,19 @@ body::before{
 /* 底部 */
 .s-foot{flex:none;height:clamp(128px,17vh,180px);display:grid;grid-template-columns:1.35fr 1fr;gap:12px;min-height:0}
 .foot-panel{min-height:0}
-.log-list,.msg-list{flex:1;overflow-y:auto;padding:6px 12px 8px;font-size:11.5px}
+.log-list,.msg-list{flex:1;overflow-y:auto;padding:6px 12px 8px;font-size:11.5px;scrollbar-gutter:stable}
 .lg{display:grid;grid-template-columns:48px 76px 96px 1fr;gap:8px;padding:5px 4px;border-bottom:1px dashed rgba(34,211,238,.1);
   animation:fadein .5s ease both}
-.lg .t{font-family:Consolas,monospace;color:#6fd3f2}
+.lg .t{font-family:var(--mono);color:#6fd3f2}
 .lg .a{color:#b7ddf3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lg .x{color:#8ff0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lg .d{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lg.p0{background:linear-gradient(90deg,rgba(244,63,94,.1),transparent)}
 .lg.p0 .x{color:#ff8496}
-.msg{display:flex;gap:8px;padding:5px 2px;border-bottom:1px dashed rgba(34,211,238,.1);font-size:11.5px;color:var(--tx2)}
-.msg .lt{flex:none;font-size:9.5px;padding:1px 5px;border-radius:2px;height:16px;line-height:14px}
-.msg .mt{font-family:Consolas,monospace;color:#6fd3f2;flex:none}
-.msg .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg{display:flex;gap:8px;padding:5px 2px;border-bottom:1px dashed rgba(34,211,238,.1);font-size:11.5px;color:var(--tx2);align-items:flex-start}
+.msg .lt{flex:none;font-size:9.5px;padding:1px 5px;border-radius:2px;height:16px;line-height:14px;flex-shrink:0}
+.msg .mt{font-family:var(--mono);color:#6fd3f2;flex:none;white-space:nowrap;flex-shrink:0}
+.msg .tx{flex:1;min-width:0;white-space:normal;word-break:break-word;line-height:1.45}
 
 /* 遮罩 / 加载 / 无权限 */
 .mask{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
@@ -265,11 +319,7 @@ body::before{
       <div class="kpi-row" id="kpis"></div>
       <div class="panel chain-panel">
         <div class="p-head"><span class="p-dot"></span>处置链路实时态势<span class="p-badge" id="chainBadge">T+00:00</span></div>
-        <div class="chain-wrap"><svg id="chainSvg" viewBox="0 0 900 180" preserveAspectRatio="xMidYMid meet"></svg></div>
-      </div>
-      <div class="panel task-panel">
-        <div class="p-head"><span class="p-dot"></span>任务处置分布</div>
-        <div class="task-dist" id="taskDist"></div>
+        <div class="chain-wrap" id="chainWrap"></div>
       </div>
     </section>
 
@@ -330,6 +380,9 @@ body::before{
     tickElapsed();
   }
   clock(); setInterval(clock, 1000);
+  window.addEventListener('resize', function(){
+    if(DATA && DATA.chainNodes){ renderChain(); }
+  });
 
   /* ---------- 数据 ---------- */
   function fetchData(){
@@ -423,7 +476,7 @@ body::before{
 
   function renderAll(){
     renderHead(); renderKpis(); renderNodes(); renderChain();
-    renderTasks(); renderRoles(); renderImpact(); renderLogs(); renderMsgs();
+    renderScore(); renderRoles(); renderImpact(); renderLogs(); renderMsgs();
   }
 
   /* ---------- 顶栏 / 项目切换 ---------- */
@@ -475,14 +528,27 @@ body::before{
     var s = DATA.stats || { total:0, done:0, doing:0, pending:0, overdue:0 };
     var rate = s.total ? Math.round(s.done/s.total*100) : 0;
     var el = elapsedText();
+    var level = p.level || '—';
+    // 等级 → 徽章颜色映射（重大=红/一般=黄/较大=蓝）
+    var levelColor = level === '重大' ? '#f43f5e' : level === '较大' ? '#fbbf24' : level === '一般' ? '#3b82f6' : '#58a6ff';
+    var levelIdx = level === '重大' ? 'Ⅱ' : level === '较大' ? 'Ⅲ' : level === '一般' ? 'Ⅳ' : 'Ⅰ';
+    var sc = DATA.score || {};
+    var scGradeCls = sc.grade === '优秀' || sc.grade === '良好' ? 'ok' : sc.grade === '合格' ? 'wn' : 'er';
+    var scGradeColor = scGradeCls === 'ok' ? '#22c55e' : scGradeCls === 'wn' ? '#fbbf24' : '#f43f5e';
     var items = [
-      { l:'当前事件等级', v:(p.level||'—'), cls:'er', f:'事件编号 '+(p.id||'—')+' · '+(p.mode||'') },
+      { l:'当前事件等级', v:null, cls:'er', f:'事件编号 '+(p.id||'—')+' · '+(p.mode||''),
+        badgeHtml:'<div class="level-badge"><span class="lv-icon" style="color:'+levelColor+';background:'+levelColor+'22;border:1px solid '+levelColor+'55">'+levelIdx+'</span>'
+          + '<span class="lv-text" style="color:'+levelColor+';text-shadow:0 0 18px '+levelColor+'66">'+esc(level)+'</span></div>' },
       { l:'演练已进行', v:el.v, cls:'ok', f:el.f, id:'kpiElapsed' },
       { l:'任务完成率', v:rate+'%', cls:rate>=100?'ok':rate>=60?'wn':'er', f:'已完成 '+s.done+' / 共 '+s.total+' 项' },
-      { l:'超时 / 待办', v:(s.overdue||0)+' / '+(s.pending||0), cls:(s.overdue?'er':(s.pending?'wn':'ok')), f:'处理中 '+s.doing+' 项' }
+      { l:'超时 / 待办', v:(s.overdue||0)+' / '+(s.pending||0), cls:'wn', f:'处理中 '+s.doing+' 项' },
+      { l:'演练评分', v:null, cls:scGradeCls, f:'已完成 '+s.done+' 项处置', id:'kpiScore',
+        badgeHtml:'<div style="display:flex;align-items:center;gap:8px"><span style="font-family:var(--mono);font-size:30px;font-weight:900;color:'+scGradeColor+';text-shadow:0 0 14px '+scGradeColor+'55">'+(sc.score!=null?sc.score:'—')+'</span>'
+          + '<span style="font-size:14px;font-weight:700;color:'+scGradeColor+';border:1px solid '+scGradeColor+'aa;background:'+scGradeColor+'22;padding:3px 10px;border-radius:3px;letter-spacing:2px">'+esc(sc.grade||'—')+'</span></div>' }
     ];
     $('kpis').innerHTML = items.map(function(x){
-      return '<div class="kpi"'+(x.id?' data-kpi="'+x.id+'"':'')+'><div class="k-l">'+x.l+'</div><div class="k-v '+x.cls+'">'+esc(x.v)+'</div><div class="k-f">'+esc(x.f)+'</div></div>';
+      var valCell = x.badgeHtml ? x.badgeHtml : esc(x.v);
+      return '<div class="kpi"'+(x.id?' data-kpi="'+x.id+'"':'')+'><div class="k-l">'+x.l+'</div><div class="k-v '+x.cls+'">'+valCell+'</div><div class="k-f">'+esc(x.f)+'</div></div>';
     }).join('');
     $('chainBadge').textContent = el.v;
   }
@@ -509,99 +575,277 @@ body::before{
     var done = nodes.filter(function(n){ return n.state==='done'; }).length;
     $('nodeBadge').textContent = done+'/'+nodes.length;
     $('nodeList').innerHTML = nodes.map(function(n){
-      var st = n.state==='done' ? 'done' : n.state==='doing' ? 'doing' : 'next';
-      var label = st==='done' ? '已完成' : st==='doing' ? '处置中' : '待启动';
+      var isOver = !!n.isOverdue;
+      var st, label;
+      if(n.state==='done'){ st = isOver ? 'overdue' : 'done'; label = isOver ? '超时完成' : '已完成'; }
+      else if(n.state==='doing'){ st = 'doing'; label = '处置中'; }
+      else { st = 'next'; label = '待启动'; }
       return '<div class="nd '+st+'"><div class="nd-top"><span class="nd-name">'+esc(n.name)+'</span>'
         + '<span class="nd-state '+st+'">'+label+'</span></div>'
         + '<div class="nd-meta">'+esc(n.time||'--:--')+' · '+esc(n.role||'—')+'</div></div>';
     }).join('');
   }
 
-  /* ---------- 处置链路 ---------- */
+  /* ---------- 处置链路（DAG 分层布局 + SVG 贝塞尔连线） ----------
+   * 参照剧本编排的可视化流程：按依赖拓扑深度分层，同层节点水平排列，
+   * 多前置/并行节点通过贝塞尔曲线正确表达，动态计算画布尺寸。
+   */
   function renderChain(){
-    var svg = $('chainSvg');
-    var nodes = (DATA.seqFlow||[]).slice(0, 11);
+    var wrap = $('chainWrap');
+    var nodes = (DATA.chainNodes || DATA.seqFlow || []).slice();
     if(!nodes.length){
-      svg.innerHTML = '<text x="450" y="96" text-anchor="middle" fill="#4d7396" font-size="14">暂无处置链路记录</text>';
+      wrap.innerHTML = '<div style="padding:24px;text-align:center;color:var(--dim);font-size:13px">暂无处置链路记录</div>';
       return;
     }
-    var W = 900, pad = 62;
-    var step = nodes.length > 1 ? (W - pad*2) / (nodes.length - 1) : 0;
-    var pts = nodes.map(function(n, i){
-      return { x: pad + i*step, y: 94 + (i%2 ? 17 : -17) };
+    // 减去wrap自身padding得到SVG可用内容区尺寸
+    var cs = getComputedStyle(wrap);
+    var pl = parseFloat(cs.paddingLeft) || 0, pr = parseFloat(cs.paddingRight) || 0;
+    var pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
+    var W = Math.max(300, wrap.clientWidth - pl - pr);
+    var H = Math.max(120, wrap.clientHeight - pt - pb);
+
+    // ---- 1. 构建 DAG 索引 ----
+    var nodeById = {};
+    nodes.forEach(function(n){ nodeById[String(n.id)] = n; });
+    var ids = nodes.map(function(n){ return String(n.id); });
+
+    // 过滤 deps 中有效且属于当前剧本的节点
+    nodes.forEach(function(n){
+      var ds = Array.isArray(n.deps) ? n.deps : [];
+      n._deps = ds.map(String).filter(function(d){ return !!nodeById[d] && d !== String(n.id); });
     });
-    var d = 'M'+pts[0].x+','+pts[0].y;
-    for(var i=1; i<pts.length; i++){
-      var a = pts[i-1], b = pts[i], mx = ((a.x+b.x)/2).toFixed(1);
-      d += ' C'+mx+','+a.y+' '+mx+','+b.y+' '+b.x+','+b.y;
+
+    // ---- 2. 拓扑排序 + 计算深度 ----
+    var depth = {};
+    var indeg = {}, childs = {};
+    ids.forEach(function(id){ indeg[id] = 0; childs[id] = []; });
+    ids.forEach(function(id){
+      nodeById[id]._deps.forEach(function(d){
+        indeg[id]++; childs[d].push(id);
+      });
+    });
+    // Kahn 拓扑排序
+    var q = ids.filter(function(id){ return indeg[id] === 0; });
+    var topoOrder = [];
+    var guard = 0;
+    while(q.length && guard++ < 20000){
+      var id = q.shift(); topoOrder.push(id);
+      childs[id].forEach(function(c){ indeg[c]--; if(indeg[c] === 0) q.push(c); });
     }
-    var out = [];
-    out.push('<defs><linearGradient id="cg" x1="0" y1="0" x2="1" y2="0">'
-      + '<stop offset="0" stop-color="#22d3ee"/><stop offset=".55" stop-color="#3b82f6"/><stop offset="1" stop-color="#a371f7"/>'
-      + '</linearGradient></defs>');
-    out.push('<path id="chainPath" d="'+d+'" fill="none" stroke="rgba(34,211,238,.13)" stroke-width="8"/>');
-    out.push('<path d="'+d+'" fill="none" stroke="url(#cg)" stroke-width="2.4" stroke-dasharray="7 9" class="flow-dash"/>');
-    [0, 2.4, 4.8].forEach(function(delay){
-      out.push('<circle r="3.2" fill="#8ff9ff" opacity=".9">'
-        + '<animateMotion dur="7.2s" begin="'+delay+'s" repeatCount="indefinite" rotate="auto">'
-        + '<mpath href="#chainPath"/></animateMotion></circle>');
-    });
-    nodes.forEach(function(n, i){
-      var p = pts[i];
-      var st = n.state==='done' ? 'done' : n.state==='doing' ? 'doing' : 'next';
-      var color = st==='done' ? '#22c55e' : st==='doing' ? '#fbbf24' : '#3d6d92';
-      var core = st==='next' ? '#0f2c48' : color;
-      out.push('<g class="node '+st+'">');
-      if(st==='doing'){
-        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="13" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity=".7">'
-          + '<animate attributeName="r" values="12;21;12" dur="2s" repeatCount="indefinite"/>'
-          + '<animate attributeName="opacity" values=".75;0;.75" dur="2s" repeatCount="indefinite"/></circle>');
+    // 若有环（理论上剧本不会出现），fallback 按 seq
+    if(topoOrder.length !== ids.length) topoOrder = ids.slice().sort(function(a,b){ return (nodeById[a].seq||0) - (nodeById[b].seq||0); });
+
+    // 计算每个节点的 depth（层）
+    topoOrder.forEach(function(id){
+      var n = nodeById[id];
+      if(!n._deps.length){ depth[id] = 0; }
+      else {
+        depth[id] = n._deps.reduce(function(m, d){ return Math.max(m, (depth[d]||0)+1); }, 0);
       }
-      out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="13" fill="#06182b" stroke="'+color+'" stroke-width="2"'
-        + (st==='done' ? ' opacity=".95"' : '')+'/>');
-      out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="4.2" fill="'+core+'" style="color:'+color+'"/>');
-      out.push('<text x="'+p.x+'" y="'+(p.y-28)+'" text-anchor="middle" fill="#d7f2ff" font-size="12.5" font-weight="600">'+esc(n.name)+'</text>');
-      out.push('<text x="'+p.x+'" y="'+(p.y+31)+'" text-anchor="middle" fill="#5f8fb8" font-size="10.5">'+esc(n.time||'')+' · '+esc(n.role||'')+'</text>');
+    });
+
+    // ---- 3. 分层 ----
+    var layers = [];
+    topoOrder.forEach(function(id){
+      var d = depth[id];
+      layers[d] = layers[d] || [];
+      layers[d].push(id);
+    });
+    // 填充空层（保险）
+    var maxD = layers.length - 1;
+    for(var li = 0; li <= maxD; li++) layers[li] = layers[li] || [];
+
+    // ---- 4. 节点坐标计算 ----
+    var nodeR = 13;
+    var padLeft = 70, padRight = 70;
+    var padTop = 28, padBot = 16;
+    var nodeNameMax = 8;
+
+    var colCount = layers.length;
+    var availW = Math.max(0, W - padLeft - padRight);
+    var colGap = colCount > 1 ? availW / (colCount - 1) : 0;
+    colGap = Math.max(42, colGap);
+
+    var positions = {};
+    var maxNodesInCol = Math.max.apply(null, layers.map(function(col){ return col.length; }));
+    var availH = Math.max(40, H - padTop - padBot);
+    var rowH = availH / Math.max(1, maxNodesInCol);
+    rowH = Math.max(nodeR*2 + 18, rowH);  // 仅设下限，让rowH自动拉伸填满可用高度
+    var svgH = H;  // SVG高度严格等于容器，不留底部空白
+
+    layers.forEach(function(colIds, ci){
+      var cx = colCount > 1 ? padLeft + ci * colGap : W/2;
+      var startY = padTop + (maxNodesInCol - colIds.length) * rowH / 2; // 垂直居中
+      colIds.forEach(function(id, ri){
+        positions[id] = {
+          x: cx,
+          y: startY + ri * rowH + nodeR + 20,
+          col: ci,
+          row: ri
+        };
+      });
+    });
+
+    // ---- 5. 构造 SVG ----
+    var svgW = W;
+    var out = [];
+    var edges = []; // { fromId, toId, pathStr }
+    nodes.forEach(function(n){
+      n._deps.forEach(function(d){
+        var from = positions[d], to = positions[String(n.id)];
+        if(!from || !to) return;
+        var ax = from.x, ay = from.y;
+        var bx = to.x, by = to.y;
+        var dx = Math.max(30, Math.abs(bx - ax) * 0.4);
+        var ps = 'M'+ax+','+ay+' C'+(ax+dx)+','+ay+' '+(bx-dx)+','+by+' '+bx+','+by;
+        edges.push({ fromId: d, toId: String(n.id), pathStr: ps });
+      });
+    });
+
+    out.push('<svg width="'+svgW+'" height="'+svgH+'" xmlns="http://www.w3.org/2000/svg" class="dag-svg">');
+    // defs：先定义所有 path 和渐变
+    out.push('<defs>');
+    edges.forEach(function(e, ei){
+      out.push('<path id="edge_'+ei+'" d="'+e.pathStr+'" fill="none" stroke="none"/>');
+    });
+    edges.forEach(function(e, ei){
+      out.push('<linearGradient id="grad_'+ei+'" x1="0" y1="0" x2="1" y2="0">');
+      out.push('<stop offset="0" stop-color="rgba(34,211,238,.35)"/>');
+      out.push('<stop offset="1" stop-color="rgba(34,211,238,.06)"/>');
+      out.push('</linearGradient>');
+    });
+    out.push('</defs>');
+
+    // ---- 5a. 绘制边 ----
+    edges.forEach(function(e, ei){
+      var isParallel = nodeById[e.toId] && nodeById[e.toId].type === 'parallel';
+      // 背景线
+      out.push('<path d="'+e.pathStr+'" fill="none" stroke="url(#grad_'+ei+')" stroke-width="1.5" class="dag-edge dag-edge-bg"/>');
+      // 前景虚线
+      if(isParallel){
+        out.push('<path d="'+e.pathStr+'" fill="none" stroke="#fbbf24" stroke-width="1" stroke-dasharray="5 4" class="dag-edge dag-edge-fg"/>');
+      } else {
+        out.push('<path d="'+e.pathStr+'" fill="none" stroke="#22d3ee88" stroke-width="1" stroke-dasharray="4 5" class="dag-edge dag-edge-fg"/>');
+      }
+      // 滚动点
+      out.push('<circle r="2.2" fill="'+(isParallel?'#fde68a':'#7fe3ff')+'" opacity=".9">');
+      out.push('<animateMotion dur="5.6s" begin="'+(ei*0.3)%3+'s" repeatCount="indefinite" rotate="auto">');
+      out.push('<mpath href="#edge_'+ei+'"/>');
+      out.push('</animateMotion></circle>');
+    });
+
+    // ---- 5b. 绘制节点 ----
+    topoOrder.forEach(function(id, idx){
+      var n = nodeById[id];
+      var p = positions[id];
+      if(!p) return;
+      var st = n.state === 'done' ? 'done' : n.state === 'doing' ? 'doing' : 'pending';
+      var overdue = !!n.isOverdue;
+      var color = overdue ? '#f43f5e' : (st === 'done' ? '#22c55e' : st === 'doing' ? '#fbbf24' : '#3d6d92');
+      var core = overdue ? '#f43f5e' : (st === 'pending' ? '#0f2c48' : color);
+      var fullName = esc(n.name);
+      var shortName = n.name.length > nodeNameMax ? n.name.slice(0, nodeNameMax-1) + '…' : n.name;
+      var isParallel = n.type === 'parallel';
+
+      out.push('<g class="dag-node '+st+(overdue?' overdue':'')+(isParallel?' parallel':'')+'" title="'+fullName+(n.timeout?' (时限 '+n.timeout+' 分钟)':'')+'">');
+      // 背景光圈动画
+      if(st === 'doing'){
+        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR+2)+'" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity=".6">');
+        out.push('<animate attributeName="r" values="'+(nodeR+2)+';'+(nodeR+10)+';'+(nodeR+2)+'" dur="2s" repeatCount="indefinite"/>');
+        out.push('<animate attributeName="opacity" values=".6;0;.6" dur="2s" repeatCount="indefinite"/>');
+        out.push('</circle>');
+      } else if(st === 'done' && !overdue){
+        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR+2)+'" fill="none" stroke="#22c55e" stroke-width="1" opacity=".4">');
+        out.push('<animate attributeName="r" values="'+(nodeR+2)+';'+(nodeR+12)+';'+(nodeR+2)+'" dur="3.2s" repeatCount="indefinite"/>');
+        out.push('<animate attributeName="opacity" values=".5;0;.5" dur="3.2s" repeatCount="indefinite"/>');
+        out.push('</circle>');
+      } else if(overdue){
+        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR+3)+'" fill="none" stroke="#f43f5e" stroke-width="1.2" opacity=".45">');
+        out.push('<animate attributeName="r" values="'+(nodeR+2)+';'+(nodeR+10)+';'+(nodeR+2)+'" dur="2.4s" repeatCount="indefinite"/>');
+        out.push('<animate attributeName="opacity" values=".5;0;.5" dur="2.4s" repeatCount="indefinite"/>');
+        out.push('</circle>');
+      }
+      // 节点主体
+      var strokeW = isParallel ? 2.5 : 2;
+      if(isParallel){
+        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR+2)+'" fill="none" stroke="#fbbf24" stroke-width="1" stroke-dasharray="3 3" opacity=".5"/>');
+      }
+      out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+nodeR+'" fill="#06182b" stroke="'+(isParallel?'#fbbf24':color)+'" stroke-width="'+strokeW+'"'+(st === 'pending' && !overdue ? ' opacity=".55"' : '')+'/>');
+      out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR*0.34)+'" fill="'+core+'"/>');
+      var innerLabel = overdue ? '!' : String(idx+1);
+      var innerFontSize = overdue ? (nodeR*0.75) : (nodeR*0.7);
+      out.push('<text x="'+p.x+'" y="'+(p.y+nodeR*0.3)+'" text-anchor="middle" font-size="'+innerFontSize+'" font-weight="700" fill="'+color+'" opacity="'+(st==='pending'?'0.55':'1')+'">'+innerLabel+'</text>');
+      // 节点名称（显示在节点上方）
+      out.push('<text x="'+p.x+'" y="'+(p.y-nodeR-12)+'" text-anchor="middle" fill="'+(overdue?'#ff9fb3':(st==='pending'?'#5d7a92':'#d7f2ff'))+'" font-size="10.5" font-weight="600" class="dag-node-label dag-name" data-full="'+fullName+'">'+esc(shortName)+'</text>');
+      // 底部信息（时间/角色/超时）
+      var bottomTxt = '';
+      if(overdue){
+        bottomTxt = '⚠ 超时'+(n.timeout?n.timeout+'\'':'');
+      } else if(st === 'pending'){
+        bottomTxt = esc(n.role || '');
+      } else {
+        bottomTxt = esc((n.time||'') + ' · ' + (n.role||''));
+      }
+      out.push('<text x="'+p.x+'" y="'+(p.y+nodeR+16)+'" text-anchor="middle" fill="'+(overdue?'#ff8496':(st==='pending'?'#3e5f7a':'#5f8fb8'))+'" font-size="9">'+bottomTxt+'</text>');
       out.push('</g>');
     });
-    svg.innerHTML = out.join('');
+
+    out.push('</svg>');
+    wrap.innerHTML = out.join('');
+
+    // hover tip 绑定
+    wrap.querySelectorAll('svg').forEach(function(svg){
+      if(svg._dagBound) return;
+      svg._dagBound = true;
+      svg.addEventListener('mousemove', function(e){
+        var t = e.target.closest('g.dag-node');
+        if(!t){ $('chainTip') && ($('chainTip').style.display='none'); return; }
+        var nameEl = t.querySelector('.dag-name');
+        if(!nameEl) return;
+        var tip = $('chainTip');
+        if(!tip){
+          tip = document.createElement('div');
+          tip.id = 'chainTip';
+          tip.style.cssText = 'position:fixed;pointer-events:none;z-index:999;padding:5px 10px;background:rgba(8,20,36,.96);border:1px solid #22d3ee55;border-radius:4px;color:#9fe9ff;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.55);max-width:280px;white-space:normal';
+          document.body.appendChild(tip);
+        }
+        tip.textContent = nameEl.getAttribute('data-full') || nameEl.textContent;
+        tip.style.display = 'block';
+        tip.style.left = (e.clientX + 12) + 'px';
+        tip.style.top = (e.clientY + 12) + 'px';
+      });
+      svg.addEventListener('mouseleave', function(){ $('chainTip') && ($('chainTip').style.display='none'); });
+    });
   }
 
-  /* ---------- 任务分布 ---------- */
-  function renderTasks(){
-    var s = DATA.stats || { total:0, done:0, doing:0, pending:0, overdue:0 };
-    var total = Math.max(1, s.total);
-    var segs = [
-      { n:'已完成', v:s.done,    c:'#22c55e' },
-      { n:'处理中', v:s.doing,   c:'#fbbf24' },
-      { n:'待处理', v:s.pending, c:'#3b82f6' },
-      { n:'超时',   v:s.overdue, c:'#f43f5e' }
-    ];
-    $('taskDist').innerHTML =
-      '<div class="td-bar">' + segs.map(function(x){
-        return '<span style="width:'+(x.v/total*100)+'%;background:'+x.c+';box-shadow:0 0 10px '+x.c+'55"></span>';
-      }).join('') + '</div>'
-      + '<div class="td-legend">' + segs.map(function(x){
-        return '<div class="td-item" style="border-color:'+x.c+'">'
-          + '<div class="n" style="color:'+x.c+'">'+x.v+'</div><div class="l">'+x.n+'</div></div>';
-      }).join('') + '</div>';
+  /* ---------- 演练评分（仅分数 + 等级） ---------- */
+  function renderScore(){
+    // 评分已合并到 KPI 行，由 renderKpis 负责渲染
   }
 
   /* ---------- 角色处置 ---------- */
   function renderRoles(){
-    var tasks = DATA.tasks || [], roles = DATA.roles || [];
+    var roles = DATA.roles || [];
     var map = {};
     roles.forEach(function(r){ map[r.id] = r; });
-    var agg = {};
-    tasks.forEach(function(t){
-      var a = agg[t.role] = agg[t.role] || { total:0, done:0, od:0 };
-      a.total++;
-      if(t.status==='已完成') a.done++;
-      if(t.status==='超时') a.od++;
-    });
+
+    // 优先使用后端统一聚合的 roleAgg（已合并 tasks + drill_steps，实战版也能显示）
+    var agg = DATA.roleAgg;
+    if(!agg || !Object.keys(agg).length){
+      // Fallback: 从 tasks 聚合（基础版兼容）
+      agg = {};
+      var tasks = DATA.tasks || [];
+      tasks.forEach(function(t){
+        var a = agg[t.role] = agg[t.role] || { total:0, done:0, overtime:0 };
+        a.total++;
+        if(t.status==='已完成') a.done++;
+        if(t.status==='超时') a.overtime++;
+      });
+    }
+
     var keys = Object.keys(agg);
     if(!keys.length){
-      $('roleList').innerHTML = '<div style="padding:24px 0;color:var(--dim);font-size:12px;text-align:center">暂无任务分派记录</div>';
+      $('roleList').innerHTML = '<div style="padding:24px 0;color:var(--dim);font-size:12px;text-align:center">暂无角色处置记录</div>';
       return;
     }
     keys.sort(function(a,b){ return agg[b].total - agg[a].total; });
@@ -609,10 +853,12 @@ body::before{
       var r = map[k] || { short:k, name:k, color:'#3b82f6' };
       var a = agg[k];
       var pct = a.total ? Math.round(a.done/a.total*100) : 0;
-      return '<div class="rl"><div class="rl-top"><span class="nm"><i style="background:'+r.color+';color:'+r.color+'"></i>'+esc(r.short||r.name)+'</span>'
-        + '<span class="cnt">'+a.done+'/'+a.total+(a.od ? ' <b style="color:#ff8496">超时'+a.od+'</b>' : '')+'</span></div>'
+      var od = a.overtime || 0;
+      return '<div class="rl"><div class="rl-top"><span class="nm"><i style="background:'+r.color+';color:'+r.color+'"></i>'+esc(r.name)+'</span>'
+        + '<span class="cnt">'+a.done+'/'+a.total+(od ? ' <b style="color:#ff8496">超时'+od+'</b>' : '')+'</span></div>'
         + '<div class="rl-bar"><span style="width:'+pct+'%;background:'+r.color+';box-shadow:0 0 8px '+r.color+'88"></span></div></div>';
     }).join('');
+    _startMarquee('roleList', 1);
   }
 
   /* ---------- 业务影响 ---------- */
@@ -631,6 +877,43 @@ body::before{
     }).join('');
   }
 
+  /* ---------- 无缝向上滚动（大屏展示用） ---------- */
+  var _marqueeTimers = {};
+  function _startMarquee(id, speed){
+    var el = document.getElementById(id);
+    if(!el) return;
+    // 清旧定时器和旧克隆
+    if(_marqueeTimers[id]){ clearInterval(_marqueeTimers[id]); delete _marqueeTimers[id]; }
+    var old = el.querySelectorAll('[data-mq-clone]');
+    for(var i=0;i<old.length;i++) old[i].parentNode.removeChild(old[i]);
+    el.scrollTop = 0;
+
+    // 内容不够长 → 不滚动，恢复滚动条
+    var needH = el.clientHeight + 4;
+    if(el.scrollHeight <= needH){
+      el.style.overflowY = '';
+      return;
+    }
+
+    // 克隆一份内容（用于无缝循环）
+    var clone = el.cloneNode(true);
+    clone.setAttribute('data-mq-clone', id);
+    el.appendChild(clone);
+    var firstBlockH = clone.scrollHeight; // 克隆的高度 = 原始内容高度
+    el.style.overflowY = 'hidden';
+
+    var sp = speed || 1;
+    _marqueeTimers[id] = setInterval(function(){
+      el.scrollTop += sp;
+      if(el.scrollTop >= firstBlockH){
+        el.scrollTop -= firstBlockH; // 无缝跳回（因为下方紧接克隆的相同内容）
+      }
+    }, 40);
+  }
+  function _stopMarquee(id){
+    if(_marqueeTimers[id]){ clearInterval(_marqueeTimers[id]); delete _marqueeTimers[id]; }
+  }
+
   /* ---------- 实时操作流 ---------- */
   function renderLogs(){
     var rows = (DATA.timeline||[]).slice().reverse().slice(0, 40);
@@ -645,11 +928,24 @@ body::before{
         + '<span class="x">'+esc(t.action||'')+'</span>'
         + '<span class="d">'+esc(t.detail||'')+'</span></div>';
     }).join('');
+    _startMarquee('logList', 1);
   }
 
   /* ---------- 告警消息 ---------- */
   function renderMsgs(){
-    var rows = (DATA.messages||[]).slice().reverse().slice(0, 16);
+    var rows = (DATA.messages||[]).slice();
+    // 扣分原因作为"评分告警"插入消息列表顶部
+    var sc = DATA.score;
+    if(sc && sc.deductions && sc.deductions.length){
+      sc.deductions.forEach(function(d){
+        rows.push({
+          time: '', level: 'P1',
+          source: '演练评分',
+          text: '扣分 -'+Math.abs(d.point||0)+'分 · '+d.type+' · '+d.title
+        });
+      });
+    }
+    rows = rows.reverse().slice(0, 20);
     if(!rows.length){
       $('msgList').innerHTML = '<div style="padding:18px 0;color:var(--dim);font-size:12px;text-align:center">暂无告警消息</div>';
       return;
@@ -662,6 +958,7 @@ body::before{
         + '<span class="mt">'+esc(m.time||'')+'</span>'
         + '<span class="tx">'+esc((m.source?('['+m.source+'] '):'')+(m.text||''))+'</span></div>';
     }).join('');
+    _startMarquee('msgList', 1);
   }
 
   /* ---------- 顶部操作 ---------- */

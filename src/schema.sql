@@ -202,45 +202,49 @@ CREATE TABLE IF NOT EXISTS form_submissions (
 
 -- 消息流
 CREATE TABLE IF NOT EXISTS messages (
-  id      TEXT PRIMARY KEY,
-  time    TEXT,
-  level   TEXT,
-  source  TEXT,
-  text    TEXT,
-  targets TEXT,   -- JSON
-  seq     INTEGER
+  id         TEXT PRIMARY KEY,
+  time       TEXT,
+  level      TEXT,
+  source     TEXT,
+  text       TEXT,
+  targets    TEXT,   -- JSON
+  seq        INTEGER,
+  project_id TEXT
 );
 
 -- 通知
 CREATE TABLE IF NOT EXISTS notifs (
-  id    TEXT PRIMARY KEY,
-  time  TEXT,
-  level TEXT,
-  source TEXT,
-  title TEXT,
-  descr TEXT,
-  seq   INTEGER,
-  target TEXT DEFAULT 'all'   -- all=全员可见；internal=仅院内角色可见
+  id         TEXT PRIMARY KEY,
+  time       TEXT,
+  level      TEXT,
+  source     TEXT,
+  title      TEXT,
+  descr      TEXT,
+  seq        INTEGER,
+  target     TEXT DEFAULT 'all',   -- all=全员可见；internal=仅院内角色可见
+  project_id TEXT
 );
 
 -- 未读状态（按用户）
 CREATE TABLE IF NOT EXISTS notif_reads (
-  user_id INTEGER,
-  notif_id TEXT,
+  user_id   INTEGER,
+  notif_id  TEXT,
+  project_id TEXT,
   PRIMARY KEY (user_id, notif_id)
 );
 
 -- 会商消息
 CREATE TABLE IF NOT EXISTS chat_messages (
-  id      INTEGER PRIMARY KEY AUTOINCREMENT,
-  grp     TEXT NOT NULL,
-  sender  TEXT,
-  role_id TEXT,
-  user_id INTEGER,
-  time    TEXT,
-  text    TEXT,
-  att     TEXT,
-  file_path TEXT
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  grp        TEXT NOT NULL,
+  sender     TEXT,
+  role_id    TEXT,
+  user_id    INTEGER,
+  time       TEXT,
+  text       TEXT,
+  att        TEXT,
+  file_path  TEXT,
+  project_id TEXT
 );
 
 -- 取证材料
@@ -370,10 +374,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 -- 业务影响
 CREATE TABLE IF NOT EXISTS impact (
-  sys   TEXT PRIMARY KEY,
-  state TEXT,
-  pct   INTEGER,
-  seq   INTEGER
+  sys        TEXT PRIMARY KEY,
+  state      TEXT,
+  pct        INTEGER,
+  seq        INTEGER,
+  project_id TEXT
 );
 
 -- 数据字典

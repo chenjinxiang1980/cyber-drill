@@ -64,6 +64,22 @@ window.API = (function () {
       return r;
     });
   }
+  /* 获取项目演练脚本（区分基础版/实战版） */
+  function getProjectScript(id) {
+    return DRILL.get('/content/projects/' + encodeURIComponent(id) + '/script');
+  }
+  /* 演练脚本导出：fmt = word(默认) | txt | html，返回带 token 的完整 URL */
+  function exportProjectScriptUrl(id, fmt) {
+    return '/api/content/projects/' + encodeURIComponent(id) + '/script/export?fmt=' + (fmt || 'word') + '&t=' + encodeURIComponent(sessionStorage.getItem('pzy_token') || '');
+  }
+  /* 手动生成演练通知 */
+  function generateProjectNotify(id) {
+    return DRILL.post('/content/projects/' + encodeURIComponent(id) + '/notify', {});
+  }
+  /* 演练通知导出：fmt = word(默认) | txt | html，返回带 token 的完整 URL */
+  function exportProjectNotifyUrl(id, fmt) {
+    return '/api/content/projects/' + encodeURIComponent(id) + '/notify/export?fmt=' + (fmt || 'word') + '&t=' + encodeURIComponent(sessionStorage.getItem('pzy_token') || '');
+  }
   /* 解析本地时间字符串（YYYY-MM-DD HH:mm[:ss]）为毫秒 */
   function parseLocal(s) {
     var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(s || ''));
@@ -506,6 +522,8 @@ window.API = (function () {
     getSystemStatus: getSystemStatus, resetSystem: resetSystem,
     getDict: getDict, saveDict: saveDict,
     getDrillReport: getDrillReport, markReportExported: markReportExported,
+    getProjectScript: getProjectScript, exportProjectScriptUrl: exportProjectScriptUrl,
+    generateProjectNotify: generateProjectNotify, exportProjectNotifyUrl: exportProjectNotifyUrl,
     getDrillWorkbench: getDrillWorkbench,
     getDrillFlows: getDrillFlows, getDrillFaults: getDrillFaults,
     submitDrillFlow: submitDrillFlow, skipDrillFlow: skipDrillFlow, finishDrill: finishDrill,

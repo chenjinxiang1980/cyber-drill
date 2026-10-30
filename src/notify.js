@@ -47,6 +47,11 @@ const FALLBACK_TEMPLATES = {
     title: '系统自动考评完成',
     desc: '已更新 {count} 项考评指标，合计得分 {sum}{max}。',
     source: '复盘评估', level: 'P1'
+  },
+  project_created: {
+    title: '演练项目已创建 · {project}',
+    desc: '演练项目「{project}」（{mode}）已创建，关联剧本「{scenario}」（{level}级），计划日期 {date}。请参演角色进入系统查看演练脚本。',
+    source: '演练调度', level: 'P1'
   }
 };
 
@@ -59,6 +64,32 @@ function loadTemplates() {
     }
   } catch (e) { /* malformed → fallback */ }
   return FALLBACK_TEMPLATES;
+}
+
+/* 首次启动/缺失时，把内置 fallback 模板写入 dict 表，便于前端显示编辑 */
+function ensureTemplates() {
+  try {
+    const row = db.prepare("SELECT value FROM dict WHERE key='notif_templates'").get();
+    if (row && row.value) {
+      /* 已存在：补齐缺失的 event 键，保留用户已有配置 */
+      let cur = {};
+      try { cur = JSON.parse(row.value) || {}; } catch (e) { cur = {}; }
+      let changed = false;
+      Object.keys(FALLBACK_TEMPLATES).forEach(function (ev) {
+        if (!cur[ev]) { cur[ev] = FALLBACK_TEMPLATES[ev]; changed = true; }
+      });
+      if (changed) {
+        db.prepare("UPDATE dict SET value=? WHERE key='notif_templates'").run(JSON.stringify(cur));
+        console.log('[migrate] 站内消息模板：补齐缺失 event');
+      }
+      return;
+    }
+    /* 不存在：整包插入 */
+    db.prepare("INSERT INTO dict (key,value) VALUES ('notif_templates', ?)").run(JSON.stringify(FALLBACK_TEMPLATES));
+    console.log('[migrate] 站内消息模板：首次写入 7 条默认模板');
+  } catch (e) {
+    console.warn('[migrate] 站内消息模板写入跳过：', e.message);
+  }
 }
 
 function render(tpl, vars) {
@@ -111,4 +142,4 @@ function push(opts) {
   return id;
 }
 
-module.exports = { push, FALLBACK_TEMPLATES };
+module.exports = { push, FALLBACK_TEMPLATES, ensureTemplates };

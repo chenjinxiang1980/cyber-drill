@@ -15,6 +15,32 @@ const MANAGED_ROLES = ['itlead', 'duty', 'netsec', 'sysadmin'];
 /* 外部单位可见的取证类型（仅医院主动报送的材料） */
 const EXTERNAL_EVIDENCE_TYPES = ['表单文书', '上报材料', '报案材料'];
 
+/* 项目动态进度计算（与 content.js 的 projectProgress 口径一致） */
+function projectProgress(r) {
+  if (!r) return 0;
+  if (r.status === '已结束' || r.status === '已归档') return 100;
+  if (r.status === '未开始') return 0;
+  const mode = r.mode || '基础版';
+  if (mode === '基础版') {
+    const ts = db.prepare('SELECT COUNT(*) AS total, SUM(CASE WHEN status=? THEN 1 ELSE 0 END) AS done FROM tasks WHERE project_id=?')
+      .get('已完成', r.id);
+    if (!ts || !ts.total) return 0;
+    return Math.round((ts.done || 0) / ts.total * 100);
+  } else {
+    if (!r.scenario_id) return 0;
+    const correct = db.prepare("SELECT COUNT(*) AS c FROM script_nodes WHERE scenario_id=? AND type!='end' AND COALESCE(flow_type,'correct')!='distractor'")
+      .get(r.scenario_id).c;
+    if (!correct) return 0;
+    const doneRow = db.prepare(
+      'SELECT COUNT(DISTINCT ds.matched_node) AS c FROM drill_steps ds '
+      + "JOIN script_nodes n ON n.id=ds.matched_node AND n.scenario_id=? AND COALESCE(n.flow_type,'correct')!='distractor' AND n.type!='end' "
+      + 'WHERE ds.project_id=?'
+    ).get(r.scenario_id, r.id);
+    const done = doneRow ? doneRow.c : 0;
+    return Math.round(done / correct * 100);
+  }
+}
+
 function mapProject(r) {
   return {
     id: r.id, name: r.name, type: r.type, date: r.date, scenarioId: r.scenario_id,
@@ -23,7 +49,8 @@ function mapProject(r) {
     mode: r.mode || '基础版',
     startedAt: r.started_at || null, pausedAt: r.paused_at || null,
     pausedSec: Number(r.paused_sec) || 0, endedAt: r.ended_at || null,
-    elapsedSec: clock.elapsedSec(r)
+    elapsedSec: clock.elapsedSec(r),
+    progress: projectProgress(r)
   };
 }
 
