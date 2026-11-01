@@ -76,7 +76,10 @@ function mapNode(r) {
     receiver: r.receiver || '',
     deps: parseJson(r.deps, []),
     posX: r.pos_x === null || r.pos_x === undefined ? null : Number(r.pos_x),
-    posY: r.pos_y === null || r.pos_y === undefined ? null : Number(r.pos_y)
+    posY: r.pos_y === null || r.pos_y === undefined ? null : Number(r.pos_y),
+    anchorId: r.anchor_id || '',
+    releaseTiming: r.release_timing || 'before',
+    shortTitle: r.short_title || ''
   };
 }
 

@@ -8,6 +8,8 @@ node_modules/
 
 # temp scripts
 tmp_*.js
+_*.js
+_*.ps1
 
 # stray temp DBs (accidental writes to cwd)
 datadrill.db

@@ -318,7 +318,7 @@ body::before{
     <section class="col-center">
       <div class="kpi-row" id="kpis"></div>
       <div class="panel chain-panel">
-        <div class="p-head"><span class="p-dot"></span>处置链路实时态势<span class="p-badge" id="chainBadge">T+00:00</span></div>
+        <div class="p-head"><span class="p-dot"></span>应急演练实时态势<span class="p-badge" id="chainBadge">T+00:00</span></div>
         <div class="chain-wrap" id="chainWrap"></div>
       </div>
     </section>
@@ -744,7 +744,8 @@ body::before{
       var color = overdue ? '#f43f5e' : (st === 'done' ? '#22c55e' : st === 'doing' ? '#fbbf24' : '#3d6d92');
       var core = overdue ? '#f43f5e' : (st === 'pending' ? '#0f2c48' : color);
       var fullName = esc(n.name);
-      var shortName = n.name.length > nodeNameMax ? n.name.slice(0, nodeNameMax-1) + '…' : n.name;
+      var displayTitle = (n.shortTitle && n.shortTitle.trim()) ? n.shortTitle.trim() : n.name;
+      var shortName = displayTitle.length > nodeNameMax ? displayTitle.slice(0, nodeNameMax-1) + '…' : displayTitle;
       var isParallel = n.type === 'parallel';
 
       out.push('<g class="dag-node '+st+(overdue?' overdue':'')+(isParallel?' parallel':'')+'" title="'+fullName+(n.timeout?' (时限 '+n.timeout+' 分钟)':'')+'">');

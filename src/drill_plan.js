@@ -334,5 +334,5 @@ module.exports = {
   ACTION_META: ACTION_META,
   buildDecision, canHandle, ensureBasicTasks, backfillBasicTasks,
   defaultScores, ensureDistractors, backfillFlowScores, backfillReceivers, backfillFeedbackForm, backfillTaskForms,
-  parseDeps, basicNodeAvailability
+  parseDeps, basicNodeAvailability, targetToRoleId
 };

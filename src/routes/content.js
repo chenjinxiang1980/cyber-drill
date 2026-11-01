@@ -346,7 +346,7 @@ function computeMonitorNodes(project) {
   let overdueCnt = 0;
 
   nodes.forEach(function (n) {
-    if (mode === '实战版' && !visible[n.id]) return;
+    const hidden = (mode === '实战版' && !visible[n.id]);
 
     const task = taskByNode[n.id];
     const doingRec = doingNode[n.id];
@@ -397,14 +397,15 @@ function computeMonitorNodes(project) {
     if (isOverdue) overdueCnt++;
 
     const item = {
-      id: n.id, seq: n.seq, name: n.title, role: role, time: time,
+      id: n.id, seq: n.seq, name: n.title, shortTitle: n.short_title || '', role: role, time: time,
       state: state, isOverdue: isOverdue, timeout: Number(n.timeout) || 0,
       deps: parseDeps(n.deps),
       type: n.type || 'task',
       parallelDesc: n.parallel_desc || n.parallelDesc || ''
     };
     allOut.push(item);
-    if (state !== 'pending') filteredOut.push(item);
+    // filteredOut 用于左侧处置进度（按可见性 + 非 pending 过滤）
+    if (!hidden && state !== 'pending') filteredOut.push(item);
   });
   return { all: allOut, filtered: filteredOut, overdue: overdueCnt };
 }
@@ -468,7 +469,7 @@ router.post('/scenarios', auth.requireAuth, function (req, res) {
 /* ---------- 剧本节点保存（可视化编排） ---------- */
 router.get('/script-nodes', auth.requireAuth, function (req, res) {
   res.json(db.prepare('SELECT * FROM script_nodes ORDER BY scenario_id,seq').all().map(function (n) {
-    return { id: n.id, scenarioId: n.scenario_id, type: n.type, title: n.title, target: n.target, timeout: n.timeout, form: n.form || undefined, att: n.att || undefined, desc: n.descr, branches: parseJson(n.branches, []), parallelDesc: n.parallel_desc || undefined, guide: n.guide || '', keywords: n.keywords || '', action: n.action || '', required: n.required !== 0, wrong: parseJson(n.wrong, []), evidenceReq: parseJson(n.evidence_req, []), flowType: n.flow_type === 'distractor' ? 'distractor' : 'correct', score: Number(n.score || 0), receiver: n.receiver || '', deps: parseDeps(n.deps), posX: n.pos_x === null || n.pos_x === undefined ? null : Number(n.pos_x), posY: n.pos_y === null || n.pos_y === undefined ? null : Number(n.pos_y) };
+    return { id: n.id, scenarioId: n.scenario_id, type: n.type, title: n.title, target: n.target, timeout: n.timeout, form: n.form || undefined, att: n.att || undefined, desc: n.descr, branches: parseJson(n.branches, []), parallelDesc: n.parallel_desc || undefined, guide: n.guide || '', keywords: n.keywords || '', action: n.action || '', required: n.required !== 0, wrong: parseJson(n.wrong, []), evidenceReq: parseJson(n.evidence_req, []), flowType: n.flow_type === 'distractor' ? 'distractor' : 'correct', score: Number(n.score || 0), receiver: n.receiver || '', deps: parseDeps(n.deps), posX: n.pos_x === null || n.pos_x === undefined ? null : Number(n.pos_x), posY: n.pos_y === null || n.pos_y === undefined ? null : Number(n.pos_y), anchorId: n.anchor_id || '', releaseTiming: n.release_timing || 'before' };
   }));
 });
 
@@ -611,7 +612,7 @@ router.post('/script-nodes', auth.requireAuth, function (req, res) {
     }
   });
 
-  /* Step 4: 应用 idMap 到 sceneNodes 的 id 和 deps */
+  /* Step 4: 应用 idMap 到 sceneNodes 的 id、deps、anchor_id */
   sceneNodes.forEach(function (n) {
     const oldId = String(n.id);
     if (idMap[oldId] && idMap[oldId] !== oldId) {
@@ -623,12 +624,36 @@ router.post('/script-nodes', auth.requireAuth, function (req, res) {
         return (idMap[s] && idMap[s] !== s) ? idMap[s] : s;
       });
     }
+    /* 混淆节点 anchor_id 同步重编号 */
+    if (n.flowType === 'distractor' || n.flow_type === 'distractor') {
+      const oldAnchor = String(n.anchorId || n.anchor_id || '').trim();
+      if (oldAnchor && idMap[oldAnchor] && idMap[oldAnchor] !== oldAnchor) {
+        n.anchorId = idMap[oldAnchor];
+      }
+    }
   });
   /* 更新 byId（后续依赖清洗要用） */
   const byId_new = {};
   sceneNodes.forEach(function (n) { byId_new[String(n.id)] = n; });
   byId = byId_new;
   /* ---------- 重编号结束 ---------- */
+
+  /* 混淆节点配置校验：必须有 anchor 且 anchor 不是混淆节点 */
+  for (let i = 0; i < sceneNodes.length; i++) {
+    const n = sceneNodes[i];
+    if (n.flowType !== 'distractor') continue;
+    const anchorId = String(n.anchorId || '').trim();
+    if (!anchorId) {
+      return res.status(400).json({ error: '混淆节点「' + String(n.title || n.id) + '」未配置「对应主流节点」，请先在节点侧边栏选择锚点主流节点' });
+    }
+    const anchor = byId[anchorId];
+    if (!anchor) {
+      return res.status(400).json({ error: '混淆节点「' + String(n.title || n.id) + '」的锚点节点「' + anchorId + '」不存在，请重新选择' });
+    }
+    if (anchor.flowType === 'distractor') {
+      return res.status(400).json({ error: '混淆节点「' + String(n.title || n.id) + '」的锚点「' + anchor.title + '」也是混淆节点，锚点必须指向正确流程节点' });
+    }
+  }
 
   /* 依赖清洗：仅允许引用同场景、非自身、非混淆流程、非结束节点的前置 */
   const correctNodes = sceneNodes.filter(function (n) { return n.flowType !== 'distractor'; });
@@ -662,7 +687,7 @@ router.post('/script-nodes', auth.requireAuth, function (req, res) {
   const name = req.body && typeof req.body.name === 'string' ? String(req.body.name).trim().slice(0, 60) : '';
 
   const del = db.prepare('DELETE FROM script_nodes WHERE scenario_id=?');
-  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,receiver,deps,pos_x,pos_y,parallel_desc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,short_title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,receiver,deps,pos_x,pos_y,parallel_desc,anchor_id,release_timing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
   const plan = require('../evidence_plan');
   tx(function () {
     del.run(scenario);
@@ -684,12 +709,15 @@ router.post('/script-nodes', auth.requireAuth, function (req, res) {
       const scoreVal = Math.max(0, Math.min(100, isNaN(rawScore) ? 0 : rawScore));
       const px = n.posX === null || n.posX === undefined || n.posX === '' || isNaN(Number(n.posX)) ? null : Math.round(Number(n.posX));
       const py = n.posY === null || n.posY === undefined || n.posY === '' || isNaN(Number(n.posY)) ? null : Math.round(Number(n.posY));
-      ins.run(id, scenario, String(n.type || 'task'), String(n.title || ''), String(n.target || ''),
+      /* 混淆节点 anchor / timing；正确流程节点留空 */
+      const anchorVal = flowType === 'distractor' ? String(n.anchorId || '').trim() : null;
+      const timingVal = flowType === 'distractor' ? String(n.releaseTiming || 'before') : 'before';
+      ins.run(id, scenario, String(n.type || 'task'), String(n.title || ''), String(n.shortTitle || ''), String(n.target || ''),
         '', n.timeout || null, String(n.form || ''), String(n.att || ''), String(n.desc || ''),
         JSON.stringify(n.branches || []), i, String(n.guide || ''), String(n.keywords || ''),
         String(n.action || ''), JSON.stringify(wrong), JSON.stringify(evReq), n.required === false ? 0 : 1,
         flowType, scoreVal, receiver, JSON.stringify(flowType === 'distractor' ? [] : depMap[id]), px, py,
-        String(n.parallel_desc || ''));
+        String(n.parallel_desc || ''), anchorVal, timingVal);
     });
     /* 同步场景剧本库：名称、节点数、版本号、更新时间、故障通报 */
     const version = resolveVersion(req, sc.version);
@@ -808,6 +836,20 @@ router.post('/projects', auth.requireAuth, function (req, res) {
       JSON.stringify(units), JSON.stringify(members), JSON.stringify(observers), mode);
   const created = db.prepare('SELECT * FROM projects WHERE id=?').get(id);
   const taskCount = ensureBasicTasks(db, created);
+  /* 为新项目初始化独立的业务系统状态（从全局模板复制，互不影响） */
+  try {
+    const tpl = db.prepare("SELECT sys,state,pct,seq FROM impact WHERE project_id='' ORDER BY seq").all();
+    if (!tpl.length) {
+      const { IMPACT } = require('../seed_data');
+      IMPACT.forEach(function (r) {
+        db.prepare('INSERT INTO impact (sys,state,pct,seq) VALUES (?,?,?,?)').run(r.sys, r.state, Number(r.pct), Number(r.seq));
+      });
+    }
+    db.prepare('DELETE FROM impact WHERE project_id=?').run(id);
+    const insImpact = db.prepare('INSERT INTO impact (sys,state,pct,seq,project_id) VALUES (?,?,?,?,?)');
+    const srcRows = db.prepare("SELECT sys,state,pct,seq FROM impact WHERE project_id='' ORDER BY seq").all();
+    srcRows.forEach(function (r) { insImpact.run(r.sys, r.state, Number(r.pct), Number(r.seq), id); });
+  } catch (e) {}
   auth.audit(req, '新建演练项目 ' + id + '《' + name + '》' + (taskCount ? '，自动下发 ' + taskCount + ' 项节点任务' : ''));
 
   /* 自动生成演练通知（站内消息）：通知参演角色演练项目已创建，可查看演练脚本 */
@@ -1485,9 +1527,15 @@ router.get('/audit', auth.requireAuth, function (req, res) {
 
 /* ---------- 业务影响 ---------- */
 router.get('/impact', auth.requireAuth, function (req, res) {
-  res.json(db.prepare('SELECT * FROM impact ORDER BY seq').all().map(function (i) {
-    return { sys: i.sys, state: i.state, pct: i.pct };
-  }));
+  const pid = activeProjectId();
+  let rows;
+  if (pid) {
+    rows = db.prepare('SELECT sys,state,pct FROM impact WHERE project_id=? ORDER BY seq').all(pid);
+  }
+  if (!rows || !rows.length) {
+    rows = db.prepare("SELECT sys,state,pct FROM impact WHERE project_id='' ORDER BY seq").all();
+  }
+  res.json(rows.map(function (i) { return { sys: i.sys, state: i.state, pct: i.pct }; }));
 });
 
 router.patch('/impact/:sys', auth.requireAuth, function (req, res) {
@@ -1496,8 +1544,15 @@ router.patch('/impact/:sys', auth.requireAuth, function (req, res) {
     return res.status(403).json({ error: '当前角色无权更新业务影响状态' });
   }
   const b = req.body || {};
-  const r = db.prepare('UPDATE impact SET state=?, pct=? WHERE sys=?')
-    .run(String(b.state || '正常'), Number(b.pct) || 100, req.params.sys);
+  const pid = activeProjectId();
+  let r;
+  if (pid) {
+    r = db.prepare('UPDATE impact SET state=?, pct=? WHERE sys=? AND project_id=?')
+      .run(String(b.state || '正常'), Number(b.pct) || 100, req.params.sys, pid);
+  } else {
+    r = db.prepare("UPDATE impact SET state=?, pct=? WHERE sys=? AND project_id=''")
+      .run(String(b.state || '正常'), Number(b.pct) || 100, req.params.sys);
+  }
   if (!r.changes) return res.status(404).json({ error: '业务系统不存在' });
   auth.audit(req, '更新业务影响：' + req.params.sys + ' → ' + String(b.state || '正常'));
   res.json({ ok: true });
@@ -1644,9 +1699,11 @@ router.get('/monitor', function (req, res) {
     if (Number(s.correct) === 1 && Number(s.ontime) === 0) roleAgg[rid].overtime++;
   });
 
-  /* ---------- impact 关联 project_id ---------- */
-  const impact = db.prepare('SELECT * FROM impact WHERE project_id=? OR project_id IS NULL ORDER BY seq').all(p.id)
-    .map(function (i) { return { sys: i.sys, state: i.state, pct: i.pct }; });
+  /* ---------- impact 严格按项目隔离 ---------- */
+  let impact = db.prepare('SELECT sys,state,pct FROM impact WHERE project_id=? ORDER BY seq').all(p.id);
+  if (!impact.length) {
+    impact = db.prepare("SELECT sys,state,pct FROM impact WHERE project_id='' ORDER BY seq").all();
+  }
 
   /* ---------- 问题 5：messages 合并站内 + 院内会商 ---------- */
   const msgs = db.prepare('SELECT * FROM messages WHERE project_id=? OR project_id IS NULL ORDER BY seq').all(p.id).slice(-16);
@@ -1819,7 +1876,10 @@ router.get('/dashboard', auth.requireAuth, function (req, res) {
   });
 
   /* ---- impact ---- */
-  const impact = db.prepare('SELECT sys,state,pct FROM impact ORDER BY seq').all();
+  let impact = db.prepare('SELECT sys,state,pct FROM impact WHERE project_id=? ORDER BY seq').all(projectId);
+  if (!impact.length) {
+    impact = db.prepare("SELECT sys,state,pct FROM impact WHERE project_id='' ORDER BY seq").all();
+  }
 
   /* ---- tasks 统计 ---- */
   const statOf = function (status) { return tasks.filter(function (t) { return t.status === status; }).length; };

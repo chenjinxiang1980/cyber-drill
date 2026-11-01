@@ -73,9 +73,29 @@ function nodesOf(scenarioId) {
       desc: n.descr || '', guide: n.guide || '', keywords: (n.keywords || '').split(',').filter(Boolean),
       action: n.action || '', required: !!n.required, wrong: parseJson(n.wrong, []),
       form: n.form || '', flowType: n.flow_type === 'distractor' ? 'distractor' : 'correct',
-      score: Number(n.score || 0) || 0, receiver: n.receiver || '', deps: parseJson(n.deps, [])
+      score: Number(n.score || 0) || 0, receiver: n.receiver || '', deps: parseJson(n.deps, []),
+      anchorId: n.anchor_id || '',
+      releaseTiming: n.release_timing || 'before'
     };
   });
+}
+
+/* 混淆节点是否已到下发时机：
+ * before → 锚点主流节点已可处置（deps 全部解锁）即同步可见
+ * after  → 锚点主流节点真实完成（drill_steps 有记录）后才可见 */
+function isDistractorReleased(p, node, byId, done) {
+  if (!node || node.flowType !== 'distractor') return true;
+  const anchorId = String(node.anchorId || '').trim();
+  if (!anchorId) return true; /* 无锚点兜底：保持可见，避免老数据集体消失 */
+  const anchor = byId[anchorId];
+  if (!anchor) return true;   /* 锚点被删，兜底可见 */
+  const timing = String(node.releaseTiming || 'before');
+  if (timing === 'after') {
+    return !!done[anchorId];
+  }
+  /* before：锚点 deps 全部完成即可见（锚点自己还未完成也无所谓） */
+  const anchorDeps = Array.isArray(anchor.deps) ? anchor.deps : [];
+  return anchorDeps.every(function (depId) { return !byId[depId] || !!done[depId]; });
 }
 
 /* 可选接收角色（全部角色中文名，供实战版参演人员选择） */
@@ -147,6 +167,14 @@ function score(projectId) {
   const all = nodesOf(p.scenario_id).filter(function (n) { return n.type !== 'end'; });
   const correct = all.filter(function (n) { return n.flowType !== 'distractor'; });
   const distractors = all.filter(function (n) { return n.flowType === 'distractor'; });
+  const byId = {};
+  all.forEach(function (n) { byId[n.id] = n; });
+  const doneSet = {};
+  db.prepare('SELECT matched_node FROM drill_steps WHERE project_id=?').all(p.id).forEach(function (r) {
+    if (r.matched_node) doneSet[r.matched_node] = true;
+  });
+  /* 仅已到下发时机的混淆节点参与扣分/统计 */
+  const releasedDistractors = distractors.filter(function (n) { return isDistractorReleased(p, n, byId, doneSet); });
   const tasks = db.prepare('SELECT * FROM tasks WHERE project_id=?').all(projectId);
   const steps = db.prepare('SELECT * FROM drill_steps WHERE project_id=? ORDER BY step_time,id').all(projectId);
 
@@ -227,7 +255,7 @@ function score(projectId) {
   if (mode !== '基础版') {
     steps.forEach(function (s) {
       if (!s.matched_node || s.correct !== 0 || s.skipped === 1) return;
-      if (distractors.some(function (n) { return n.id === s.matched_node; })) wrongPicked[s.matched_node] = s;
+      if (releasedDistractors.some(function (n) { return n.id === s.matched_node; })) wrongPicked[s.matched_node] = s;
     });
   }
   const skipMap = {};
@@ -325,10 +353,12 @@ function score(projectId) {
     });
   });
 
-  /* 跳过混淆流程：扣分制下无奖励、无扣分（未执行即无违规） */
+  /* 跳过混淆流程：扣分制下无奖励、无扣分（未执行即无违规）
+   * 仅对已下发的混淆节点统计跳过，未下发的不计入任何统计 */
   Object.keys(skipMap).forEach(function (nid) {
     const n = distractors.filter(function (x) { return x.id === nid; })[0];
     if (!n) return;
+    if (!releasedDistractors.some(function (x) { return x.id === nid; })) return; /* 未下发的跳过不统计 */
     skippedDistract++;
     nodeResults.push({
       id: n.id, title: n.title, role: n.target, plan: planText(n),
@@ -354,7 +384,7 @@ function score(projectId) {
   return {
     projectId: projectId, mode: mode, scenarioId: p.scenario_id, ended: ended,
     total: total, hit: hitCnt, ontime: ontimeCnt, missed: missedCnt, pending: pendingCnt,
-    wrong: wrongCnt, late: lateCnt, maxScore: maxScore, distractors: distractors.length,
+    wrong: wrongCnt, late: lateCnt, maxScore: maxScore, distractors: releasedDistractors.length,
     skipped: skippedCorrect + skippedDistract, skippedCorrect: skippedCorrect, skippedDistract: skippedDistract,
     completeness: completeness, timeRate: timeRate,
     score: sc, grade: gradeOf(sc), deductions: deductions, bonuses: [],
@@ -382,9 +412,26 @@ function practicalDone(projectId) {
   return set;
 }
 
-/* 正确流程的前置依赖是否全部完成；混淆流程不参与依赖图，始终可执行 */
+/* 正确流程的前置依赖是否全部完成；混淆流程：
+ *   - before 时机：不额外锁定（已由 isDistractorReleased 控制可见性）
+ *   - after 时机：锚点主流节点未完成时锁定，避免 anchor 还没搞定就让人看到混淆项
+ *   - 正确流程：deps 全部完成才可执行 */
 function nodeLock(node, byId, done) {
-  if (!node || node.flowType === 'distractor') return { locked: false, blockedBy: [] };
+  if (!node) return { locked: false, blockedBy: [] };
+  if (node.flowType === 'distractor') {
+    /* after 时机：锚点未完成时锁定 */
+    if (String(node.releaseTiming || 'before') === 'after') {
+      const anchorId = String(node.anchorId || '').trim();
+      const anchor = anchorId ? byId[anchorId] : null;
+      if (anchor && !done[anchorId]) {
+        return {
+          locked: true,
+          blockedBy: [{ id: anchorId, title: anchor.title, reason: '锚点主流节点尚未完成（after 下发时机）' }]
+        };
+      }
+    }
+    return { locked: false, blockedBy: [] };
+  }
   const pending = (node.deps || []).filter(function (id) { return byId[id] && !done[id]; });
   return {
     locked: pending.length > 0,
@@ -393,32 +440,37 @@ function nodeLock(node, byId, done) {
 }
 
 /* 实战版：本角色可执行的全部处置流程（正确流程与混淆流程外观一致，不暴露属性、分值、引导提示）
- * 与剧本基线相比多出的流程即为混淆流程，选中后按该流程分值扣分 */
+ * 与剧本基线相比多出的流程即为混淆流程，选中后按该流程分值扣分
+ * 混淆节点按时机过滤：before 随锚点主流节点同步出现，after 等锚点完成后出现 */
 function flowList(p, role) {
   const nodes = nodesOf(p.scenario_id).filter(function (n) { return n.type !== 'end'; });
   const byId = {};
   nodes.forEach(function (n) { byId[n.id] = n; });
   const done = practicalDone(p.id);
   const steps = db.prepare('SELECT * FROM drill_steps WHERE project_id=?').all(p.id);
-  const list = nodes.filter(function (n) { return canHandle(role, n.target); }).map(function (n) {
-    const st = steps.filter(function (s) { return s.matched_node === n.id; })[0] || null;
-    const f = formFields(n.form);
-    const lock = nodeLock(n, byId, done);
-    return {
-      nodeId: n.id, timeout: n.timeout, type: n.type, action: n.action, target: n.target,
-      title: n.title, desc: n.desc, formId: n.form || '',
-      formName: f.name || '', fields: f.fields || [],
-      locked: lock.locked, blockedBy: lock.blockedBy,
-      submitted: st ? {
-        stepTime: st.step_time, user: st.user, role: st.role_id,
-        correct: st.correct === 0 ? 0 : 1, ontime: !!st.ontime, foundAt: st.found_at,
-        found: st.found, measure: st.measure, result: st.result, evidence: st.evidence,
-        forms: parseJson(st.forms, {}), delta: Number(st.score || 0),
-        receiver: st.receiver || '', receiverOk: st.receiver_ok === 0 ? 0 : 1,
-        skipped: st.skipped === 1 ? 1 : 0
-      } : null
-    };
-  });
+  const list = nodes
+    .filter(function (n) { return canHandle(role, n.target); })
+    /* 混淆节点按时机过滤 */
+    .filter(function (n) { return isDistractorReleased(p, n, byId, done); })
+    .map(function (n) {
+      const st = steps.filter(function (s) { return s.matched_node === n.id; })[0] || null;
+      const f = formFields(n.form);
+      const lock = nodeLock(n, byId, done);
+      return {
+        nodeId: n.id, timeout: n.timeout, type: n.type, action: n.action, target: n.target,
+        title: n.title, desc: n.desc, formId: n.form || '',
+        formName: f.name || '', fields: f.fields || [],
+        locked: lock.locked, blockedBy: lock.blockedBy,
+        submitted: st ? {
+          stepTime: st.step_time, user: st.user, role: st.role_id,
+          correct: st.correct === 0 ? 0 : 1, ontime: !!st.ontime, foundAt: st.found_at,
+          found: st.found, measure: st.measure, result: st.result, evidence: st.evidence,
+          forms: parseJson(st.forms, {}), delta: Number(st.score || 0),
+          receiver: st.receiver || '', receiverOk: st.receiver_ok === 0 ? 0 : 1,
+          skipped: st.skipped === 1 ? 1 : 0
+        } : null
+      };
+    });
   /* 按节点 ID 哈希稳定混杂，避免混淆流程集中在一处 */
   const hash = function (s) {
     let h = 0;
@@ -544,14 +596,19 @@ router.post('/skip', auth.requireAuth, function (req, res) {
   if (dup) return res.status(409).json({ error: '该流程已由 ' + dup.user + ' 处理，不可重复跳过' });
 
   const isCorrect = node.flowType !== 'distractor';
+  /* 混淆节点跳过时必须填写原因（非空、非纯空格）；正确流程跳过可留空 */
+  let reason = String((b.reason || '') || '').trim().slice(0, 500);
+  if (!isCorrect && !reason) {
+    return res.status(400).json({ error: '跳过混淆节点必须填写原因（请说明为何判定为干扰项）', needReason: true });
+  }
   /* 不向前端下发流程属性，仅返回本次跳过带来的分值变化与最新得分
    * 扣分制：跳过混淆流程无奖励无扣分；跳过正确流程结束时扣全分 */
   const delta = 0;
   const stepTime = hhmm();
-  db.prepare('INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,choice,correct,found_at,measure,result,forms,flow_type,score,receiver,receiver_ok,skipped,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+  db.prepare('INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,choice,correct,found_at,measure,result,forms,flow_type,score,receiver,receiver_ok,skipped,skip_reason,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(p.id, p.scenario_id, req.user.role.id, req.user.name, node.action || '', node.title,
       '参演人员判定该流程不执行（跳过）', stepTime, node.id, 1, 0, node.title, isCorrect ? 1 : 0,
-      now().slice(0, 16), '参演人员判定不执行，跳过该流程', '已跳过（未执行）', '', node.flowType, delta, '', 1, 1, nowSec());
+      now().slice(0, 16), '参演人员判定不执行，跳过该流程', '已跳过（未执行）', '', node.flowType, delta, '', 1, 1, reason, nowSec());
   db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')
     .run(p.id, stepTime, req.user.name, req.user.role.id, '跳过处置流程',
       '流程「' + node.title + '」由参演人员判定不执行（跳过）', '', null);
@@ -767,6 +824,267 @@ router.post('/score/:projectId/recalc', auth.requireAuth, function (req, res) {
   auth.audit(req, '重新自动考评 ' + s.projectId + '（' + s.mode + '）：' + s.formula);
   res.json(s);
 });
+
+/* 上一节点处置详情（只读，用于角色工作台研判参考）
+ * 查询参数：nodeId=当前节点ID & projectId=演练项目ID
+ * 基础版：从 tasks + form_submissions + task_attachments + script_nodes 组装
+ * 实战版：从 drill_steps + drill_node_state + script_nodes 组装
+ * 安全约束：实战版绝不下发 script_nodes 的 flow_type / guide / keywords / wrong / score / receiver / required 等剧本属性
+ */
+router.get('/predecessor', auth.requireAuth, function (req, res) {
+  const nodeId = String((req.query && req.query.nodeId) || '').trim();
+  const projId = String((req.query && req.query.projectId) || '').trim() || activeProjectId();
+  if (!nodeId) return res.status(400).json({ error: '缺少 nodeId 参数' });
+  if (!projId) return res.status(400).json({ error: '缺少 projectId 参数' });
+
+  const p = projectOf(projId);
+  if (!p) return res.status(404).json({ error: '演练项目不存在' });
+
+  /* 外部单位仅能查看本院公开的处置结果，不参与研判链条 */
+  if (req.user.role.external) return res.status(403).json({ error: '外部单位无研判参考查看权限（分级权限隔离）' });
+
+  const mode = p.mode || '基础版';
+  const allNodes = nodesOf(p.scenario_id);
+  const byId = {};
+  allNodes.forEach(function (n) { byId[n.id] = n; });
+
+  const cur = byId[nodeId];
+  if (!cur) return res.status(404).json({ error: '节点不存在：' + nodeId });
+
+  const depIds = Array.isArray(cur.deps) ? cur.deps.slice() : [];
+  const predecessors = [];
+
+  /* 演练开始时间（用于无前置节点时起算实际耗时） */
+  const startMs = clock.parseLocal(p.started_at);
+  const baseStart = isFinite(startMs) ? startMs : null;
+
+  depIds.forEach(function (depId) {
+    const dep = byId[depId];
+    if (!dep) return; /* 剧本里被删的悬空依赖，跳过 */
+    predecessors.push(buildPredecessor(dep, mode, p, byId, baseStart, req.user));
+  });
+
+  res.json({
+    ok: true,
+    mode: mode,
+    currentNode: { id: cur.id, title: cur.title, target: cur.target, deps: depIds },
+    predecessors: predecessors
+  });
+});
+
+/* 组装单个前置节点的处置详情（只读，不暴露剧本属性） */
+function buildPredecessor(dep, mode, p, byId, baseStart, user) {
+  const rid = user.role.id;
+  const canViewAll = rid === 'commander' || rid === 'platformadmin' || rid === 'itlead';
+  let roleName = dep.target || ''; /* 剧本预设责任角色 */
+
+  /* 基础版：查 tasks 表 */
+  if (mode === '基础版') {
+    const task = db.prepare('SELECT * FROM tasks WHERE project_id=? AND node_id=?').get(p.id, dep.id);
+    if (!task) {
+      return buildNotYet(dep, roleName, mode);
+    }
+    /* 处置中状态 */
+    const state = db.prepare('SELECT * FROM drill_node_state WHERE project_id=? AND node_id=?').get(p.id, dep.id);
+    let status = task.status || '待处理';
+    if (status === '处理中' || (state && state.started_at && task.status !== '已完成')) {
+      status = '处置中';
+    } else if (status === '已完成') {
+      status = '已完成';
+    } else {
+      status = '待处置';
+    }
+
+    /* 完成时间 */
+    const completedAt = task.completed_at ? String(task.completed_at).slice(0, 16) : null;
+
+    /* 实际耗时：从前置节点中最晚完成的时刻（本节点的 deps 中之前的节点？不——这里算的是 dep 节点本身的耗时，从 dep 的 deps 或演练开始） */
+    let actualMinutes = null;
+    let ontime = null;
+    if (task.status === '已完成' && completedAt) {
+      const depStartMs = predecessorDoneMs(dep, p, byId, baseStart, mode);
+      const doneMs = clock.parseLocal(completedAt);
+      if (isFinite(doneMs) && depStartMs !== null && doneMs >= depStartMs) {
+        actualMinutes = Math.round((doneMs - depStartMs) / 60000);
+        if (dep.timeout > 0) ontime = actualMinutes <= Number(dep.timeout);
+      }
+    }
+
+    /* 表单提交 */
+    const formSubs = db.prepare('SELECT * FROM form_submissions WHERE task_id=? ORDER BY id').all(task.id);
+    const forms = formSubs.map(function (s) {
+      const data = parseJson(s.data, {});
+      const fields = Object.keys(data).map(function (k) {
+        let v = String(data[k] || '').trim();
+        /* datetime-local 归一：把 T 换成空格，统一 YYYY-MM-DD HH:mm */
+        v = v.replace(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2})?)/, '$1 $2');
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(v)) v = v.slice(0, 16);
+        return { label: k, value: v };
+      });
+      return { formId: s.form_id, formName: s.form_name, submitter: s.submitter, time: String(s.time || '').slice(0, 16), fields: fields };
+    });
+
+    /* 附件 */
+    const atts = db.prepare('SELECT * FROM task_attachments WHERE task_id=? ORDER BY id').all(task.id);
+    const attachments = atts.map(function (a) {
+      return { id: a.id, name: a.name, type: a.type, size: a.size, url: a.url, by: a.uploader, time: a.time, auto: !!a.auto };
+    });
+
+    return {
+      nodeId: dep.id, nodeTitle: dep.title, nodeType: dep.type || '',
+      role: roleName,
+      status: status,
+      completedAt: completedAt,
+      plannedTimeout: dep.timeout || 0,
+      actualMinutes: actualMinutes,
+      ontime: ontime,
+      submitted: task.status === '已完成',
+      skipped: false,
+      forms: forms,
+      attachments: attachments
+    };
+  }
+
+  /* 实战版：查 drill_steps 表（仅参演人员实际提交的处置记录，绝不暴露剧本属性） */
+  const steps = db.prepare('SELECT * FROM drill_steps WHERE project_id=? AND matched_node=? ORDER BY id').all(p.id, dep.id);
+  const step = steps[0] || null;
+  /* 查该主流节点所锚定的混淆节点中被跳过的记录（让后继接收人知晓锚点期间的干扰情况） */
+  const distractorSkips = db.prepare(
+    'SELECT ds.matched_node AS nodeId, ds.user, ds.created_at, ds.skip_reason AS reason, n.title '
+    + 'FROM drill_steps ds JOIN script_nodes n ON n.id=ds.matched_node '
+    + 'WHERE ds.project_id=? AND ds.skipped=1 AND COALESCE(ds.flow_type,\'correct\')=\'distractor\' '
+    + 'AND n.anchor_id=? AND n.scenario_id=? '
+    + 'ORDER BY ds.created_at'
+  ).all(p.id, dep.id, p.scenario_id).map(function (r) {
+    const t = String(r.created_at || '').slice(0, 16).replace('T', ' ');
+    return {
+      nodeId: r.nodeId, title: r.title, user: r.user,
+      skipTime: t, reason: r.reason || ''
+    };
+  });
+  if (!step) {
+    /* 看看是否"处置中"（drill_node_state） */
+    const state = db.prepare('SELECT * FROM drill_node_state WHERE project_id=? AND node_id=?').get(p.id, dep.id);
+    if (state) {
+      return {
+        nodeId: dep.id, nodeTitle: dep.title, nodeType: dep.type || '',
+        role: roleName,
+        status: '处置中',
+        completedAt: null,
+        plannedTimeout: dep.timeout || 0,
+        actualMinutes: null,
+        ontime: null,
+        submitted: false,
+        skipped: false,
+        forms: [],
+        attachments: [],
+        distractorSkips: distractorSkips
+      };
+    }
+    const ny = buildNotYet(dep, roleName, mode);
+    ny.distractorSkips = distractorSkips;
+    return ny;
+  }
+
+  let status = '已完成';
+  if (step.skipped === 1) status = '已跳过';
+  else if (step.correct === 0) status = '已完成（偏差）';
+
+  /* 完成时间（取 drill_steps.created_at，统一 YYYY-MM-DD HH:mm） */
+  let completedAt = step.created_at ? String(step.created_at).slice(0, 16) : null;
+  if (!completedAt && step.step_time) {
+    /* step_time 是 HH:mm，拼上演练日期 */
+    const pDate = (p.date || '').slice(0, 10) || (p.started_at || '').slice(0, 10) || '';
+    completedAt = pDate ? (pDate + ' ' + String(step.step_time).slice(0, 5)) : String(step.step_time).slice(0, 5);
+  }
+
+  /* 实际耗时 */
+  let actualMinutes = null;
+  let ontime = null;
+  if (completedAt) {
+    const depStartMs = predecessorDoneMs(dep, p, byId, baseStart, mode);
+    const doneMs = clock.parseLocal(completedAt);
+    if (isFinite(doneMs) && depStartMs !== null && doneMs >= depStartMs) {
+      actualMinutes = Math.round((doneMs - depStartMs) / 60000);
+      if (dep.timeout > 0) ontime = actualMinutes <= Number(dep.timeout);
+      else ontime = step.ontime === 1;
+    } else {
+      ontime = step.ontime === 1;
+    }
+  }
+
+  /* 表单（从 drill_steps.forms JSON 解析）：仅参演人员实际填报的字段，绝不暴露剧本字段定义 */
+  const formsRaw = parseJson(step.forms, {});
+  const forms = Object.keys(formsRaw).map(function (k) {
+    let v = String(formsRaw[k] || '').trim();
+    v = v.replace(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2})?)/, '$1 $2');
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(v)) v = v.slice(0, 16);
+    return { label: k, value: v };
+  });
+
+  /* 实战版暂无独立附件上传接口（演练证据统一归档至 evidence 表），此处置空 */
+  const attachments = [];
+
+  return {
+    nodeId: dep.id, nodeTitle: dep.title, nodeType: dep.type || '',
+    role: step.role_id || roleName,
+    status: status,
+    completedAt: completedAt,
+    plannedTimeout: dep.timeout || 0,
+    actualMinutes: actualMinutes,
+    ontime: ontime,
+    submitted: step.skipped !== 1,
+    skipped: step.skipped === 1,
+    foundAt: step.found_at || null,
+    found: step.found || null,
+    measure: step.measure || null,
+    result: step.result || null,
+    evidence: step.evidence || null,
+    forms: forms,
+    attachments: attachments,
+    distractorSkips: distractorSkips
+  };
+}
+
+/* 计算某节点的起算时刻（取其所有前置节点中最晚的实际完成时刻；无前置时取演练开始时刻）
+ * 用于"实际耗时 vs 剧本处置时长"对比 */
+function predecessorDoneMs(node, p, byId, baseStart, mode) {
+  const deps = Array.isArray(node.deps) ? node.deps : [];
+  if (!deps.length) return baseStart;
+  let best = null;
+  deps.forEach(function (depId) {
+    const dep = byId[depId];
+    if (!dep) return;
+    let ms = NaN;
+    if (mode === '基础版') {
+      const t = db.prepare('SELECT completed_at FROM tasks WHERE project_id=? AND node_id=? AND status=\'已完成\'').get(p.id, depId);
+      if (t && t.completed_at) ms = clock.parseLocal(String(t.completed_at).slice(0, 16));
+    } else {
+      const s = db.prepare('SELECT created_at FROM drill_steps WHERE project_id=? AND matched_node=? AND skipped!=1 ORDER BY id LIMIT 1').get(p.id, depId);
+      if (s && s.created_at) ms = clock.parseLocal(String(s.created_at).slice(0, 16));
+    }
+    if (isFinite(ms) && (best === null || ms > best)) best = ms;
+  });
+  if (best !== null) return best;
+  return baseStart;
+}
+
+/* 前置节点尚未处置的占位结构 */
+function buildNotYet(dep, roleName, mode) {
+  return {
+    nodeId: dep.id, nodeTitle: dep.title, nodeType: dep.type || '',
+    role: roleName,
+    status: '待处置',
+    completedAt: null,
+    plannedTimeout: dep.timeout || 0,
+    actualMinutes: null,
+    ontime: null,
+    submitted: false,
+    skipped: false,
+    forms: [],
+    attachments: []
+  };
+}
 
 /* 供 content.js /dashboard 聚合接口复用评分计算 */
 module.exports = router;

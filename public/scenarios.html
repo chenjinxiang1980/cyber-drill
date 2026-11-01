@@ -34,6 +34,7 @@
 .dag-edge{fill:none;stroke:var(--border2);stroke-width:1.8;pointer-events:stroke;cursor:pointer;transition:stroke .12s}
 .dag-edge:hover{stroke:var(--err);stroke-width:2.6}
 .dag-edge.parallel{stroke:var(--warn);stroke-width:2.2}
+.dag-edge.parallel:hover{stroke:var(--err);stroke-width:2.6}
 .dag-edge-label{font-size:10.5px;fill:var(--text3);pointer-events:none;user-select:none}
 .dag-node{position:absolute;width:236px;background:var(--panel);border:1px solid var(--border2);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25);transition:border-color .12s,box-shadow .12s;z-index:2}
 .dag-node:hover{border-color:var(--accent)}
@@ -780,7 +781,7 @@ document.addEventListener('app:ready', function(e){
           var by = (Number(to.posY)||0) + toEl.offsetHeight/2;
           var dx = Math.max(36, Math.abs(bx-ax)*0.45);
           var path = document.createElementNS('http://www.w3.org/2000/svg','path');
-          path.setAttribute('class', 'dag-edge'+(from.type==='parallel'?' parallel':''));
+          path.setAttribute('class', 'dag-edge'+((from.type==='parallel'||to.type==='parallel')?' parallel':''));
           path.setAttribute('d', 'M'+ax+','+ay+' C'+(ax+dx)+','+ay+' '+(bx-dx)+','+by+' '+bx+','+by);
           path.setAttribute('marker-end', 'url(#dagArrow)');
           path.setAttribute('data-from', String(from.id));
@@ -1145,6 +1146,7 @@ document.addEventListener('app:ready', function(e){
       var body =
         '<div class="form-row"><label class="f-label">节点编号<span class="req">*</span></label><input class="input mono" id="ndId" value="'+App.esc(String(n.id||''))+'" placeholder="如：S01-1 或 DS01-信息科-1"><div class="tiny dim" style="margin-top:4px">主流节点建议格式：{场景ID}-{序号}（如 S01-1）；混淆节点建议格式：DS{场景ID}-{角色}-{序号}（如 DS01-信息科-1）。修改后会自动更新所有依赖引用。</div></div>'
         + '<div class="form-row"><label class="f-label">节点标题<span class="req">*</span></label><input class="input" id="ndTitle" value="'+App.esc(n.title||'')+'"></div>'
+        + '<div class="form-row"><label class="f-label">节点简称</label><input class="input" id="ndShortTitle" value="'+App.esc(n.shortTitle||'')+'" maxlength="12" placeholder="大屏/紧凑视图显示，≤6个汉字"><div class="tiny dim" style="margin-top:4px">可选留空；填写后将在演练监视大屏的处置链路节点标签中优先显示，不填写则自动截取节点标题前 6 个字符。建议不超过 6 个汉字。</div></div>'
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">节点类型</label><select class="select" id="ndType">'+Object.keys(TYPES).map(function(k){ return '<option value="'+k+'"'+(n.type===k?' selected':'')+'>'+TYPES[k].label+'节点</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">接收角色</label><select class="select" id="ndTarget">'+targetOpts+'</select></div>'
@@ -1156,15 +1158,32 @@ document.addEventListener('app:ready', function(e){
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">流程属性</label><select class="select" id="ndFlow"><option value="correct"'+(n.flowType==='distractor'?'':' selected')+'>正确流程（基础版显示）</option><option value="distractor"'+(n.flowType==='distractor'?' selected':'')+'>混淆流程（仅实战版显示）</option></select></div>'
         + '<div class="form-row"><label class="f-label">本步骤分值（0-100）</label><input class="input" id="ndScore" type="number" min="0" max="100" step="1" value="'+(Number(n.score)||0)+'"></div>'
+        /* ---------- 正确流程专属：接收人 + deps ---------- */
+        + '<div id="ndCorrectBlocks" style="'+(n.flowType==='distractor'?'display:none':'')+'">'
         + '<div class="form-row span2"><label class="f-label">下一节点接收人 <span class="tiny dim">（下拉多选）</span></label>'
         +   '<div id="ndReceiverBox" data-field="receiver"></div>'
         +   '<div class="tiny dim" style="margin-top:4px">本流程完成后的流转对象，可多选；未勾选时按依赖关系自动取后继流程的责任角色（无后继时流转至院应急指挥部）。基础版按预设接收人自动流转；实战版由参演人员在处置表单中自行选择，所选接收人与预设集合完全一致才正确，多选、漏选均扣本流程 10% 分值。</div></div>'
         + '</div>'
+        /* ---------- 混淆流程专属：anchor + timing ---------- */
+        + '<div id="ndDistractorBlocks" style="'+(n.flowType==='distractor'?'':'display:none')+'">'
+        + '<div class="form-row span2"><label class="f-label">对应主流节点<span class="req">*</span> <span class="tiny dim">（混淆节点按时机绑定某个正确流程节点，仅在该节点锚定的时机到达后才下发）</span></label>'
+        +   '<select class="select" id="ndAnchor"><option value="">— 请选择锚点主流节点 —</option>'
+        +     correctNodes().filter(function(x){ return x.id!==n.id && x.type!=='end'; }).map(function(x){ return '<option value="'+App.esc(String(x.id))+'"'+(String(n.anchorId||'')===String(x.id)?' selected':'')+'>'+App.esc(String(x.id))+' '+App.esc(x.title||'')+'</option>'; }).join('')
+        +   '</select>'
+        +   '<div class="tiny dim" style="margin-top:4px">锚点必须指向正确流程（非混淆）节点；锚点完成/解锁后混淆节点才会在实战版待办中出现。</div></div>'
+        + '<div class="form-row span2"><label class="f-label">下发时机<span class="req">*</span></label>'
+        +   '<label class="check" style="margin-right:16px"><input type="radio" name="ndTiming" value="before"'+(String(n.releaseTiming||'before')==='before'?' checked':'')+'>主流节点可处置前下发（随锚点 deps 解锁同步出现）</label>'
+        +   '<label class="check"><input type="radio" name="ndTiming" value="after"'+(String(n.releaseTiming||'before')==='after'?' checked':'')+'>主流节点完成后下发（锚点 drill_steps 有记录后才出现）</label>'
+        +   '<div class="tiny dim" style="margin-top:4px">before 适合"锚点一开始就给参演人员看到干扰项，让其自行判断不要踩坑"的场景；after 适合"锚点完成后才放出干扰，考验参演人在不同阶段的稳定性"的场景。</div></div>'
+        + '</div>'
+        + '</div>'
+        + '<div id="ndCorrectDepsRow" style="'+(n.flowType==='distractor'?'display:none':'')+'">'
         + '<div class="form-row"><label class="f-label">前置节点 <span class="tiny dim">（下拉多选，全部完成后本流程才可处置；与画布连线自动联动）</span></label>'
         +   '<div id="ndDepsBox" data-field="deps"></div>'
         +   '<div class="tiny dim" style="margin-top:4px">也可在画布上按住节点右侧圆点拖拽连线到本节点建立依赖；勾选或取消勾选会实时更新画布上的连线。混淆流程不参与依赖图，多个前置需全部完成后本流程才开放。</div></div>'
         + '<div class="form-row"><label class="f-label">后继节点 <span class="tiny dim">（由依赖关系自动推导，无需手工填写）</span></label>'
         +   '<div class="tiny dim">'+(succOf(n.id).map(function(x){ return App.esc(x.title); }).join('、') || '无（本流程为末端流程）')+'</div></div>'
+        + '</div>'
         + '<div id="ndScoreTip" class="tiny dim mb2">扣分制总分 100 起。正确流程按时完成无扣分，超时完成扣本节点分值的 10%；混淆流程被选中扣本节点全部分值（10 分），不计入 100 分总分。</div>'
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">动作类型</label><select class="select" id="ndAction"><option value="">— 未分类 —</option>'+ACTION_TYPES.map(function(a){ return '<option value="'+a+'"'+(n.action===a?' selected':'')+'>'+a+'</option>'; }).join('')+'</select></div>'
@@ -1208,6 +1227,14 @@ document.addEventListener('app:ready', function(e){
         /* ---- end MultiSelect ---- */
 
         dv.querySelector('#ndType').onchange = function(){ dv.querySelector('#ndBranchRow').style.display = this.value==='parallel'?'':'none'; };
+        /* flowType 切换 → 同步显隐 correct/distractor 专属配置块 */
+        dv.querySelector('#ndFlow').onchange = function(){
+          var isDis = this.value === 'distractor';
+          dv.querySelector('#ndCorrectBlocks').style.display = isDis ? 'none' : '';
+          dv.querySelector('#ndCorrectDepsRow').style.display = isDis ? 'none' : '';
+          dv.querySelector('#ndDistractorBlocks').style.display = isDis ? '' : 'none';
+          refreshScoreTip();
+        };
         /* 实时统计正确流程总分，超过 100 分给出超分提醒 */
         function refreshScoreTip(){
           var isDis = dv.querySelector('#ndFlow').value==='distractor';
@@ -1261,6 +1288,8 @@ document.addEventListener('app:ready', function(e){
           if(!title){ App.toast('节点标题不能为空','err'); return; }
           var ty = dv.querySelector('#ndType').value;
           n.title = title; n.type = ty;
+          var st = dv.querySelector('#ndShortTitle').value.trim();
+          if(st){ n.shortTitle = st; } else { delete n.shortTitle; }
           n.target = dv.querySelector('#ndTarget').value;
           n.form = dv.querySelector('#ndForm').value || undefined;
           var tm = parseInt(dv.querySelector('#ndTimeout').value,10);
@@ -1276,6 +1305,16 @@ document.addEventListener('app:ready', function(e){
           n.score = isNaN(scv) ? 0 : Math.max(0, Math.min(100, scv));
           n.receiver = recvMs.getValue().join('、');
           n.deps = n.flowType==='distractor' ? [] : depsMs.getValue();
+          /* 混淆节点 anchor + timing 写回 */
+          if(n.flowType==='distractor'){
+            n.anchorId = dv.querySelector('#ndAnchor').value.trim();
+            var timingSel = dv.querySelector('input[name="ndTiming"]:checked');
+            n.releaseTiming = timingSel ? timingSel.value : 'before';
+            if(!n.anchorId){ App.toast('混淆节点必须选择对应主流节点','err'); return; }
+          } else {
+            delete n.anchorId;
+            delete n.releaseTiming;
+          }
           n.evidenceReq = parseEvText(dv.querySelector('#ndEv').value);
           n.keywords = dv.querySelector('#ndKeywords').value.split(/[,，、;；\s]+/).filter(function(x){ return !!x; });
           if(ty==='parallel'){ var pv = dv.querySelector('#ndPD').value.trim(); n.parallelDesc = pv; n.parallel_desc = pv; delete n.branches; }
@@ -1306,6 +1345,8 @@ document.addEventListener('app:ready', function(e){
         flowType:isDis?'distractor':'correct', score:isDis?10:0, receiver:'', deps:[] };
       if(type!=='end') n.timeout = isDis ? 10 : 15;
       if(type==='parallel'){ n.parallelDesc = ''; n.parallel_desc = ''; }
+      /* 新建混淆节点默认空 anchor + before 时机，让用户在 drawer 里选 */
+      if(isDis){ n.anchorId = ''; n.releaseTiming = 'before'; }
       nodes.push(n);
       if(!isDis){
         var lastX = 0, lastY = 0;
@@ -1351,6 +1392,10 @@ document.addEventListener('app:ready', function(e){
       if(!name){ App.toast('请先填写剧本名称','err'); return; }
       if(name.length>60){ App.toast('剧本名称不能超过 60 个字','err'); return; }
       if(!topoOrder()){ App.toast('剧本存在循环依赖，请检查节点前置关系后再保存','err'); return; }
+      _doSave();
+    };
+
+    function _doSave(){
       var miss = correctNodes().filter(function(n){ return n.type!=='end' && !(Number(n.timeout)>0); });
       if(miss.length){ App.toast('以下节点未设置处置时长：'+miss.map(function(n){ return n.title; }).join('、'),'err'); return; }
       if(correctNodes().some(function(n){ return n.type!=='end' && (n.posX===null || n.posX===undefined); })) autoLayout();

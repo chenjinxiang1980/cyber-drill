@@ -309,8 +309,8 @@ router.post('/:id/forms', auth.requireAuth, loadTask, function (req, res) {
       const arr = String(raw).split(/[、,，|｜\s]+/).map(normalize).filter(Boolean);
       /* 去重 */
       const uniq = arr.filter(function (v, i, a) { return a.indexOf(v) === i; });
-      const upd = db.prepare('UPDATE impact SET state=\'故障\', pct=30 WHERE sys=?');
-      uniq.forEach(function (sys) { try { upd.run(sys); } catch (e) {} });
+      const upd = db.prepare('UPDATE impact SET state=\'故障\', pct=30 WHERE sys=? AND project_id=?');
+      uniq.forEach(function (sys) { try { upd.run(sys, t.project_id); } catch (e) {} });
       if (arr.length) {
         try {
           db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')
@@ -331,14 +331,14 @@ router.post('/:id/forms', auth.requireAuth, loadTask, function (req, res) {
       { label: '医学影像系统状态', sys: '医学影像系统' },
       { label: '办公OA系统状态', sys: '办公OA系统' }
     ];
-    const upd = db.prepare('UPDATE impact SET state=? WHERE sys=?');
+    const upd = db.prepare('UPDATE impact SET state=? WHERE sys=? AND project_id=?');
     SYS_STATE_FIELDS.forEach(function (f) {
       const v = String(data[f.label] || '').trim();
-      if (v) { try { upd.run(v, f.sys); } catch (e) {} }
+      if (v) { try { upd.run(v, f.sys, t.project_id); } catch (e) {} }
     });
     /* 检查是否全系统已恢复 */
     try {
-      const all = db.prepare('SELECT sys,state FROM impact ORDER BY seq').all();
+      const all = db.prepare('SELECT sys,state FROM impact WHERE project_id=? ORDER BY seq').all(t.project_id);
       const allOk = all.length > 0 && all.every(function (x) { return x.state === '已恢复' || x.state === '正常'; });
       if (allOk) {
         db.prepare('INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)')

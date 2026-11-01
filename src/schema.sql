@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS script_nodes (
   scenario_id TEXT,
   type       TEXT,
   title      TEXT,
+  short_title TEXT,  -- 节点简称（大屏/紧凑视图显示，≤6个汉字）
   target     TEXT,
   time       TEXT,
   timeout    INTEGER,
@@ -106,7 +107,9 @@ CREATE TABLE IF NOT EXISTS script_nodes (
   receiver   TEXT,  -- 下一节点接收角色名称（基础版默认按剧本流转，实战版由参演人员选择）
   deps       TEXT,  -- JSON：前置节点 ID 列表（全部完成后本节点才可执行；空数组=并行起始节点）
   pos_x      INTEGER, -- 编排画布 X 坐标（仅用于可视化布局）
-  pos_y      INTEGER  -- 编排画布 Y 坐标
+  pos_y      INTEGER,  -- 编排画布 Y 坐标
+  anchor_id  TEXT,     -- 混淆节点锚定的主流节点 ID（仅 flow_type=distractor 时有效）
+  release_timing TEXT DEFAULT 'before' -- 混淆节点下发时机：before=主流节点可处置时同步出现 / after=主流节点完成后出现
 );
 
 -- 实战版自主处置记录（按剧本节点自主选择处置方案并填写实际情况）
@@ -372,13 +375,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   ip      TEXT
 );
 
--- 业务影响
+-- 业务影响（按项目隔离，每个演练项目独立维护自己的业务系统状态）
 CREATE TABLE IF NOT EXISTS impact (
-  sys        TEXT PRIMARY KEY,
+  sys        TEXT NOT NULL,
   state      TEXT,
   pct        INTEGER,
   seq        INTEGER,
-  project_id TEXT
+  project_id TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (sys, project_id)
 );
 
 -- 数据字典

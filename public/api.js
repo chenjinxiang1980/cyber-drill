@@ -154,6 +154,10 @@ window.API = (function () {
   function submitForm(id, formId, data) {
     return DRILL.post('/tasks/' + encodeURIComponent(id) + '/forms', { formId: formId, data: data });
   }
+  /* 前置节点处置详情（只读，用于角色工作台研判参考；不暴露剧本属性） */
+  function getPredecessor(nodeId, projectId) {
+    return DRILL.get('/drill/predecessor?nodeId=' + encodeURIComponent(nodeId) + '&projectId=' + encodeURIComponent(projectId));
+  }
 
   /* ---------- 会话 ---------- */
   function login(username, password, role) {
@@ -485,7 +489,7 @@ window.API = (function () {
   function getDrillFlows(projectId) { return DRILL.get('/drill/flows/' + encodeURIComponent(projectId)); }
   function getDrillFaults(projectId) { return DRILL.get('/drill/faults/' + encodeURIComponent(projectId)); }
   function submitDrillFlow(payload) { return DRILL.post('/drill/decide', payload); }
-  function skipDrillFlow(projectId, nodeId) { return DRILL.post('/drill/skip', { projectId: projectId, nodeId: nodeId }); }
+  function skipDrillFlow(projectId, nodeId, reason) { return DRILL.post('/drill/skip', { projectId: projectId, nodeId: nodeId, reason: reason || '' }); }
   function finishDrill(projectId) { return DRILL.post('/drill/finish', { projectId: projectId }); }
   function addDrillStep(step) { return DRILL.post('/drill/steps', step); }
   function deleteDrillStep(id) { return DRILL.del('/drill/steps/' + encodeURIComponent(id)); }
@@ -500,6 +504,7 @@ window.API = (function () {
     acceptTask: acceptTask, submitTask: submitTask,
     getTaskAttachments: getTaskAttachments, uploadTaskAttachments: uploadTaskAttachments,
     deleteTaskAttachment: deleteTaskAttachment, submitForm: submitForm,
+    getPredecessor: getPredecessor,
     getMessages: getMessages, getNotifs: getNotifs, readNotifs: readNotifs, pushMessage: pushMessage,
     getChatChannels: getChatChannels, getChat: getChat, sendChat: sendChat, uploadChatAttachment: uploadChatAttachment, getDrillProgress: getDrillProgress, startNode: startNode, getForms: getForms,
     getScenarios: getScenarios, getScriptNodes: getScriptNodes,

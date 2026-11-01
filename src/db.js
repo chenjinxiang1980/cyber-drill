@@ -98,6 +98,10 @@ function migrate() {
   addColumn('script_nodes', 'evidence_req', 'TEXT');
   addColumn('script_nodes', 'flow_type', "TEXT DEFAULT 'correct'");
   addColumn('script_nodes', 'score', 'INTEGER DEFAULT 0');
+  /* 混淆节点锚定：对应主流节点 ID + 下发时机（before=主流节点可处置时同步出现 / after=主流节点完成后出现） */
+  addColumn('script_nodes', 'anchor_id', 'TEXT');
+  addColumn('script_nodes', 'release_timing', "TEXT DEFAULT 'before'");
+  addColumn('script_nodes', 'short_title', 'TEXT');
   addColumn('drill_steps', 'forms', 'TEXT');
   addColumn('drill_steps', 'flow_type', "TEXT DEFAULT 'correct'");
   addColumn('drill_steps', 'score', 'REAL DEFAULT 0');
@@ -108,6 +112,7 @@ function migrate() {
   addColumn('drill_steps', 'receiver', 'TEXT');
   addColumn('drill_steps', 'receiver_ok', 'INTEGER DEFAULT 1');
   addColumn('drill_steps', 'skipped', 'INTEGER DEFAULT 0');
+  addColumn('drill_steps', 'skip_reason', 'TEXT'); /* 混淆节点跳过时填写的原因（正确流程跳过可留空） */
   addColumn('notifs', 'target', "TEXT DEFAULT 'all'");
   /* 旧库升级：停用「计划时刻」，超时判定改为按上一节点真实完成时间 + 处置时长 */
   try {
@@ -233,19 +238,55 @@ function migrate() {
   } catch (e) {
     console.warn('[migrate] 站内消息模板写入跳过：', e.message);
   }
-  /* 业务影响系统名统一修正（6 标准系统 + 初始正常） */
+  /* 业务影响按项目隔离：impact 表改为 (sys, project_id) 联合主键 */
   try {
-    const { IMPACT } = require('./seed_data');
-    const flagRow = db.prepare("SELECT value FROM settings WHERE key='impact_sys_standard_v2'").get();
-    if (!flagRow) {
-      db.prepare('DELETE FROM impact').run();
-      const ins = db.prepare('INSERT INTO impact (sys,state,pct,seq) VALUES (?,?,?,?)');
-      IMPACT.forEach(function (r) { ins.run(r.sys, r.state, Number(r.pct), Number(r.seq)); });
-      db.prepare("INSERT INTO settings (key,value) VALUES ('impact_sys_standard_v2','1')").run();
-      console.log('[migrate] impact 表已重建为 6 标准系统');
+    const flagV3 = db.prepare("SELECT value FROM settings WHERE key='impact_pk_v3'").get();
+    if (!flagV3) {
+      /* 检查当前主键结构是否已经是联合主键 */
+      const cols = db.prepare("PRAGMA table_info(impact)").all();
+      const pkCols = cols.filter(function (c) { return c.pk > 0; }).sort(function (a, b) { return a.pk - b.pk; });
+      const needsMigrate = pkCols.length < 2;
+      if (needsMigrate) {
+        /* DROP + CREATE + 数据迁移 */
+        db.prepare('ALTER TABLE impact RENAME TO impact_old').run();
+        db.prepare("CREATE TABLE impact (sys TEXT NOT NULL, state TEXT, pct INTEGER, seq INTEGER, project_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (sys, project_id))").run();
+        /* 旧数据迁移：project_id 为 NULL 的统一转为 '' 作为全局模板 */
+        const oldRows = db.prepare('SELECT sys,state,pct,seq,project_id FROM impact_old').all();
+        const insNew = db.prepare('INSERT INTO impact (sys,state,pct,seq,project_id) VALUES (?,?,?,?,?)');
+        oldRows.forEach(function (r) {
+          const pid = r.project_id || '';
+          try { insNew.run(r.sys, r.state, r.pct, r.seq, pid); } catch (e) {}
+        });
+        /* 为所有已有项目补齐独立 impact */
+        const tpl = db.prepare("SELECT sys,state,pct,seq FROM impact WHERE project_id='' ORDER BY seq").all();
+        const projects = db.prepare('SELECT id FROM projects').all();
+        projects.forEach(function (p) {
+          tpl.forEach(function (r) {
+            try { insNew.run(r.sys, r.state, r.pct, r.seq, p.id); } catch (e) {}
+          });
+        });
+        db.prepare('DROP TABLE impact_old').run();
+        console.log('[migrate] impact 主键已升级为 (sys, project_id) 联合，老项目已补齐独立数据');
+      }
+      db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('impact_pk_v3','1')").run();
     }
+    /* 兜底：即使没走上面的 DROP+CREATE，也确保每个项目都有独立 impact */
+    const tpl = db.prepare("SELECT sys,state,pct,seq FROM impact WHERE project_id='' ORDER BY seq").all();
+    if (!tpl.length) {
+      const { IMPACT } = require('./seed_data');
+      const ins = db.prepare("INSERT OR IGNORE INTO impact (sys,state,pct,seq,project_id) VALUES (?,?,?,?,?)");
+      IMPACT.forEach(function (r) { ins.run(r.sys, r.state, Number(r.pct), Number(r.seq), ''); });
+    }
+    const projects = db.prepare('SELECT id FROM projects').all();
+    const insImp = db.prepare("INSERT OR IGNORE INTO impact (sys,state,pct,seq,project_id) VALUES (?,?,?,?,?)");
+    projects.forEach(function (p) {
+      const cnt = db.prepare('SELECT COUNT(*) AS c FROM impact WHERE project_id=?').get(p.id).c;
+      if (cnt === 0) {
+        tpl.forEach(function (r) { insImp.run(r.sys, r.state, Number(r.pct), Number(r.seq), p.id); });
+      }
+    });
   } catch (e) {
-    console.warn('[migrate] impact 表修正跳过：', e.message);
+    console.warn('[migrate] impact 主键迁移跳过：', e.message);
   }
   /* F1/F7 表单模板强制更新（受影响系统 multiselect + 系统状态下拉） */
   try {
@@ -258,6 +299,13 @@ function migrate() {
     console.log('[migrate] F1/F7 表单模板已更新');
   } catch (e) {
     console.warn('[migrate] F1/F7 模板更新跳过：', e.message);
+  }
+  /* 旧库升级：混淆节点自动锚定同角色最近的主流节点 */
+  try {
+    const n = backfillAnchorForDistractors(db);
+    if (n) console.log('[migrate] 混淆节点锚定回填 ' + n + ' 条（默认 release_timing=before）');
+  } catch (e) {
+    console.warn('[migrate] 混淆节点锚定回填跳过：', e.message);
   }
   /* sessions 过期清理 */
   try {
@@ -342,6 +390,32 @@ function backfillDeps(database) {
         up.run('[]', n.id);
         count++;
       }
+    });
+  });
+  return count;
+}
+
+/* 旧库升级：为未配置锚点的混淆节点自动绑定同角色最近的主流节点
+ * 同 target 角色有主流节点 → 取 seq 最接近的
+ * 同 target 无主流节点 → 降级为整个场景 seq 最接近的主流节点
+ * release_timing 统一默认 'before' */
+function backfillAnchorForDistractors(database) {
+  const up = database.prepare('UPDATE script_nodes SET anchor_id=?, release_timing=? WHERE id=?');
+  let count = 0;
+  database.prepare('SELECT id FROM scenarios').all().forEach(function (sc) {
+    const correct = database.prepare("SELECT id,seq,target FROM script_nodes WHERE scenario_id=? AND type!='end' AND COALESCE(flow_type,'correct')!='distractor' ORDER BY seq").all(sc.id);
+    if (!correct.length) return;
+    const distractors = database.prepare("SELECT id,seq,target,anchor_id FROM script_nodes WHERE scenario_id=? AND flow_type='distractor' AND (anchor_id IS NULL OR anchor_id='')").all(sc.id);
+    distractors.forEach(function (d) {
+      /* 先按同 target 角色匹配 */
+      let pool = correct.filter(function (c) { return c.target === d.target; });
+      /* 同角色没有就降级全场景 */
+      if (!pool.length) pool = correct;
+      if (!pool.length) return;
+      pool.sort(function (a, b) { return Math.abs(a.seq - d.seq) - Math.abs(b.seq - d.seq); });
+      const anchor = pool[0];
+      up.run(anchor.id, 'before', d.id);
+      count++;
     });
   });
   return count;
