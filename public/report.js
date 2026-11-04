@@ -174,7 +174,7 @@ window.ReportPage = (function () {
       + '@media print{.page{padding:0;max-width:none}}';
 
     var B = (window.DRILL && DRILL.brand()) || {};
-    var brandUnit = B.unitName || '盘州市人民医院';
+    var brandUnit = B.unitName || '示例医院';
     var brandSystem = B.systemName || '网络安全应急演练系统';
 
     var cover = '<div class="cover"><div class="cls">密级：内部（演练专用）<br>编号：'+App.esc(no)+'</div>'
@@ -188,7 +188,7 @@ window.ReportPage = (function () {
       + '<tr><td class="k">项目编号</td><td>'+App.esc(p.id)+'</td><td class="k">演练类型</td><td>'+App.esc(p.type)+'</td></tr>'
       + '<tr><td class="k">事件等级</td><td>'+App.esc(p.level)+'</td><td class="k">演练状态</td><td>'+App.esc(p.status)+'</td></tr>'
       + '<tr><td class="k">演练日期</td><td>'+App.esc(p.date)+'</td><td class="k">演练地点</td><td>院内演练环境（独立演练服务器，与生产网物理隔离）</td></tr>'
-      + '<tr><td class="k">参演单位</td><td colspan="3">'+App.esc((p.units||[]).join('、')||'盘州市人民医院')+'</td></tr>'
+      + '<tr><td class="k">参演单位</td><td colspan="3">'+App.esc((p.units||[]).join('、')||'示例医院')+'</td></tr>'
       + '<tr><td class="k">演练目标</td><td colspan="3">'+App.esc(p.target||'—')+'</td></tr>'
       + '<tr><td class="k">场景剧本</td><td colspan="3">'+App.esc(sc?sc.name+'（'+sc.version+'）':'—')+(sc?('，剧本节点 '+sc.nodes+' 个'):'')+'</td></tr>'
       + '</table>';

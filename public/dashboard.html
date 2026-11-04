@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>态势总看板 · 盘州市人民医院网络安全应急演练系统</title>
+<title>态势总看板 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 </head>
 <body data-page="dashboard">
 <script src="system.js"></script>
@@ -53,13 +53,13 @@ document.addEventListener('app:ready', function(e){
       + '<button class="btn primary" id="btnRefresh">'+App.icon('refresh')+'刷新态势</button></div></div>'
       + '<div class="sim-banner">'+App.icon('alert')+'<span>本看板所有告警、事件、系统状态均为<b>演练模拟数据</b>，与医院真实生产环境无关。</span></div>'
       + '<div class="grid grid-4" id="kpis"></div>'
-      + '<div class="grid mt4" style="grid-template-columns:1.5fr 1fr;margin-top:16px">'
+      + '<div class="grid mt4 dash-row-2">'
       +   '<div class="card"><div class="card-title">'+App.icon('flow')+'剧本时序进度</div>'
       +     '<div class="scroll-panel" id="scriptBox"></div></div>'
       +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色任务完成状态</div>'
       +     '<div class="scroll-panel" id="roleBox"></div></div>'
       + '</div>'
-      + '<div class="grid mt4" style="grid-template-columns:1fr 1.2fr 1fr;gap:16px;margin-top:16px">'
+      + '<div class="grid mt4 dash-row-3">'
       +   '<div class="card"><div class="card-title">'+App.icon('file')+'已上报文书清单</div><div id="docs" class="doc-list"></div></div>'
       +   '<div class="card"><div class="card-title">'+App.icon('bell')+'消息通知流</div><div class="timeline scroll-panel" id="msgFlow" style="padding-left:22px;height:300px;overflow-y:auto"></div></div>'
       +   '<div class="card"><div class="card-title">'+App.icon('hospital')+'业务影响范围</div><div id="impact" class="doc-list"></div></div>'
@@ -107,14 +107,10 @@ document.addEventListener('app:ready', function(e){
   function renderKpis(){
     var st = CUR.stats || {};
     var project = CUR.project || {};
-    var now = Date.now();
-    var elapsed = '';
-    if(project.startedAt){
-      var stMs = new Date(project.startedAt).getTime();
-      if(isNaN(stMs)) stMs = Date.now();
-      var diff = Math.max(0, Math.floor((now - stMs)/1000));
-      elapsed = 'T+' + String(Math.floor(diff/3600)).padStart(2,'0') + ':' + String(Math.floor((diff%3600)/60)).padStart(2,'0') + ':' + String(diff%60).padStart(2,'0');
-    }
+    /* 计时统一走 API.elapsedOf（当前时间 − started_at，暂停取 paused_at、结束取 ended_at，并扣 pausedSec），
+     * 与顶栏/工作台/大屏同一算法，禁止本地累加或 new Date() 直接解析 */
+    var sec = API.elapsedOf(project);
+    var elapsed = (sec === null) ? '' : ('T+' + API.fmtElapsed(sec));
     var scoreTxt = st.score !== null && st.score !== undefined ? (st.score + ' 分 · ' + (st.grade||'')) : '—';
     var k = [
       { l:'当前事件等级', v: project.level || '—', cls:'err', f: (project.mode||'') + ' 模式', ic:'alert' },
@@ -198,12 +194,70 @@ document.addEventListener('app:ready', function(e){
     renderKpis(); renderScript(); renderRoles(); renderDocs(); renderMsgs(); renderImpact();
   }
 
-  /* ---------- 拉取聚合数据 ---------- */
+  /* ---------- 拉取聚合数据（复用 /api/content/monitor，前端做字段映射） ---------- */
   function refreshAll(silent){
     var pid = CUR && CUR.project && CUR.project.id;
     if(!pid){ if(!silent) App.toast('当前无演练项目','err'); return; }
-    return DRILL.get('/content/dashboard?projectId=' + encodeURIComponent(pid)).then(function(data){
-      CUR = data;
+    return DRILL.get('/content/monitor?projectId=' + encodeURIComponent(pid)).then(function(m){
+      // MonitorContent → dashboard 期望的 CUR 结构
+      var curProj = m.project || {};
+      var sc = m.score || {};
+      var agg = m.roleAgg || {};
+      var rolesList = m.roles || [];
+      var roleNameById = {};
+      rolesList.forEach(function(r){ roleNameById[r.id] = r.name; });
+      var onlineActors = Object.keys(agg).length;
+      var totalActors = 0;
+      Object.values(agg).forEach(function(a){ totalActors += (a.total||0); });
+
+      // seqFlow 字段适配：MonitorContent → dashboard
+      var seqFlow = (m.seqFlow || []).map(function(n){
+        return {
+          id: n.id,
+          title: n.name || n.shortTitle || n.target || '',
+          role: roleNameById[n.role] || n.role || '',
+          state: n.state === 'done' ? '已完成' : (n.state === 'doing' ? '处置中' : '待处理'),
+          completedAt: n.time || '',
+          score: '',
+          deduct: '',
+          flowType: n.type === 'distractor' ? 'distractor' : '',
+        };
+      });
+
+      // roles 适配：roleAgg + roles → dashboard 期望格式
+      var roles = Object.values(agg).map(function(a){
+        return {
+          roleId: a.roleId,
+          roleName: roleNameById[a.roleId] || a.roleId || '',
+          done: a.done || 0,
+          total: a.total || 0,
+          overtime: a.overtime || 0,
+          wrong: sc.Wrong || 0,
+        };
+      });
+
+      // messages 适配 → dashboard msgs
+      var msgs = (m.messages || []).map(function(x){
+        return { time: x.time || '', level: x.level || 'P2', actor: x.source || '', action: x.text || '', detail: '' };
+      });
+
+      CUR = {
+        serverTime: m.serverTime,
+        project: curProj,
+        stats: {
+          score: sc.Score != null ? Math.round(sc.Score*10)/10 : null,
+          grade: sc.Grade || '',
+          pendingTasks: (m.stats && m.stats.pending) || 0,
+          overdueTasks: (m.stats && m.stats.overdue) || 0,
+          onlineActors: onlineActors,
+          totalActors: totalActors,
+        },
+        seqFlow: seqFlow,
+        roles: roles,
+        docs: [],
+        msgs: msgs,
+        impact: m.impact || [],
+      };
       renderAll();
       if(!silent) App.toast('态势数据已刷新','ok');
     }).catch(function(err){

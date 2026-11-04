@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>演练监视大屏 · 盘州市人民医院网络安全应急演练系统</title>
+<title>演练监视大屏 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
 <style>
 :root{
@@ -13,11 +13,14 @@
   --mono:Consolas,"Microsoft YaHei","PingFang SC","Courier New",monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
+html{overflow:hidden;width:100vw;height:100vh;background:#030711}
 body{
-  background:#030711; color:var(--tx); overflow:hidden;
+  position:fixed;top:0;left:0;margin:0;width:1920px;height:1080px;
+  background:#030711; color:var(--tx);
   font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
   -webkit-font-smoothing:antialiased;
+  transform-origin:top left;
+  transform:scale(1);
 }
 body::before{
   content:''; position:fixed; inset:0; z-index:-2;
@@ -41,7 +44,7 @@ body::before{
   box-shadow:0 0 20px rgba(34,211,238,.6); animation:scanMove 7s linear infinite}
 @keyframes scanMove{0%{top:-1%}100%{top:101%}}
 
-.screen{height:100vh;display:flex;flex-direction:column;padding:10px 16px 14px;gap:10px;animation:fadein .6s ease both}
+.screen{height:1080px;display:flex;flex-direction:column;padding:10px 16px 14px;gap:10px;animation:fadein .6s ease both}
 @keyframes fadein{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 
 /* ---------- 顶栏 ---------- */
@@ -279,11 +282,6 @@ body::before{
 .sb-meta .m-item b{font-size:30px;color:var(--cy);font-weight:700;letter-spacing:1px}
 .sb-meta .m-item span{font-size:13px;color:var(--dim);letter-spacing:1px}
 .spinner{width:32px;height:32px;border:2px solid rgba(34,211,238,.2);border-top-color:var(--cy);border-radius:50%;animation:spin 1s linear infinite}
-
-@media (max-width:1400px){
-  .s-main{grid-template-columns:280px minmax(0,1fr) 300px}
-  .lg{grid-template-columns:42px 64px 84px 1fr}
-}
 </style>
 </head>
 <body>
@@ -293,8 +291,8 @@ body::before{
 <div class="screen" id="screen" style="display:none">
   <header class="s-head">
     <div class="h-left">
-      <span class="h-logo"><img src="img/logo.png" alt="盘州市人民医院院徽"></span>
-      <div><div class="h-org" data-brand="unit">盘州市人民医院</div><div class="h-sub" data-brand="system">网络与信息安全应急演练</div></div>
+      <span class="h-logo"><img src="img/logo.png" alt="示例医院院徽"></span>
+      <div><div class="h-org" data-brand="unit">示例医院</div><div class="h-sub" data-brand="system">网络与信息安全应急演练</div></div>
     </div>
     <div class="h-mid">
       <div class="h-title">演练监视大屏</div>
@@ -352,7 +350,53 @@ body::before{
   <div>正在接入演练数据…</div>
 </div>
 
+<script>
+/* ---------- 小屏 / 触屏设备守卫 ----------
+   手机 / 平板等 coarse pointer 或视口 < 1024px 时，不渲染 1920×1080 缩放画布，
+   改为显示居中提示页。桌面端（fine pointer 且 ≥1024px）完全不变，
+   body 的 transform/left/top 仍走下方 scale() 原样路径。
+*/
+(function(){
+  var isTouch = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+  var viewportW = Math.min(window.innerWidth || 0, document.documentElement.clientWidth || 0);
+  var small = viewportW > 0 && viewportW < 1024;
+  if(isTouch || small){
+    var body = document.body;
+    // 隐藏大屏所有原生子节点，后续叠加提示页
+    Array.prototype.forEach.call(body.children, function(c){ c.style.display='none'; });
+    var tip = document.createElement('div');
+    tip.id = 'mobileTip';
+    var curW = window.innerWidth || '?';
+    tip.innerHTML =
+      '<div style="padding:32px 24px;background:#030711;color:#d7efff;text-align:center;line-height:1.8">'
+      +'<div style="font-size:48px;margin-bottom:16px;line-height:1">🖥️</div>'
+      +'<h2 style="font-size:20px;font-weight:700;margin-bottom:8px;color:#22d3ee">演练监视大屏需在电脑端使用</h2>'
+      +'<p style="font-size:14px;color:#8db8d9;max-width:360px;margin:0 auto">'
+      +'建议 1920×1080 及以上分辨率 · 支持 Chrome / Edge 全屏投屏<br>'
+      +'请在电脑浏览器中打开本页面，或返回上一页面。</p>'
+      +'<div style="margin-top:20px;padding:10px 16px;background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.25);border-radius:6px;font-size:12px;color:#8db8d9;display:inline-block">'
+      +'当前设备宽度：<b style="color:#d7efff;font-family:Consolas,monospace">'+curW+'px</b>'
+      +(isTouch ? ' · 触屏设备' : (small ? ' · 视口过小' : ''))
+      +'</div>'
+      +'<div><a href="javascript:history.back()" style="margin-top:20px;display:inline-block;padding:10px 24px;background:#2f81f7;color:#fff;border-radius:6px;text-decoration:none;font-size:14px">← 返回上一页</a></div>'
+      +'</div>';
+    body.appendChild(tip);
+    return;
+  }
+
+  /* ---------- 等比缩放适配（1920×1080 设计基准，桌面端原逻辑不变）---------- */
+  var W=1920, H=1080;
+  function scale(){
+    var s=Math.min(innerWidth/W, innerHeight/H);
+    document.body.style.transform='scale('+s+')';
+    document.body.style.left=((innerWidth-W*s)/2)+'px';
+    document.body.style.top=((innerHeight-H*s)/2)+'px';
+  }
+  scale(); addEventListener('resize', scale); addEventListener('orientationchange', scale);
+})();
+</script>
 <script src="system.js"></script>
+<script src="api.js"></script>
 <script>
 (function(){
   'use strict';
@@ -498,27 +542,20 @@ body::before{
   }
 
   /* ---------- KPI ---------- */
-  /* 真实计时：按服务端记录的启动/暂停/结束时刻本地每秒推算 */
+  /* 真实计时：与看板/工作台共用 api.js 的 API.elapsedOf（当前时间 − started_at，暂停取 paused_at、结束取 ended_at，并扣 pausedSec），
+   * 不做本地累加，刷新/切页不归零 */
   function localElapsed(){
-    var p = DATA && DATA.project;
-    if(!p || !p.startedAt) return null;
-    var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(p.startedAt));
-    if(!m) return null;
-    var start = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0)).getTime();
-    var end = Date.now();
-    var q = p.endedAt || p.pausedAt;
-    if(q){
-      var n = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(q));
-      if(n) end = new Date(+n[1], +n[2]-1, +n[3], +n[4], +n[5], +(n[6]||0)).getTime();
-    }
-    var sec = Math.floor((end - start)/1000 - (Number(p.pausedSec)||0));
-    return sec > 0 ? sec : 0;
+    return API.elapsedOf(DATA && DATA.project);
   }
   function elapsedText(){
     var p = DATA && DATA.project;
     if(!p) return { v:'--:--:--', f:'未选择演练项目' };
     var sec = localElapsed();
-    if(sec === null) return { v:'未开始', f:'项目状态：'+p.status };
+    if(sec === null){
+      /* 项目在「演练中/暂停」但 started_at 为空（历史数据缺开始时刻）：不显示 T+00:00:00 */
+      var pending = (p.status==='演练中' || p.status==='暂停');
+      return { v:(pending ? '计时未启动' : '未开始'), f:'项目状态：'+p.status };
+    }
     var h = Math.floor(sec/3600), mm = Math.floor(sec%3600/60), ss = sec%60;
     var tail = p.status==='暂停' ? ' · 已暂停' : ((p.status==='已结束'||p.status==='已归档') ? ' · 计时已冻结' : '');
     return { v:'T+'+p2(h)+':'+p2(mm)+':'+p2(ss), f:'启动于 '+String(p.startedAt).slice(0,16)+tail };
@@ -878,8 +915,14 @@ body::before{
     }).join('');
   }
 
-  /* ---------- 无缝向上滚动（大屏展示用） ---------- */
+  /* ---------- 无缝向上滚动（大屏展示用） ----------
+   * 旧实现直接 cloneNode 整个 .log-list/.msg-list/.role-list（含容器自身 padding），
+   * 拼接处会多出一段空白（容器 padding-bottom + 克隆 padding-top，角色列表还有末条 margin-bottom），
+   * 且回卷阈值取 clone.scrollHeight，与"克隆块真实起始位置"不一致 → 末尾出现空行/错位。
+   * 新实现：只把条目克隆进无 padding 的包装层；清零容器 padding-bottom 与末条 margin-bottom；
+   * 回卷阈值 = 克隆块在滚动内容中的真实偏移（每次渲染重新测量），拼接处首尾紧贴、无空白。 */
   var _marqueeTimers = {};
+  var _marqueePos = {};
   function _startMarquee(id, speed){
     var el = document.getElementById(id);
     if(!el) return;
@@ -887,28 +930,52 @@ body::before{
     if(_marqueeTimers[id]){ clearInterval(_marqueeTimers[id]); delete _marqueeTimers[id]; }
     var old = el.querySelectorAll('[data-mq-clone]');
     for(var i=0;i<old.length;i++) old[i].parentNode.removeChild(old[i]);
-    el.scrollTop = 0;
+    var keep = _marqueePos[id] || 0;
+    el.style.paddingBottom = '';
+    el.style.overflowY = '';
 
     // 内容不够长 → 不滚动，恢复滚动条
     var needH = el.clientHeight + 4;
     if(el.scrollHeight <= needH){
-      el.style.overflowY = '';
+      _marqueePos[id] = 0;
+      el.scrollTop = 0;
       return;
     }
 
-    // 克隆一份内容（用于无缝循环）
-    var clone = el.cloneNode(true);
+    // 拼接处不产生空白：容器底部内边距与末条外边距不参与滚动内容
+    el.style.paddingBottom = '0px';
+    var padTop = parseInt(getComputedStyle(el).paddingTop, 10) || 0;
+    var kids = [];
+    for(var k=0;k<el.children.length;k++){ if(!el.children[k].hasAttribute('data-mq-clone')) kids.push(el.children[k]); }
+    if(kids.length){
+      var last = kids[kids.length-1];
+      if(last) last.style.marginBottom = '0px';
+    }
+
+    // 条目克隆到无内边距包装层（不是克隆整个滚动容器）
+    var clone = document.createElement('div');
     clone.setAttribute('data-mq-clone', id);
+    clone.style.padding = '0';
+    clone.style.margin = '0';
+    for(var j=0;j<kids.length;j++) clone.appendChild(kids[j].cloneNode(true));
     el.appendChild(clone);
-    var firstBlockH = clone.scrollHeight; // 克隆的高度 = 原始内容高度
     el.style.overflowY = 'hidden';
+
+    // 回卷阈值 = 克隆块相对滚动内容顶部的真实偏移（= 原始内容高度）
+    var firstBlockH = clone.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    if(!isFinite(firstBlockH) || firstBlockH <= 0) firstBlockH = clone.offsetTop;
+    if(firstBlockH <= 0) return;
+    // 顶部内边距不参与循环：滚动窗口从首条顶部开始（回卷时同样对齐到该位置），避免回顶跳 6~10px
+    var pos = keep ? (keep % firstBlockH) : 0;
+    el.scrollTop = padTop + pos;
 
     var sp = speed || 1;
     _marqueeTimers[id] = setInterval(function(){
       el.scrollTop += sp;
       if(el.scrollTop >= firstBlockH){
-        el.scrollTop -= firstBlockH; // 无缝跳回（因为下方紧接克隆的相同内容）
+        el.scrollTop = padTop + Math.max(0, el.scrollTop - firstBlockH); // 无缝跳回（下方紧接内容相同的克隆块）
       }
+      _marqueePos[id] = el.scrollTop;
     }, 40);
   }
   function _stopMarquee(id){

@@ -1,4 +1,4 @@
-/* 盘州市人民医院网络安全应急演练系统 · App Shell / 图标 / 通用组件（共享骨架，禁止各页自写导航） */
+/* 示例医院网络安全应急演练系统 · App Shell / 图标 / 通用组件（共享骨架，禁止各页自写导航） */
 (function(){
 "use strict";
 
@@ -121,8 +121,8 @@ function mountShell(pageKey){
   var B = DRILL.brand()||{};
   var brandLogo = B.logo || 'img/logo.png';
   var brandSystem = B.systemName || '网络安全应急演练';
-  var brandUnit = B.unitName || '盘州市人民医院';
-  var brandVer = B.version || 'v0.1.7';
+  var brandUnit = B.unitName || '示例医院';
+  var brandVer = B.version || 'v0.5.0';
   var brandGh = B.github || 'https://github.com/chenjinxiang1980/cyber-drill';
   var brandGe = B.gitee || 'https://gitee.com/habeas/cyber-drill';
   var html = '<aside class="sidebar"><div class="brand"><span class="logo brand-logo"><img src="'+brandLogo+'" alt="'+App.esc(brandUnit)+'院徽"></span><span class="bt"><div class="t1">'+App.esc(brandSystem)+'</div><div class="t2">'+App.esc(brandUnit)+' · DRILL</div></span></div><nav class="nav">';
@@ -144,21 +144,45 @@ function mountShell(pageKey){
     + '</div></div></aside>';
 
   html += '<div class="main-wrap"><header class="topbar">'
-    + '<span class="proj-sel" onclick="App.switchProject()">'+icon('projects')+'<b id="topProj"></b><span class="dim">切换 ▾</span></span>'
-    + '<span id="topLive"></span>'
-    + '<span class="tb-center" onclick="App.openScreen()">'+icon('screen')+'<span>演练监视大屏</span></span>'
-    + '<span class="right tb-clock" id="topClock"></span>'
-    + '<span class="bell" onclick="App.showNotifs()">'+icon('bell')+'<span class="n" id="bellN" style="display:none">0</span></span>'
-    + '<span class="bell voice-btn" id="voiceBtn" onclick="App.toggleVoice()" title="语音播报"></span>'
-    + '<span class="role-chip"><span class="av">'+(r.name||'?').slice(0,1)+'</span>'+r.name+'</span>'
-    + '<span class="tb-out" onclick="location.href=\'password.html\'">'+icon('lock')+'修改密码</span>'
-    + '<span class="tb-out" onclick="App.logout()">'+icon('logout')+'退出</span>'
+    + '<div class="topbar-row topbar-row-1">'
+    +   '<button class="nav-toggle" id="navToggle" type="button" aria-label="导航菜单">☰</button>'
+    +   '<span class="proj-sel" onclick="App.switchProject()">'+icon('projects')+'<b id="topProj"></b><span class="dim">切换 ▾</span></span>'
+    +   '<span id="topLive"></span>'
+    + '</div>'
+    + '<span class="tb-center" onclick="App.openScreen()">'+icon('screen')+'<span id="topStatus">演练监视大屏</span></span>'
+    + '<div class="topbar-right-group">'
+    +   '<span class="bell" onclick="App.showNotifs()">'+icon('bell')+'<span class="n" id="bellN" style="display:none">0</span></span>'
+    +   '<span class="bell voice-btn" id="voiceBtn" onclick="App.toggleVoice()" title="语音播报"></span>'
+    +   '<span class="role-chip"><span class="av">'+(r.name||'?').slice(0,1)+'</span>'+r.name+'</span>'
+    +   '<span class="tb-out" onclick="location.href=\'password.html\'">'+icon('lock')+'修改密码</span>'
+    +   '<span class="tb-out" onclick="App.logout()">'+icon('logout')+'退出</span>'
+    +   '<span class="tb-clock" id="topClock"></span>'
+    + '</div>'
     + '</header><main id="page"></main></div>';
   document.body.insertAdjacentHTML('afterbegin', html);
 
   // 时钟（立即启动，不依赖数据）
   function tick(){ var d=new Date(); var el=document.getElementById('topClock'); if(el) el.textContent = d.toLocaleDateString('zh-CN')+' '+d.toTimeString().slice(0,8); }
-  tick(); setInterval(tick,1000);
+  tick(); shellClockTick = setInterval(tick,1000);
+
+  // 移动端汉堡：切换 sidebar 抽屉 + body.drawer-open 遮罩
+  var toggle = document.getElementById('navToggle');
+  var side = document.querySelector('.sidebar');
+  if(toggle && side){
+    function openDrawer(){ side.classList.add('open'); document.body.classList.add('drawer-open'); }
+    function closeDrawer(){ side.classList.remove('open'); document.body.classList.remove('drawer-open'); }
+    toggle.addEventListener('click', function(e){
+      e.stopPropagation();
+      if(side.classList.contains('open')) closeDrawer(); else openDrawer();
+    });
+    document.addEventListener('click', function(e){
+      if(!side.classList.contains('open')) return;
+      if(side.contains(e.target)) return;
+      if(toggle.contains(e.target)) return;
+      closeDrawer();
+    });
+    // 抽屉打开时锁 body 滚动（额外在 styles.css body.drawer-open::before 做遮罩）
+  }
 }
 
 /* 未读消息角标：数字 >0 时显示，打开消息弹窗后自动隐藏 */
@@ -170,10 +194,18 @@ function setBell(n){
 }
 /* ---------- 语音引擎（浏览器内置 speechSynthesis，零依赖、本机记忆开关） ---------- */
 var VOICE_KEY = 'pzy_voice_on';
-var seenNotif = null;
 var voiceLastText = '';
-var voiceTimer = null;
+var voiceTimer = null;   /* 交互提示播报（表单提示/开关提示）的防抖定时器 */
 var voiceSeq = 0;
+
+/* 站内消息播报：以消息 id 去重，按页面会话生命周期维护（刷新后未读仍会再播一次） */
+var notifSpoken = {};    /* 已入队/已播的消息 id */
+var notifQueue = [];     /* [{id,text}] 串行播报队列 */
+var notifSpeaking = false;
+var notifWatchdog = null;
+var notifClaimTimer = null;
+var notifBusy = false;   /* 通知刷新请求进行中，避免并发响应重复入队 */
+var notifChannel = null; /* 同浏览器多标签互斥（同一消息只在一个标签播报） */
 function voiceSupported(){
   return typeof window !== 'undefined' && !!window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function';
 }
@@ -183,7 +215,8 @@ function voiceOn(){
 function buildUtterance(t){
   var u = new SpeechSynthesisUtterance(t);
   u.lang = 'zh-CN'; u.rate = 1; u.pitch = 1;
-  var zh = (window.speechSynthesis.getVoices() || []).filter(function(v){ return /^zh|chinese/i.test(v.lang || ''); })[0];
+  var voices = (typeof window.speechSynthesis.getVoices === 'function') ? (window.speechSynthesis.getVoices() || []) : [];
+  var zh = voices.filter(function(v){ return /^zh|chinese/i.test(v.lang || ''); })[0];
   if(zh) u.voice = zh;
   return u;
 }
@@ -240,32 +273,112 @@ function toggleVoice(){
   toast(next ? '语音播报已开启' : '语音播报已关闭', next ? 'ok' : '');
   if(next) voiceSpeak('语音播报已开启', { force:true });
 }
+/* ---------- 站内消息播报：串行队列 + 消息 id 去重 + 当前项目过滤 ---------- */
+function initNotifChannel(){
+  if(notifChannel || typeof BroadcastChannel !== 'function') return;
+  try{
+    notifChannel = new BroadcastChannel('pzy_notif_voice');
+    notifChannel.onmessage = function(ev){
+      var d = ev && ev.data;
+      if(!d || d.type !== 'spoken' || !d.id) return;
+      var id = String(d.id);
+      notifSpoken[id] = 1;
+      notifQueue = notifQueue.filter(function(q){ return q.id !== id; });
+    };
+  }catch(e){ notifChannel = null; }
+}
+/* 同标签页刷新沿用 sessionStorage 中的 tab id，其他标签页拿不到它 */
+function notifTabId(){
+  try{
+    var id = sessionStorage.getItem('pzy_voice_tab');
+    if(!id){
+      id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      sessionStorage.setItem('pzy_voice_tab', id);
+    }
+    return id;
+  }catch(e){ return 'tab-' + Date.now(); }
+}
+/* 抢播占位：同一消息 5 秒内只允许一个标签页发声；同一标签页刷新不受限（仍会再播一次） */
+function notifClaim(id){
+  var mine = notifTabId();
+  try{
+    var rec = JSON.parse(localStorage.getItem('pzy_voice_claim_' + id) || 'null');
+    if(rec && rec.tab !== mine && Date.now() - rec.t < 5000) return 'other';
+    localStorage.setItem('pzy_voice_claim_' + id, JSON.stringify({ tab: mine, t: Date.now() }));
+    return 'mine';
+  }catch(e){ return 'mine'; }
+}
+function notifQueueDrain(){
+  if(notifSpeaking) return;
+  if(!voiceSupported()){ notifQueue.length = 0; return; }
+  var item = notifQueue.shift();
+  while(item){
+    /* 播报前再核对一次服务端已读状态：已读消息不再播 */
+    var cur = (MOCK.NOTIFS || []).filter(function(x){ return String(x.id) === item.id; })[0];
+    if(cur && cur.read){ item = notifQueue.shift(); continue; }
+    if(notifClaim(item.id) === 'other'){ item = notifQueue.shift(); continue; }
+    break;
+  }
+  if(!item) return;
+  notifSpeaking = true;
+  var synth = window.speechSynthesis;
+  var finished = false;
+  function done(){
+    if(finished) return;
+    finished = true;
+    if(notifWatchdog){ clearTimeout(notifWatchdog); notifWatchdog = null; }
+    notifSpeaking = false;
+    notifQueueDrain();
+  }
+  /* 留出跨标签页写占位的确认窗口：若同帧被另一标签抢占则让出 */
+  notifClaimTimer = setTimeout(function(){
+    notifClaimTimer = null;
+    if(notifClaim(item.id) === 'other'){ notifSpeaking = false; notifQueueDrain(); return; }
+    try{
+      var u = buildUtterance(item.text);
+      u.onend = done; u.onerror = done;
+      /* 兜底：个别环境不触发 onend，按正文长度解除占用，避免队列卡死 */
+      notifWatchdog = setTimeout(done, 1200 + item.text.length * 260);
+      synth.speak(u);
+    }catch(e){ done(); }
+  }, 150);
+}
+function announceNotif(n){
+  var id = String(n.id || '');
+  if(!id || notifSpoken[id]) return;
+  /* 播报文本 = 消息正文（descr）原样：不拼 title、不加序号、不截断、不做空白归一化 */
+  var text = String(n.desc == null ? '' : n.desc);
+  if(!text) return; /* 正文为空（空串/null）不播报，不退化为播标题 */
+  notifSpoken[id] = 1;
+  notifQueue.push({ id:id, text:text });
+  try{ if(notifChannel && notifChannel.postMessage) notifChannel.postMessage({ type:'spoken', id:id }); }catch(e){}
+}
+function announceUnreadNotifs(ns){
+  var proj = API.activeProject();
+  var pid = proj && proj.id ? String(proj.id) : '';
+  if(!pid) return; /* 无当前演练项目：不播报 */
+  (ns || []).forEach(function(n){
+    if(!n || n.read) return; /* 已读消息不播报，读状态以服务端返回为准 */
+    var npid = n.projectId == null ? '' : String(n.projectId);
+    if(!npid || npid !== pid) return; /* 跨项目消息 / project_id 为空的全局公告：一律不播 */
+    announceNotif(n);
+  });
+  notifQueueDrain();
+}
 function refreshNotifBadge(){
+  if(notifBusy) return; /* 并发刷新只允许一个请求落地，防止同一消息重复入队 */
+  notifBusy = true;
   API.getNotifs().then(function(ns){
+    notifBusy = false;
     MOCK.NOTIFS = ns;
     var unread = ns.filter(function(x){ return !x.read; });
     setBell(unread.length);
-    /* 语音提醒：新未读消息直接朗读 title+desc 内容，不受语音开关限制 */
-    var fresh = unread.filter(function(x){ return !seenNotif || !seenNotif[x.id]; });
-    if(fresh.length){
-      /* 最多朗读最新 3 条，避免密集时刷屏 */
-      var toSpeak = fresh.slice(0, 3);
-      var queue = toSpeak.map(function(n, i){
-        var head = fresh.length > 1 ? ('第'+(i+1)+'条，') : '';
-        return head + (n.desc || n.title || '');
-      });
-      if(fresh.length > 3) queue.push('另外还有 '+(fresh.length-3)+' 条未读消息');
-      /* 每条之间停顿 600ms，queue:true 让 speechSynthesis 自然串行 */
-      queue.forEach(function(t, i){
-        voiceSpeak(t, { always:true, force:true, queue:i>0 });
-      });
-    }
-    seenNotif = {};
-    ns.forEach(function(x){ seenNotif[x.id] = 1; });
-  }).catch(function(){});
+    announceUnreadNotifs(ns);
+  }).catch(function(){ notifBusy = false; });
 }
 var notifPoll = null;
 var liveTick = null;
+var shellClockTick = null;
 /* 顶栏演练计时：按真实起止时刻每秒本地推算 T+HH:MM:SS */
 function renderLiveChip(){
   var live = document.getElementById('topLive');
@@ -274,16 +387,41 @@ function renderLiveChip(){
   if(!proj){ live.innerHTML = '<span class="live-chip none"><span class="dot"></span>暂无演练</span>'; return; }
   if(proj.status==='演练中' || proj.status==='暂停'){
     var paused = proj.status==='暂停';
+    /* 历史数据可能 started_at 为空（未写入开始时刻）：如实标注"计时未启动"，不显示误导性的 T+00:00:00 */
+    var es = API.elapsedOf(proj);
+    var timerTxt = (es === null) ? '计时未启动' : ('T+' + API.fmtElapsed(es));
     live.innerHTML = '<span class="live-chip'+(paused?' none':'')+'"><span class="dot"></span>'
-      + (paused?'演练已暂停':'演练进行中') + ' · ' + App.esc(proj.level||'') + '级事件 · T+' + API.fmtElapsed(API.elapsedOf(proj)) + '</span>';
+      + (paused?'演练已暂停':'演练进行中') + ' · ' + App.esc(proj.level||'') + '级事件 · ' + timerTxt + '</span>';
   } else {
     live.innerHTML = '<span class="live-chip none"><span class="dot"></span>' + App.esc(proj.status) + '</span>';
   }
 }
 function startNotifPolling(){
   if(notifPoll) return;
+  initNotifChannel();
   notifPoll = setInterval(refreshNotifBadge, 15000);
 }
+function stopNotifPolling(){
+  if(notifPoll){ clearInterval(notifPoll); notifPoll = null; }
+}
+/* 页面卸载/进入后台缓存时释放全部定时器与跨标签通道，避免重复轮询与叠加播报 */
+function clearShellTimers(){
+  stopNotifPolling();
+  if(liveTick){ clearInterval(liveTick); liveTick = null; }
+  if(shellClockTick){ clearInterval(shellClockTick); shellClockTick = null; }
+  voiceStop();
+  notifQueue.length = 0;
+  notifSpeaking = false;
+  if(notifWatchdog){ clearTimeout(notifWatchdog); notifWatchdog = null; }
+  if(notifClaimTimer){ clearTimeout(notifClaimTimer); notifClaimTimer = null; }
+  if(notifChannel){ try{ notifChannel.close(); }catch(e){} notifChannel = null; }
+}
+window.addEventListener('pagehide', clearShellTimers);
+window.addEventListener('pageshow', function(){
+  initNotifChannel();
+  startNotifPolling();
+  if(!liveTick) liveTick = setInterval(renderLiveChip, 1000);
+});
 
 /* 数据加载完成后刷新顶栏与徽标（bootstrap 之后调用） */
 function refreshShell(){
@@ -454,9 +592,174 @@ function openScreen(){
   try { win.focus(); } catch(e){}
 }
 
+/* ===== 演练脚本弹层（项目管理页与角色工作台共用，只读） ===== */
+function scriptModeOf(data, p){
+  var mode = (data && data.mode) || (p && p.mode) || '基础版';
+  return mode === '实战版' ? '实战版' : '基础版';
+}
+function scriptNodeCard(n, idx, mode){
+  var typeLabel = ({alert:'告警节点',parallel:'并行节点',task:'处置节点',report:'上报节点',decision:'决策节点'})[n.type] || '节点';
+  var timeoutTag = n.timeout ? (n.timeout + ' 分钟') : '未设置';
+  var extras = '';
+  if(mode === '基础版'){
+    if(n.guide) extras += '<div class="sn-guide"><span class="sn-guide-label">演练提示：</span>'+App.esc(n.guide)+'</div>';
+    if(n.desc) extras += '<div class="sn-desc">'+App.esc(n.desc)+'</div>';
+    if(n.score) extras += '<div class="sn-score">分值 '+n.score+' 分</div>';
+  }else{
+    /* 实战版：组内所有条目外观完全一致，不出现任何对错标记 */
+    if(n.desc) extras += '<div class="sn-desc">'+App.esc(n.desc)+'</div>';
+    if(n.action) extras += '<div class="sn-action">处置动作：'+App.esc(n.action)+'</div>';
+  }
+  var titleHtml = mode === '基础版' ? ((idx+1)+'. '+App.esc(n.title)) : (App.esc(n.title) || '未命名动作');
+  return '<div class="script-node '+(mode === '基础版' ? 'basic' : 'option')+'">'
+    + '<div class="sn-head"><span class="sn-title">'+titleHtml+'</span></div>'
+    + '<div class="sn-meta">'
+    +   '<span>'+typeLabel+'</span>'
+    +   '<span>责任角色：'+(n.role ? App.esc(n.role) : '—')+'</span>'
+    +   '<span>处置时长：'+timeoutTag+'</span>'
+    +   (mode === '基础版' && n.action ? '<span>动作：'+App.esc(n.action)+'</span>' : '')
+    + '</div>'
+    + extras
+    + '</div>';
+}
+/* 实战版分组：一个主流节点 = 一个步骤组，组内混合锚定在该节点上的全部动作 */
+function shuffleList(arr){
+  for(var i=arr.length-1;i>0;i--){
+    var j = Math.floor(Math.random()*(i+1));
+    var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+  return arr;
+}
+function buildScriptGroups(list){
+  var groups = [], groupByMainId = {};
+  list.forEach(function(n){
+    if(String(n.flowType || '') === 'distractor') return;
+    var g = { main:n, items:[n] };
+    groups.push(g);
+    groupByMainId[String(n.id)] = g;
+  });
+  var orphans = [];
+  list.forEach(function(n){
+    if(String(n.flowType || '') !== 'distractor') return;
+    var g = groupByMainId[String(n.anchorId || '')];
+    if(g){ g.items.push(n); } else { orphans.push(n); }
+  });
+  /* 锚点缺失或失配的条目并入序号最接近的前一组，避免静默丢失 */
+  orphans.forEach(function(n){
+    var target = groups[0];
+    for(var i=0;i<groups.length;i++){
+      if(Number(groups[i].main.seq) <= Number(n.seq)) target = groups[i];
+    }
+    if(target) target.items.push(n);
+  });
+  /* 组内随机混排；若本次打开中主流条目排在首位的组数超过半数则重新洗牌 */
+  var tries = 0;
+  do {
+    groups.forEach(function(g){ shuffleList(g.items); });
+    tries++;
+    var multi = groups.filter(function(g){ return g.items.length > 1; });
+    var firstCount = multi.filter(function(g){ return g.items[0] === g.main; }).length;
+  } while(firstCount > Math.floor(multi.length/2) && tries < 30);
+  return groups;
+}
+function renderScriptBody(container, data, p){
+  if(!data || !data.ok){ container.innerHTML = '<div class="center dim">脚本数据异常</div>'; return; }
+  var mode = scriptModeOf(data, p);
+  var all = Array.isArray(data.script) ? data.script : [];
+  /* 终止节点一律不展示；基础版再过滤混淆节点，实战版保留全部动作 */
+  var list = all.filter(function(n){
+    if(n.type === 'end') return false;
+    if(mode === '基础版' && String(n.flowType || '') === 'distractor') return false;
+    return true;
+  });
+  var instructionsHtml = (data.instructions || []).map(function(s){ return '<li>'+App.esc(s)+'</li>'; }).join('');
+  var membersHtml = (data.members || []).map(function(m){ return '<span class="sm-chip">'+App.esc(m.name)+'</span>'; }).join('');
+  var projectName = data.projectName || data.name || (p && p.name) || '—';
+
+  var flowSection;
+  if(mode === '实战版'){
+    /* 一个主流节点 = 一个步骤组；组内主流动作与锚定动作随机混排，外观完全一致 */
+    var groups = buildScriptGroups(list);
+    var groupsHtml = groups.map(function(g, gi){
+      return '<div class="script-section"><h3>步骤组 '+(gi+1)+'</h3>'
+        + g.items.map(function(n){ return scriptNodeCard(n, 0, mode); }).join('')
+        + '</div>';
+    }).join('');
+    flowSection = '<div class="script-section"><h3>演练步骤（'+groups.length+' 个步骤组 · '+list.length+' 个动作）</h3>'
+      + '<div class="tiny dim" style="margin-bottom:10px">每个步骤组对应一个主流节点，组内动作顺序随机排列；请结合现场情况自主选择执行的处置动作。</div>'
+      + groupsHtml
+      + '</div>';
+  }else{
+    flowSection = '<div class="script-section"><h3>演练流程（'+list.length+' 个主流节点）</h3>'
+      + list.map(function(n, idx){ return scriptNodeCard(n, idx, mode); }).join('')
+      + '</div>';
+  }
+
+  container.innerHTML =
+    '<div class="script-instructions"><h4>'+App.esc(mode)+'演练脚本说明</h4><ul>'+instructionsHtml+'</ul>'
+    + '<div class="tiny dim mt2" style="margin-top:8px">'
+    + (mode === '实战版'
+        ? '每个步骤组内的动作顺序为随机排列，不提前标注执行结果'
+        : '✅ 已自动过滤全部混淆节点与终止节点，仅展示主流处置流程')
+    + '</div></div>'
+    + '<div class="script-section"><h3>演练概览</h3>'
+    +   '<div class="grp-kv" style="margin-top:6px">'
+    +     '<span class="k">项目编号</span><span>'+App.esc(data.projectId)+'</span>'
+    +     '<span class="k">项目名称</span><span>'+App.esc(projectName)+'</span>'
+    +     '<span class="k">演练模式</span><span>'+(mode === '实战版' ? '<span class="tag red">实战版</span>' : '<span class="tag green">基础版</span>')+'</span>'
+    +     '<span class="k">关联剧本</span><span>'+(data.scenario ? App.esc(data.scenario.name) : '—')+'</span>'
+    +     '<span class="k">剧本类型</span><span>'+(data.scenario ? App.esc(data.scenario.type) : '—')+'</span>'
+    +     '<span class="k">当前状态</span><span>'+statusTag(data.status)+'</span>'
+    +     '<span class="k">事件等级</span><span>'+App.esc(data.level)+'</span>'
+    +   '</div>'
+    + '</div>'
+    + '<div class="script-section"><h3>参演角色（'+((data.members||[]).length)+' 人）</h3>'
+    +   (membersHtml ? '<div class="script-members">'+membersHtml+'</div>' : '<div class="tiny dim">尚未添加参演角色</div>')
+    + '</div>'
+    + flowSection;
+}
+function openScript(p, opts){
+  opts = opts || {};
+  /* 无进行中项目：给空态提示，不弹错误 */
+  if(!p || !p.id){
+    modal({
+      title:'演练脚本',
+      body:'<div class="standby-hero" style="margin:0"><div class="sb-icon">'+icon('file-text')+'</div>'
+        + '<div class="sb-body"><span class="sb-tag"><span class="dot"></span>NO ACTIVE DRILL · 暂无演练</span>'
+        + '<h2>暂无可查看的演练脚本</h2>'
+        + '<div class="sb-sub">当前没有进行中的演练项目。演练项目启动后，可在此查看本项目全部处置流程与选项（只读，不提供执行入口）。</div>'
+        + '</div></div>',
+      foot:'<button class="btn" id="scEmptyClose">关闭</button>',
+      onOpen:function(ov){ ov.querySelector('#scEmptyClose').onclick = ov.close; }
+    });
+    return;
+  }
+  var foot = '<button class="btn" id="scClose">关闭</button>';
+  if(opts.canExport){
+    foot += '<a class="btn ok" id="scWord" style="text-decoration:none" target="_blank">'+icon('download')+'导出 Word</a>';
+  }
+  modal({ title:'演练脚本 · '+App.esc(p.name)+'（'+(p.mode||'基础版')+'）', wide:true,
+    body:'<div id="scriptBody" class="script-body"><div class="center dim">加载中…</div></div>',
+    foot:foot,
+    onOpen:function(ov){
+      ov.querySelector('#scClose').onclick = ov.close;
+      if(opts.canExport && ov.querySelector('#scWord')) ov.querySelector('#scWord').href = API.exportProjectScriptUrl(p.id);
+      API.getProjectScript(p.id).then(function(data){
+        try { renderScriptBody(ov.querySelector('#scriptBody'), data, p); }
+        catch(err){
+          console.error('[script-view] renderScriptBody error:', err);
+          ov.querySelector('#scriptBody').innerHTML = '<div class="center dim" style="color:#e74c3c">渲染异常：'+App.esc(err.message)+'<br>请刷新页面重试</div>';
+        }
+      }).catch(function(err){
+        console.error('[script-view] getProjectScript error:', err);
+        ov.querySelector('#scriptBody').innerHTML = '<div class="center dim" style="color:#e74c3c">加载失败：'+App.esc((err&&err.message)||'未知错误')+'<br>请检查登录状态或刷新页面</div>';
+      });
+    } });
+}
+
 window.App = { boot:boot, icon:icon, ICONS:ICONS, toast:toast, modal:modal, drawer:drawer, confirmSim:confirmSim,
   logout:logout, switchProject:switchProject, showNotifs:showNotifs, openScreen:openScreen, statusTag:statusTag, levelTag:levelTag,
   refreshShell:refreshShell, renderLiveChip:renderLiveChip, toggleVoice:toggleVoice,
   voice:{ speak:voiceSpeak, stop:voiceStop, on:voiceOn, supported:voiceSupported, sync:syncVoiceBtn },
-  barChart:barChart, hbar:hbar, donut:donut, curRole:curRole, curUser:curUser, esc:function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');} };
+  barChart:barChart, hbar:hbar, donut:donut, curRole:curRole, curUser:curUser, openScript:openScript, esc:function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');} };
 })();

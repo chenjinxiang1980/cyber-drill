@@ -1,0 +1,87 @@
+# =============================================================================
+# docker-compose.smoke.yml —— 轻量冒烟专用（独立端口 / 独立项目名 / 独立卷）
+#
+# 与 deploy/docker-dist/docker-compose.yml 区别：
+#   - 项目名固定 S99_dockerdist（-p 参数），避免碰 drill-* 现有项目
+#   - 宿主端口：app→18090，mysql→13306（不碰 8090 / 3306）
+#   - 构建用 Dockerfile.runtime（只 build runtime 阶段，快）
+#   - MySQL 卷也带项目名前缀（compose -p 会自动加）
+# =============================================================================
+
+services:
+  mysql:
+    image: mysql:8.0.42
+    container_name: s99-dockerdist-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-smoke_root_pw}
+      MYSQL_DATABASE:      ${DB_NAME:-drill_system}
+      MYSQL_USER:          ${DB_USER:-smoke_user}
+      MYSQL_PASSWORD:      ${DB_PASSWORD:-smoke_pw_42}
+      TZ:                  Asia/Shanghai
+    ports:
+      - "13306:3306"
+    volumes:
+      - S99_mysql_data:/var/lib/mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --max-connections=300
+      --default-time-zone='+08:00'
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - S99_net
+
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/docker-dist/Dockerfile.runtime
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    image: drill-server:0.5.0-smoke
+    container_name: s99-dockerdist-app
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-drill_system}
+      DB_USER: ${DB_USER:-smoke_user}
+      DB_PASSWORD: ${DB_PASSWORD:-smoke_pw_42}
+      DB_SSLMODE: disable
+      JWT_SECRET:      ${JWT_SECRET:-}
+      SESSION_SECRET:  ${SESSION_SECRET:-}
+      HTTP_ADDR: 0.0.0.0:8090
+      APP_ENV: production
+      TRUSTED_PROXIES: "172.17.0.0/16,127.0.0.1/32"
+    ports:
+      - "18090:8090"
+    volumes:
+      - S99_app_data:/opt/drill/data
+      - S99_app_uploads:/opt/drill/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - S99_net
+
+volumes:
+  S99_mysql_data:
+  S99_app_data:
+  S99_app_uploads:
+
+networks:
+  S99_net:
+    driver: bridge

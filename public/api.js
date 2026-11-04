@@ -160,12 +160,15 @@ window.API = (function () {
   }
 
   /* ---------- 会话 ---------- */
-  function login(username, password, role) {
-    return DRILL.post('/auth/login', { username: username, password: password, role: role || '' }).then(function (r) {
+  function login(username, password, role, captchaId, captchaCode) {
+    var body = { username: username, password: password, role: role || '' };
+    if (captchaId) body.captchaId = captchaId;
+    if (captchaCode) body.captchaCode = captchaCode;
+    return DRILL.post('/auth/login', body).then(function (r) {
       DRILL.setToken(r.token);
       sessionStorage.setItem('pzy_role', JSON.stringify(r.role));
       sessionStorage.setItem('pzy_user', r.user.name);
-      sessionStorage.setItem('pzy_org', r.user.org || '盘州市人民医院');
+      sessionStorage.setItem('pzy_org', r.user.org || '示例医院');
       return r;
     });
   }
@@ -426,7 +429,7 @@ window.API = (function () {
       (MOCK.USERS = MOCK.USERS || []).push({
         id: r.id, username: u.username, name: u.name,
         role: (u.roles && u.roles[0]) || u.role, roleName: '',
-        roles: (u.roles || [u.role]).slice(), org: u.org || '盘州市人民医院', status: '启用'
+        roles: (u.roles || [u.role]).slice(), org: u.org || '示例医院', status: '启用'
       });
       return r;
     });

@@ -1,20 +1,70 @@
+# ---- Node 旧项目产物 ----
 *.log
 .gh-config/
 *.db-wal
 *.db-shm
-
-# dependencies
 node_modules/
+
+# ---- 打包输出（运行时产生，永远不入库）----
+dist/
+*.sql
+!migrations/*.sql
+backup/
+*.bak
+*.bak-*
+*.bak_*
+*.orig
+public.bak*
+public.bak-*
+
+# ---- 临时 / 中间产物（统一收口到 .trae/tmp，.trae/ 已整体忽略）----
+.trae/tmp/
+dist_local/
+deploy-out/
+server/deploy-linux/dev-drill-server
+server/temp/
+server/.build_out/
+
+# ---- Go 编译产物 ----
+*.exe
+*.test
+*.test.exe
+*.out
+*.syso
+server/server
+server/server.exe
+server/drill-server
+server/drill-server.exe
+server/bin/
+server/deploy/
+server/build-output-*
+server/release/
+server/release-*/
+server/release*/
+server/.gocache/
+server/.gotmp/
+# 发布二进制不入库，只保留签名文本 drill-server.sha256.txt
+server/deploy-linux/drill-server
+server/deploy-linux/drill-server.exe
+server/deploy-linux/drill-server-linux
+server/deploy-linux/*.tar.gz
+
+# ---- 归档 / 离线包（不入库，作为 Release 附件）----
+*.tar.gz
+*.tgz
+*.zip
 
 # temp scripts
 tmp_*.js
 _*.js
+_*.mjs
 _*.ps1
+_*.py
 
 # stray temp DBs (accidental writes to cwd)
 datadrill.db
 *.db
-!data/drill.db
+/data/
 
 # extracted documents from user uploads
 *_extracted.md
@@ -37,9 +87,46 @@ data/server.err.log
 # uploads
 uploads/
 
-# env
+# ---- 安全的默认：只允许 .env.example，任何真实 .env / .env.* 一律不入库 ----
 .env
-.env.local
+.env.*
+!.env.example
+
+# ---- 证书 / 私钥（永不入库）----
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
+deploy/certs/
+
+# ---- 日志目录 ----
+logs/
+
+# ---- 根目录杂项 / 安全软件产物 ----
+/qc
+/query
+/.mysql.pid
+.screenshots/
+/docs/screenshots/
+
+# ---- 作者本机内网运维脚本（含真实 VM 地址/宿主路径，不随开源仓库分发）----
+/scripts/deploy-to-vm.ps1
+/scripts/sync-public-to-vm.ps1
+/scripts/sync_public_core.py
+/scripts/*.png
+
+# ---- 本机临时探针（会写/删本地数据，不随开源仓库分发）----
+server/cmd/_*/
+
+# ---- 内部验收工具（依赖真实账号/现役库，不随开源仓库分发）----
+/server/cmd/verify_admin/
+/server/cmd/verify_e2e/
+/server/cmd/verify_lifecycle/
+/server/cmd/verify_postproject/
+/server/cmd/verify_all/
+/server/cmd/verify_c_smoke/
+/server/cmd/verify_reset/
 
 # OS
 .DS_Store

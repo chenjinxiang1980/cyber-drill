@@ -3,35 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>演练项目管理 · 盘州市人民医院网络安全应急演练系统</title>
+<title>演练项目管理 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 <style>
 .pj-prog{display:flex;align-items:center;gap:8px;min-width:130px}
 .pj-prog .progress{flex:1}
 .pj-ops{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .grp-kv{display:grid;grid-template-columns:88px 1fr;gap:8px 14px;font-size:13px;margin-top:14px}
 .grp-kv .k{color:var(--text3)}
-.script-body{max-height:70vh;overflow-y:auto}
-.script-section{margin-bottom:18px}
-.script-section h3{font-size:14px;font-weight:600;margin-bottom:8px;color:var(--text1);display:flex;align-items:center;gap:6px}
-.script-section h3::before{content:'';width:3px;height:14px;background:var(--primary);border-radius:2px}
-.script-node{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:var(--bg2)}
-.script-node.basic{border-left:3px solid var(--green,#22a06b)}
-.script-node .sn-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.script-node .sn-title{font-weight:600;font-size:13.5px}
-.script-node .sn-meta{display:flex;gap:10px;font-size:12px;color:var(--text3);flex-wrap:wrap}
-.script-node .sn-meta span{display:inline-flex;align-items:center;gap:2px}
-.script-node .sn-desc{font-size:13px;color:var(--text2);line-height:1.6;margin-top:6px}
-.script-node .sn-guide{margin-top:8px;padding:8px 10px;background:rgba(52,152,219,.08);border-radius:6px;font-size:12.5px;color:#2c3e50;border-left:2px solid #3498db}
-.script-node .sn-guide .sn-guide-label{font-weight:600;color:#3498db;margin-right:4px}
-.script-node .sn-action{margin-top:4px;font-size:12px;color:var(--text3)}
-.script-node .sn-score{font-size:12px;color:#e67e22;font-weight:600}
-.script-instructions{background:linear-gradient(135deg,rgba(52,152,219,.08),rgba(46,204,113,.06));border:1px solid rgba(52,152,219,.2);border-radius:8px;padding:14px 16px;margin-bottom:18px}
-.script-instructions h4{margin:0 0 8px;font-size:13px;color:#2c3e50}
-.script-instructions ul{margin:0;padding-left:18px;font-size:12.5px;color:var(--text2);line-height:1.8}
-.script-members{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
-.script-members .sm-chip{background:rgba(79,124,255,.1);color:var(--primary);padding:3px 10px;border-radius:12px;font-size:12px}
 .notice-preview{background:rgba(46,204,113,.06);border:1px solid rgba(46,204,113,.25);border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px;line-height:1.7}
 .notice-preview .np-title{font-weight:600;margin-bottom:4px;color:#2c3e50}
 .notice-preview .np-body{color:var(--text2)}
@@ -122,86 +102,11 @@ document.addEventListener('app:ready', function(e){
     });
   }
 
-  /* ===== 演练脚本（仅 Word 导出） ===== */
+  /* ===== 演练脚本（共用 App.openScript，只读） ===== */
   function openScript(p){
     if(!p){ App.toast('演练项目不存在','err'); return; }
     if(!p.scenarioId){ App.toast('该项目未关联剧本','warn'); return; }
-    App.modal({ title:'演练脚本 · '+App.esc(p.name)+'（'+p.mode+'）', wide:true, body:'<div id="scriptBody" class="script-body"><div class="center dim">加载中…</div></div>',
-      foot:'<button class="btn" id="scClose">关闭</button>'
-        + '<a class="btn ok" id="scWord" style="text-decoration:none" target="_blank">'+App.icon('download')+'导出 Word</a>',
-      onOpen:function(ov){
-        ov.querySelector('#scClose').onclick = ov.close;
-        ov.querySelector('#scWord').href = API.exportProjectScriptUrl(p.id);
-        API.getProjectScript(p.id).then(function(data){
-          try { renderScriptBody(ov.querySelector('#scriptBody'), data, p); }
-          catch(err) { console.error('[projects.html] renderScriptBody error:', err); ov.querySelector('#scriptBody').innerHTML = '<div class="center dim" style="color:#e74c3c">渲染异常：' + err.message + '<br>请刷新页面重试</div>'; }
-        }).catch(function(err){
-          console.error('[projects.html] getProjectScript error:', err);
-          ov.querySelector('#scriptBody').innerHTML = '<div class="center dim" style="color:#e74c3c">加载失败：' + ((err&&err.message)||'未知错误') + '<br>请检查登录状态或刷新页面</div>';
-        });
-      } });
-  }
-  function renderScriptBody(container, data, p){
-    if(!data || !data.ok){ container.innerHTML = '<div class="center dim">脚本数据异常</div>'; return; }
-    var mode = data.mode;
-    /* 前端二次过滤（绝对保险）：即便后端漏了，也绝不展示混淆节点和终止节点 */
-    var safeList = (data.script || []).filter(function(n){
-      if(n.type === 'end') return false;          /* 终止节点不展示 */
-      if(n.flowType === 'distractor') return false; /* 混淆节点不展示 */
-      return true;
-    });
-    /* 验证过滤是否生效：如果后端漏了混淆节点，前端拦截并警告 */
-    var leaked = (data.script || []).length - safeList.length;
-    if(leaked > 0){
-      console.warn('[projects.html] 前端二次过滤拦截了 '+leaked+' 个不应展示的节点（已屏蔽）');
-    }
-
-    var instructionsHtml = data.instructions.map(function(s){ return '<li>'+App.esc(s)+'</li>'; }).join('');
-    var membersHtml = (data.members || []).map(function(m){ return '<span class="sm-chip">'+App.esc(m.name)+'</span>'; }).join('');
-
-    var nodesHtml = safeList.map(function(n, idx){
-      var roleTags = n.role ? App.esc(n.role) : '—';
-      var typeLabel = ({alert:'告警节点',parallel:'并行节点',task:'处置节点',report:'上报节点',decision:'决策节点'})[n.type] || '节点';
-      var timeoutTag = n.timeout ? (n.timeout + ' 分钟') : '未设置';
-      var extras = '';
-      if(mode === '基础版'){
-        if(n.guide) extras += '<div class="sn-guide"><span class="sn-guide-label">演练提示：</span>'+App.esc(n.guide)+'</div>';
-        if(n.desc) extras += '<div class="sn-desc">'+App.esc(n.desc)+'</div>';
-        if(n.score) extras += '<div class="sn-score">分值 '+n.score+' 分</div>';
-      }
-      return '<div class="script-node basic">'
-        + '<div class="sn-head"><span class="sn-title">'+(idx+1)+'. '+App.esc(n.title)+'</span></div>'
-        + '<div class="sn-meta">'
-        +   '<span>'+typeLabel+'</span>'
-        +   '<span>责任角色：'+roleTags+'</span>'
-        +   '<span>处置时长：'+timeoutTag+'</span>'
-        +   (n.action ? '<span>动作：'+App.esc(n.action)+'</span>' : '')
-        + '</div>'
-        + extras
-        + '</div>';
-    }).join('');
-
-    container.innerHTML =
-      '<div class="script-instructions"><h4>'+App.esc(mode)+'演练脚本说明</h4><ul>'+instructionsHtml+'</ul>'
-      + '<div class="tiny dim mt2" style="color:#16a085;margin-top:8px">✅ 已自动过滤全部混淆节点与终止节点，仅展示主流处置流程</div>'
-      + '</div>'
-      + '<div class="script-section"><h3>演练概览</h3>'
-      +   '<div class="grp-kv" style="margin-top:6px">'
-      +     '<span class="k">项目编号</span><span>'+App.esc(data.projectId)+'</span>'
-      +     '<span class="k">项目名称</span><span>'+App.esc(data.projectName)+'</span>'
-      +     '<span class="k">演练模式</span><span>'+(mode==='实战版'?'<span class="tag red">实战版</span>':'<span class="tag green">基础版</span>')+'</span>'
-      +     '<span class="k">关联剧本</span><span>'+(data.scenario?App.esc(data.scenario.name):'—')+'</span>'
-      +     '<span class="k">剧本类型</span><span>'+(data.scenario?App.esc(data.scenario.type):'—')+'</span>'
-      +     '<span class="k">当前状态</span><span>'+App.statusTag(data.status)+'</span>'
-      +     '<span class="k">事件等级</span><span>'+App.esc(data.level)+'</span>'
-      +   '</div>'
-      + '</div>'
-      + '<div class="script-section"><h3>参演角色（'+(data.members?data.members.length:0)+' 人）</h3>'
-      +   (membersHtml ? '<div class="script-members">'+membersHtml+'</div>' : '<div class="tiny dim">尚未添加参演角色</div>')
-      + '</div>'
-      + '<div class="script-section"><h3>演练流程（'+safeList.length+' 个主流节点）</h3>'
-      + nodesHtml
-      + '</div>';
+    App.openScript(p, {canExport:true});
   }
 
   /* ===== 演练通知（手动生成 + Word 导出） ===== */

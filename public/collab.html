@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>演练导调中心 · 盘州市人民医院网络安全应急演练系统</title>
+<title>演练导调中心 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 </head>
 <body data-page="collab">
 <script src="system.js"></script>
@@ -60,6 +60,7 @@ document.addEventListener('app:ready', function(e){
   var esc = App.esc; /* 本地别名，文件内大量复用 */
   var CHAT_ACCESS = {}; /* 运行时字典：{ inner:{label, roles:[...]}, external:{label, roles:[...]} } */
   var GROUPS = [], curGroup = ''; /* GROUPS：当前角色可访问的频道 {key, label}  */
+  var CHANNELS_CONFIGURED = null; /* 频道字典是否真的存在配置；null=无权限确认（非平台管理员） */
   function canUseChat(k){ return !!(CHAT_ACCESS[k] && CHAT_ACCESS[k].roles && CHAT_ACCESS[k].roles.indexOf(role.id)>=0); }
   function groupOf(k){ return CHAT_ACCESS[k] ? { key:k, label: CHAT_ACCESS[k].label||k } : { key:k, label:k }; }
   var pendingAtt = null;
@@ -67,17 +68,23 @@ document.addEventListener('app:ready', function(e){
   var pollTimer = null;
   var lastCount = 0;
 
-  /* 从 dict 表加载频道配置；字典不存在/为空/格式异常视为无频道 */
+  /* 频道可见范围由服务端按 dict.chat_channels.roles 过滤后下发（Node content.js:134）；
+   * 不能直接读 /api/system/dict（仅平台管理员可读，其他角色会 403 并被误判为“未配置”） */
   function loadChatAccess() {
-    return API.getDict('chat_channels').then(function(res){
-      var v = res && res.value;
-      if(!v || typeof v !== 'object' || !Object.keys(v).length){ CHAT_ACCESS = {}; return; }
-      Object.keys(v).forEach(function(k){
-        if(!v[k].label) v[k].label = k;
-        if(!Array.isArray(v[k].roles)) v[k].roles = [];
+    return API.getChatChannels().then(function(list){
+      var v = {};
+      (Array.isArray(list) ? list : []).forEach(function(ch){
+        if(!ch || !ch.key) return;
+        v[ch.key] = { label: ch.label || ch.key, roles: [role.id] };
       });
       CHAT_ACCESS = v;
-    }).catch(function(){ CHAT_ACCESS = {}; });
+      if(Object.keys(v).length){ CHANNELS_CONFIGURED = true; return; }
+      /* 空列表时再探测字典是否真的未配置：平台管理员可读；其他角色 403 视为“未授权” */
+      return API.getDict('chat_channels').then(function(res){
+        var d = res && res.value;
+        CHANNELS_CONFIGURED = !!(d && typeof d === 'object' && Object.keys(d).length);
+      }).catch(function(){ CHANNELS_CONFIGURED = null; });
+    }).catch(function(){ CHAT_ACCESS = {}; CHANNELS_CONFIGURED = null; });
   }
 
   loadChatAccess().then(draw);
@@ -88,7 +95,7 @@ document.addEventListener('app:ready', function(e){
     curGroup = (canUseChat('inner') ? 'inner' : (GROUPS[0] ? GROUPS[0].key : ''));
 
     if(!GROUPS.length){
-      var noAccess = allKeys.length > 0;
+      var noAccess = !(CHANNELS_CONFIGURED === false);
       page.innerHTML = '<div class="page-head"><div><h1>演练导调中心</h1><div class="sub">院内演练会商与院外上报沟通</div></div></div>'
         + '<div class="embed" style="min-height:320px">'
         + '<div class="empty">'+App.icon('lock')

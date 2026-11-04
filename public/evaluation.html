@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>复盘评估 · 盘州市人民医院网络安全应急演练系统</title>
+<title>复盘评估 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 <style>
 .ev-mode{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .ev-mode .badge{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--border2)}
@@ -22,6 +22,12 @@
 .st-item{padding:9px 0;border-bottom:1px dashed var(--border);font-size:12.5px}
 .st-item:last-child{border-bottom:none}
 .st-item .st-h{display:flex;justify-content:space-between;gap:8px;align-items:center}
+@media(max-width:640px){
+  .ev-row{flex-wrap:wrap;gap:6px}
+  .ev-row .ev-name{width:100%}
+  .ev-row .ev-rule{flex:1 1 100%;width:100%}
+  .ev-row .ev-ro{width:100%;text-align:left}
+}
 </style>
 </head>
 <body data-page="evaluation">
@@ -83,7 +89,7 @@ document.addEventListener('app:ready', function(e){
     + (canEval?'<button class="btn" id="evReEval">'+App.icon('refresh')+'重新自动考评</button>':'')
     + '<button class="btn primary" id="evReport">'+App.icon('file')+'演练报告导出</button></div></div>'
     + '<div class="sim-banner">'+App.icon('alert')+'<span>考评由系统按演练数据自动计算：<b>基础版</b>为完整诱导演练，仅对处置时长打分（逐节点处置时长达成率）；<b>实战版</b>任务中心只展示已发现的系统故障，由参演人员在角色工作台自主选择处置动作，按<b>与剧本基线偏离、处置超时、未处置、偏离剧本的额外操作</b>扣分。所有数据均为演练记录。</span></div>'
-    + '<div class="grid" style="grid-template-columns:1.55fr 1fr;gap:16px">'
+    + '<div class="grid eval-row">'
     +   '<div class="card"><div class="card-title">'+App.icon('score')+'考评明细<span class="more" id="evTitle"></span></div><div id="evItems"><div class="loading-block">正在加载考评数据…</div></div></div>'
     +   '<div class="col gap4">'
     +     '<div class="card"><div class="card-title">'+App.icon('dashboard')+'评估汇总</div>'
@@ -134,7 +140,7 @@ document.addEventListener('app:ready', function(e){
             : '')+'</div>'
         + '</div>';
     }).join('');
-    if(!rows) rows = '<div class="empty">'+App.icon('file')+'<div>暂无考评单元</div></div>';
+    if(!rows) rows = '<div class="empty">'+App.icon('file')+'<div>剧本未配置考评单元</div><div class="tiny dim mt2">请先在剧本管理中补充基线节点</div></div>';
     document.getElementById('evItems').innerHTML = rows;
   }
 
@@ -223,18 +229,80 @@ document.addEventListener('app:ready', function(e){
       + '</tr></thead><tbody>'+ (rows || '<tr><td colspan="7"><div class="empty">'+App.icon('shield')+'<div>暂无实战处置记录</div></div></td></tr>') +'</tbody></table></div>';
   }
 
+  /* 无演练进程数据 → 初始化界面（对齐 Node 版空态，不报错） */
+  function renderInit(status){
+    var notStarted = (status === '未开始');
+    var title = notStarted ? '尚未开始演练' : '演练进行中，暂无处置记录';
+    var desc = notStarted
+      ? '当前项目尚未启动，暂无考评数据。请先在演练项目中启动演练；参演人员在角色工作台完成节点处置后，系统会自动生成考评明细与改进建议。'
+      : '演练已启动，但参演人员尚未提交任何处置记录。首个节点处置完成后，这里会自动生成考评明细。';
+    document.getElementById('evTitle').textContent = notStarted ? '尚未开始演练' : '演练进行中';
+    document.getElementById('evItems').innerHTML =
+      '<div class="standby-hero" style="margin:0">'
+      + '<div class="sb-icon" style="background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.28);color:var(--warn)">'+App.icon('score')+'</div>'
+      + '<div class="sb-body">'
+      +   '<span class="sb-tag" style="color:var(--warn);background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.28)"><span class="dot" style="background:var(--warn)"></span>'+(notStarted?'AWAITING START · 待启动':'IN PROGRESS · 演练中')+'</span>'
+      +   '<h2>'+title+'</h2>'
+      +   '<div class="sb-sub">'+desc+'</div>'
+      +   '<div class="sb-acts" style="flex-wrap:wrap">'
+      +     (notStarted?'<a class="btn primary" href="projects.html">'+App.icon('projects')+'前往演练项目启动</a>':'')
+      +     '<a class="btn" href="workbench.html">'+App.icon('workbench')+'前往角色工作台</a>'
+      +   '</div>'
+      + '</div></div>';
+    document.getElementById('smTotal').textContent = '—';
+    document.getElementById('smMax').textContent = '';
+    var rate = document.getElementById('smRate'); rate.className = 'right tag gray'; rate.textContent = notStarted ? '未开始' : '进行中';
+    var bar = document.getElementById('smBar'); bar.style.width = '0%'; bar.className = 'bar';
+    document.getElementById('smGrade').innerHTML = '<span class="tag gray">'+(notStarted?'未开始':'进行中')+'</span>';
+    document.getElementById('smFormula').textContent = '—';
+    document.getElementById('smStats').innerHTML = '';
+    document.getElementById('evSug').textContent = notStarted
+      ? '启动演练并完成节点处置后，系统将自动生成改进建议。'
+      : '暂无处置记录，暂不生成改进建议。';
+    document.getElementById('evStepsCard').innerHTML = '';
+  }
+
   function load(){
     var btn = document.getElementById('evReEval');
     if(btn) btn.disabled = true;
     API.getDrillWorkbench(proj.id).then(function(wb){
+      if(!wb || !wb.score || !Array.isArray(wb.score.nodes) || !Array.isArray(wb.nodes)){
+        throw new Error('考评数据结构异常：缺少 score/nodes');
+      }
       WB = wb;
       document.querySelector('.page-head .sub').textContent = proj.name + ' · 系统自动考评 · ' + wb.mode;
+      var s = wb.score;
+      var st = proj.status || '未开始';
+      var ended = !!s.ended || st === '已结束' || st === '已归档';
+      /* 无演练进程数据：未结束且无步骤、无完成/偏离/跳过记录 → 初始化界面 */
+      var hasProgress = (wb.steps||[]).length > 0 || (s.hit||0) > 0 || (s.ontime||0) > 0 || (s.wrong||0) > 0 || (s.skipped||0) > 0;
+      if(!ended && !hasProgress){
+        renderInit(st);
+        if(btn) btn.disabled = false;
+        return;
+      }
       renderMode(); renderItems(); renderSummary(); renderSuggestions(); renderSteps();
       if(btn) btn.disabled = false;
     }).catch(function(err){
-      document.getElementById('evItems').innerHTML = '<div class="empty">'+App.icon('alert')+'<div>考评数据加载失败：'+App.esc((err&&err.message)||'请稍后重试')+'</div></div>';
+      renderError((err&&err.message)||'请稍后重试');
       if(btn) btn.disabled = false;
     });
+  }
+
+  /* 接口真失败：错误态（与空态、初始化界面区分） */
+  function renderError(msg){
+    document.getElementById('evTitle').textContent = '加载失败';
+    document.getElementById('evItems').innerHTML = '<div class="empty">'+App.icon('alert')+'<div>考评数据加载失败：'+App.esc(msg)+'</div><div class="tiny dim mt2">请检查网络或稍后重试</div></div>';
+    document.getElementById('smTotal').textContent = '—';
+    document.getElementById('smMax').textContent = '';
+    var rate = document.getElementById('smRate'); rate.className = 'right tag gray'; rate.textContent = '加载失败';
+    var bar = document.getElementById('smBar'); bar.style.width = '0%'; bar.className = 'bar';
+    document.getElementById('smGrade').innerHTML = '<span class="tag gray">加载失败</span>';
+    document.getElementById('smFormula').textContent = '—';
+    document.getElementById('smStats').innerHTML = '';
+    document.getElementById('smMode').innerHTML = '';
+    document.getElementById('evSug').textContent = '—';
+    document.getElementById('evStepsCard').innerHTML = '';
   }
 
   if(btnRe){

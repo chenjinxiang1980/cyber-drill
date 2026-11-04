@@ -1,0 +1,86 @@
+# =============================================================================
+# Dockerfile.runtime —— 轻量冒烟用（只有 runtime 阶段，不依赖 golang 镜像）
+#
+# 用法（远程 Linux 上）：
+#   DOCKER_BUILDKIT=1 docker build \
+#       --build-arg HTTP_PROXY=http://<代理地址>:7890 \
+#       --build-arg HTTPS_PROXY=http://<代理地址>:7890 \
+#       -f deploy/docker-dist/Dockerfile.runtime -t drill-server:0.5.0-smoke .
+#
+# 假设：构建上下文根目录下有：
+#   dist_local/drill-server   dist_local/drill-migrate  （本地交叉编译好的 ELF）
+#   public/                    （前端静态资源）
+#   migrations/                （建表 SQL）
+#   deploy/docker-dist/docker-entrypoint.sh
+#
+# =============================================================================
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY=localhost,127.0.0.1
+
+FROM alpine:3.20
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV NO_PROXY=${NO_PROXY}
+
+ENV TZ=Asia/Shanghai
+ENV APP_ROOT=/opt/drill
+
+# apk add 运行时依赖
+RUN apk add --no-cache tini wget ca-certificates tzdata \
+ && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+ && echo "Asia/Shanghai" > /etc/timezone \
+ && addgroup -S -g 10001 drill \
+ && adduser  -S -u 10001 -G drill -h /opt/drill -s /sbin/nologin drill \
+ && echo "[runtime] apk OK"
+
+# 目录
+RUN mkdir -p /opt/drill/bin \
+              /opt/drill/public \
+              /opt/drill/migrations \
+              /opt/drill/data \
+              /opt/drill/uploads \
+              /opt/drill/etc \
+ && chown -R drill:drill /opt/drill
+
+WORKDIR /opt/drill
+
+# ELF（已交叉编译好）
+COPY dist_local/drill-server  /opt/drill/bin/drill-server
+COPY dist_local/drill-migrate /opt/drill/bin/drill-migrate
+
+# 静态资源 + 迁移脚本
+COPY public/          /opt/drill/public/
+COPY migrations/      /opt/drill/migrations/
+
+# entrypoint
+COPY deploy/docker-dist/docker-entrypoint.sh /opt/drill/docker-entrypoint.sh
+
+# 权限
+RUN chown -R drill:drill /opt/drill \
+ && chmod 755 /opt/drill/bin/drill-server \
+ && chmod 755 /opt/drill/bin/drill-migrate \
+ && chmod 755 /opt/drill/docker-entrypoint.sh \
+ && chmod 644 /opt/drill/public/*           2>/dev/null || true \
+ && chmod 644 /opt/drill/public/img/*       2>/dev/null || true \
+ && chmod 644 /opt/drill/migrations/*.sql   2>/dev/null || true \
+ && echo "[runtime] permissions OK"
+
+# 容器内运行时代理清空（默认不设）
+ENV HTTP_PROXY=
+ENV HTTPS_PROXY=
+
+EXPOSE 8090
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8090/api/health || exit 1
+
+USER drill:drill
+
+ENTRYPOINT ["/sbin/tini", "--", "/opt/drill/docker-entrypoint.sh"]
+CMD ["/opt/drill/bin/drill-server", "-root=/opt/drill"]

@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>系统基础管理 · 盘州市人民医院网络安全应急演练系统</title>
+<title>系统基础管理 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 <style>
 .mx-y{color:var(--ok);display:inline-flex} .mx-y svg{width:15px;height:15px}
 .mx-n{color:var(--text3);opacity:.45;display:inline-flex} .mx-n svg{width:14px;height:14px}
@@ -64,7 +64,13 @@ document.addEventListener('app:ready', function(e){
     +   (BRAND_ADMIN ? '<div class="tab" data-t="brand">'+App.icon('admin')+'基本信息设置</div>' : '')
     + '</div>'
     + '<div class="adm-pane on" id="pane-users">'
-    +   '<div class="card"><div class="card-title">'+App.icon('user')+'用户账号<span class="more" id="uAddBtn">'+App.icon('plus')+'新增用户</span></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('user')+'用户账号'
+    +     '<span class="more" style="display:flex;gap:8px;align-items:center">'
+    +       '<button class="btn sm danger" id="uCleanBtn">'+App.icon('trash')+'清理测试账号</button>'
+    +       '<span class="tiny dim">基线 '+users.filter(function(u){return (u.roles||[u.role]).some(function(r){return r==='platformadmin'||r==='commander';})}).length+' 个</span>'
+    +       '<button class="btn sm" id="uAddBtn" style="white-space:nowrap">'+App.icon('plus')+'新增用户</button>'
+    +     '</span>'
+    +   '</div>'
     +   '<div class="table-wrap"><table class="table"><thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>部门/单位</th><th>状态</th><th>操作</th></tr></thead><tbody id="uBody"></tbody></table></div></div>'
     + '</div>'
     + '<div class="adm-pane" id="pane-matrix">'
@@ -123,7 +129,7 @@ document.addEventListener('app:ready', function(e){
       + '<div class="card"><div class="card-title">'+App.icon('admin')+'系统基本信息</div>'
       +   '<div class="form-grid" style="grid-template-columns:1fr">'
       +     '<div class="form-row"><label class="f-label">系统名称 <span class="req">*</span></label><input class="input" id="bsName" maxlength="40" placeholder="如 网络安全应急演练系统"></div>'
-      +     '<div class="form-row"><label class="f-label">单位名称 <span class="req">*</span></label><input class="input" id="bsUnit" maxlength="40" placeholder="如 盘州市人民医院"></div>'
+      +     '<div class="form-row"><label class="f-label">单位名称 <span class="req">*</span></label><input class="input" id="bsUnit" maxlength="40" placeholder="如 示例医院"></div>'
       +     '<div class="form-row"><label class="f-label">系统版本</label><input class="input" id="bsVer" disabled style="background:rgba(60,70,90,.3);cursor:not-allowed" title="版本号由系统自动维护，不可手动修改"></div>'
       +   '</div>'
       +   '<div class="flex gap3 mt4"><button class="btn primary" id="bsSaveBtn" style="flex:1">'+App.icon('check')+'保存设置</button><button class="btn" id="bsResetBtn">'+App.icon('refresh')+'恢复默认</button></div>'
@@ -172,9 +178,9 @@ document.addEventListener('app:ready', function(e){
     document.querySelectorAll('#uBody [data-rp]').forEach(function(b){
       b.onclick = function(){
         var u = users[+b.dataset.rp];
-        App.confirmSim('将账号「'+u.account+'」（'+u.name+'）的密码重置为初始密码 Pzy@2026？', function(){
-          API.resetUserPassword(u.id, 'Pzy@2026').then(function(){
-            App.toast('已重置「'+u.account+'」的密码为 Pzy@2026','ok');
+        App.confirmSim('将账号「'+u.account+'」（'+u.name+'）的密码重置为初始密码？', function(){
+          API.resetUserPassword(u.id).then(function(){
+            App.toast('已重置「'+u.account+'」的密码（新密码请从 .env 查看 DRILL_INIT_PWD）','ok');
           }).catch(function(e){ App.toast((e&&e.message)||'重置失败','err'); });
         });
       };
@@ -215,7 +221,7 @@ document.addEventListener('app:ready', function(e){
         ov.querySelector('#euYes').onclick = function(){
           var acc = ov.querySelector('#euAcc').value.trim();
           var nm = ov.querySelector('#euName').value.trim();
-          var org = ov.querySelector('#euOrg').value.trim() || ((DRILL.brand()||{}).unitName) || '盘州市人民医院';
+          var org = ov.querySelector('#euOrg').value.trim() || ((DRILL.brand()||{}).unitName) || '示例医院';
           var roles = Array.prototype.slice.call(ov.querySelectorAll('.euRole:checked')).map(function(x){ return x.value; });
           if(!/^[A-Za-z0-9_.-]{3,32}$/.test(acc)){ App.toast('账号需为 3-32 位字母、数字或 _ . -','err'); return; }
           if(!nm){ App.toast('姓名必填','err'); return; }
@@ -233,13 +239,81 @@ document.addEventListener('app:ready', function(e){
             API.addUser({ username:acc, name:nm, roles:roles, org:org }).then(function(r){
               users.push({ id:r.id, account:acc, name:nm, role:roles[0], roles:roles, org:org, status:'启用' });
               ov.close(); renderUsers();
-              App.toast('账号「'+acc+'」已创建，初始密码 Pzy@2026','ok');
+              App.toast('账号「'+acc+'」已创建，初始密码见 .env 的 DRILL_INIT_PWD','ok');
             }).catch(function(e){ App.toast((e&&e.message)||'创建失败','err'); });
           }
         };
       } });
   }
   document.getElementById('uAddBtn').onclick = function(){ openUserModal(null, -1); };
+
+  /* ---------- 清理测试账号 ---------- */
+  document.getElementById('uCleanBtn').onclick = function(){
+    var btn = document.getElementById('uCleanBtn');
+    btn.disabled = true; var prev = btn.textContent; btn.textContent = '加载中…';
+    DRILL.post('/admin/users/cleanup-test-accounts', { dryRun: true }).then(function(data){
+      btn.disabled = false; btn.innerHTML = prev;
+      openCleanupModal(data);
+    }).catch(function(e){
+      btn.disabled = false; btn.innerHTML = prev;
+      App.modal({ title:'清理测试账号',
+        body:'<div class="tiny dim">无法获取预览：'+App.esc((e&&e.message)||'未知错误')+'</div>',
+        foot:'<button class="btn primary" id="cuClose">关闭</button>',
+        onOpen:function(ov){ ov.querySelector('#cuClose').onclick = ov.close; } });
+    });
+  };
+  function openCleanupModal(data){
+    var removable = (data && data.removable) || [];
+    var kept = (data && data.keptCount) !== undefined ? data.keptCount : null;
+
+    if(!removable.length){
+      App.modal({ title:'清理测试账号',
+        body:'<div style="text-align:center;padding:24px 8px">'
+        +'<div style="font-size:32px;margin-bottom:8px">✓</div>'
+        +'<div style="font-size:14px;color:var(--tx)">没有可删除的测试账号</div>'
+        +(kept !== null ? '<div class="tiny dim mt3">当前共有 '+((data&&data.usersCount)||'?')+' 个账号，其中基线 '+kept+' 个</div>' : '')
+        +'</div>',
+        foot:'<button class="btn primary" id="cuNo">关闭</button>',
+        onOpen:function(ov){ ov.querySelector('#cuNo').onclick = ov.close; } });
+      return;
+    }
+
+    var rows = removable.map(function(a){
+      return '<tr><td class="mono">'+App.esc(a.username)+'</td><td>'+roleName(a.roleId)+'</td></tr>';
+    }).join('');
+    var bodyHtml =
+      '<div class="tiny dim sim-banner" style="margin-bottom:10px">'+App.icon('alert')+'<span>这是预览，尚未删除。确认执行后将永久删除以下 '+removable.length+' 个测试账号。</span></div>'
+      +'<div class="tiny dim">共 <b class="mono">'+((data&&data.usersCount)||'?')+'</b> 个账号，其中基线 <b class="mono">'+(kept!==null?kept:'?')+'</b> 个将被保留。</div>'
+      +'<div class="table-wrap mt3"><table class="table tiny"><thead><tr><th>账号</th><th>角色</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+      +'<div class="form-row mt3" style="gap:8px"><label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="cuConfirm"> <span>我已确认，这些账号将被永久删除</span></label></div>';
+
+    App.modal({ title:'清理测试账号 · 预览', wide:true, body:bodyHtml,
+      foot:'<button class="btn" id="cuNo">取消</button>'
+          +'<button class="btn danger" id="cuGo" disabled>'+App.icon('trash')+'执行清理</button>',
+      onOpen:function(ov){
+        var yes = ov.querySelector('#cuConfirm'), go = ov.querySelector('#cuGo');
+        yes.onchange = function(){ go.disabled = !yes.checked; };
+        ov.querySelector('#cuNo').onclick = ov.close;
+        go.onclick = function(){
+          go.disabled = true; go.textContent = '正在执行…';
+          DRILL.post('/admin/users/cleanup-test-accounts', { dryRun:false, confirm:'DELETE-TEST-ACCOUNTS' }).then(function(d2){
+            ov.close();
+            App.toast('清理完成，已删除 '+(d2&&d2.removedCount||removable.length)+' 个测试账号', 'ok');
+            // 刷新列表：重新拉取真实账号（走已有 API）
+            Promise.all([ fetch('/api/auth/accounts').then(function(r){ return r.ok?r.json():[]; }),
+                          fetch('/api/auth/roles').then(function(r){ return r.ok?r.json():[]; }) ]).then(function(ra){
+              ACCOUNTS = ra[0]; ROLES = ra[1];
+              users = ACCOUNTS.map(function(u){ return { id:u.id, account:u.username, name:u.name, role:u.role, roles:(u.roles||[u.role]).slice(), org:u.org, status:u.status||'启用' }; });
+              renderUsers();
+            });
+          }).catch(function(e){
+            go.disabled = false; go.textContent = App.icon('trash')+'执行清理';
+            App.toast((e&&e.message)||'执行失败', 'err');
+          });
+        };
+      }
+    });
+  }
 
   /* ---------- b) 权限矩阵（可编辑：模块可见性 + 角色名称/说明 + 顺序 + 停用/删除） ---------- */
   var rolesState = MOCK.ROLES.map(function(r){
@@ -707,7 +781,7 @@ document.addEventListener('app:ready', function(e){
 
   /* ---------- f) 系统设置（仅平台管理员） ---------- */
   var BRAND_DEFAULTS = {
-    systemName:'网络安全应急演练系统', unitName:'盘州市人民医院', logo:'img/logo.png',
+    systemName:'网络安全应急演练系统', unitName:'示例医院', logo:'img/logo.png',
     github:'https://github.com/chenjinxiang1980/cyber-drill', gitee:'https://gitee.com/habeas/cyber-drill'
   };
   var brandLogoUrl = 'img/logo.png';
@@ -798,7 +872,7 @@ document.addEventListener('app:ready', function(e){
           +'<div>✅ 所有会商记录、取证材料、台账、评分、审计日志</div>'
           +'<div>✅ 内置表单模板（F1–F8）</div>'
           +'<div style="margin-top:12px;color:var(--green)">不会删除：uploads/ 上传文件、data/backups/ 数据库备份</div>'
-          +'<div style="margin-top:12px;color:var(--red)">⚠️ 重置后当前登录态将失效，需用初始密码 <code>Pzy@2026</code> 重新登录</div>'
+          +'<div style="margin-top:12px;color:var(--red)">⚠️ 重置后当前登录态将失效，需用新密码（见 .env 的 DRILL_INIT_PWD）重新登录</div>'
           +'</div>',
         footer: '<button class="btn" id="rsCancel">取消</button><button class="btn danger" id="rsConfirm">确认重置</button>',
         onOpen: function(m){

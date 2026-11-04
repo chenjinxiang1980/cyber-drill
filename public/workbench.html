@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>角色工作台 · 盘州市人民医院网络安全应急演练系统</title>
+<title>角色工作台 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 </head>
 <body data-page="workbench">
 <script src="system.js"></script>
@@ -24,7 +24,10 @@ document.addEventListener('app:ready', function(e){
       var projs = Array.isArray(r[1]) ? r[1] : [];
       var nodes = Array.isArray(r[2]) ? r[2] : [];
       page.innerHTML =
-        '<div class="standby-hero">'
+        '<div class="page-head"><div><h1>'+App.esc(role.name)+' · 工作台</h1>'
+        + '<div class="sub">当前无进行中的演练项目 · 待命状态</div></div>'
+        + '<div class="acts"><button class="btn" id="btnScript">'+App.icon('file-text')+'查看演练脚本</button></div></div>'
+        + '<div class="standby-hero">'
         + '<div class="sb-icon" style="background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.28);color:var(--ok)">'+App.icon('workbench')+'</div>'
         + '<div class="sb-body">'
         +   '<span class="sb-tag" style="color:var(--ok);background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.28)"><span class="dot" style="background:var(--ok)"></span>READY · 工作台就绪</span>'
@@ -48,6 +51,8 @@ document.addEventListener('app:ready', function(e){
         +   '<b>· 表单分步填写</b>：处置表单采用分步向导逐字段引导，支持一键模拟数据预填并自动归档至取证模块；实战版需自行研判流转对象。<br>'
         +   '<b>· 证据采集与打分</b>：处置过程中可上传文件或屏幕截图，系统自动生成告警与故障截图作为取证材料；演练期间实时显示评分与偏离情况。</div>'
         + '</div>';
+      var bScriptEmpty = document.getElementById('btnScript');
+      if(bScriptEmpty) bScriptEmpty.onclick = function(){ App.openScript(null, {canExport:false}); };
     }).catch(function(){
       page.innerHTML = '<div class="forbidden">'+App.icon('alert')+'<h2>数据加载失败</h2><p>请检查网络或联系管理员</p></div>';
     });
@@ -97,14 +102,17 @@ document.addEventListener('app:ready', function(e){
   };
 
   function p2(n){ return n<10 ? '0'+n : String(n); }
+  /* 演练计时文案：以服务端 started_at 为唯一基准；历史数据缺开始时刻时显示"计时未启动" */
+  function liveTxt(p){ var sec = API.elapsedOf(p); return (sec === null) ? '计时未启动' : ('T+' + API.fmtElapsed(sec)); }
   function fmtSize(b){ return b<1024 ? b+' B' : b<1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
 
   page.innerHTML =
     '<div class="page-head"><div><h1>'+App.esc(role.name)+' · 工作台</h1>'
     + '<div class="sub">'+App.esc(proj.name)+' · '+(isPractical?'实战版：自主研判处置':'基础版：按剧本流程逐步执行')+(isExternal?' · <span style="color:var(--warn)">外部单位受限视图</span>':'')+'</div></div>'
     + '<div class="acts">'
-    + (started ? '<span class="live-chip" id="wbLive"><span class="dot"></span>演练进行中 · T+'+API.fmtElapsed(API.elapsedOf(proj))+'</span>' : '')
+    + (started ? '<span class="live-chip" id="wbLive"><span class="dot"></span>演练进行中 · '+liveTxt(proj)+'</span>' : '')
     + '<button class="btn" id="btnFault">'+App.icon('alert')+'查看故障通报</button>'
+    + '<button class="btn" id="btnScript">'+App.icon('file-text')+'查看演练脚本</button>'
     + (isPractical && proj.status==='演练中' && ['commander','platformadmin','itlead'].indexOf(role.id)>=0
         ? '<button class="btn danger" id="btnFinish">'+App.icon('check')+'完成演练</button>' : '')
     + '<button class="btn" id="btnRefresh">'+App.icon('refresh')+'刷新</button></div></div>'
@@ -139,10 +147,10 @@ document.addEventListener('app:ready', function(e){
       var p = API.activeProject() || proj;
       if(p.status==='暂停'){
         el.className = 'live-chip none';
-        el.innerHTML = '<span class="dot"></span>演练已暂停 · T+'+API.fmtElapsed(API.elapsedOf(p));
+        el.innerHTML = '<span class="dot"></span>演练已暂停 · '+liveTxt(p);
       } else {
         el.className = 'live-chip';
-        el.innerHTML = '<span class="dot"></span>演练进行中 · T+'+API.fmtElapsed(API.elapsedOf(p));
+        el.innerHTML = '<span class="dot"></span>演练进行中 · '+liveTxt(p);
       }
     }, 1000);
   }
@@ -218,7 +226,7 @@ document.addEventListener('app:ready', function(e){
     if(/风险等级/.test(fd)) return '低';
     if(/等级/.test(fd)) return (SCEN&&SCEN.level)||t.level||'较大';
     if(/类型/.test(fd)) return SCEN?SCEN.name:'模拟事件';
-    if(/单位/.test(fd)) return (proj.units&&proj.units[0]) || ((DRILL.brand()||{}).unitName) || '盘州市人民医院';
+    if(/单位/.test(fd)) return (proj.units&&proj.units[0]) || ((DRILL.brand()||{}).unitName) || '示例医院';
     if(/摘要|依据/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'（系统自动填充，请核对修改）';
     if(/患者数/.test(fd)) return '0（虚拟数据，无真实患者）';
     if(/损失/.test(fd)) return FACTS.impact;
@@ -1118,20 +1126,58 @@ document.addEventListener('app:ready', function(e){
       + '<div class="tiny dim mt2">该流程已锁定，不可重复提交；处置记录已归档至取证模块。</div>';
   }
 
+  /* 关闭处置弹窗前的轻提示：已有未提交内容时防手滑（文案不含“错误/失败”） */
+  function confirmDiscard(onOk){
+    App.modal({
+      title:'关闭处置流程',
+      body:'<div class="fm-strip">'+App.icon('alert')+'<span>当前内容尚未提交，确定关闭？</span></div>'
+        + '<div class="tiny dim mt2">关闭后，本次填写的内容不会计入处置记录。</div>',
+      foot:'<button class="btn" id="wbDiscardNo">继续填写</button><button class="btn danger" id="wbDiscardYes">确定关闭</button>',
+      onOpen:function(m){
+        m.querySelector('#wbDiscardNo').onclick = m.close;
+        m.querySelector('#wbDiscardYes').onclick = function(){ m.close(); onOk(); };
+      }
+    });
+  }
+
+  /* 判定处置弹窗内是否已有未提交内容（含分步向导各字段） */
+  function flowHasInput(ov, nodeId){
+    var box = ov.querySelector('#wbFlowBody');
+    if(!box) return false;
+    var texts = box.querySelectorAll('#flFound,#flMeasure,#flResult,#flEvidence');
+    for(var i=0;i<texts.length;i++){ if(String(texts[i].value||'').trim()) return true; }
+    var rc = box.querySelector('#flReceiverBox');
+    if(rc && rc.querySelector('input:checked')) return true;
+    var s = WIZ['p-'+proj.id+'-'+nodeId];
+    if(s && s.values){
+      for(var k in s.values){ if(String(s.values[k]||'').trim()) return true; }
+    }
+    return false;
+  }
+
   function openFlow(d){
     var sub = d.submitted;
     var predWrapId = 'wbPred-'+d.nodeId;
+    var submitting = false; /* 提交请求未返回期间禁止关闭，避免出现半提交状态 */
     App.modal({
       title:'处置流程 · '+App.esc(d.title||d.action||'系统故障'),
       wide:true,
+      /* 关闭方式收敛为两条：右上角 ×（含未提交内容确认）与提交成功后的自动关闭。
+       * persist 关闭遮罩点击关闭；全站无 Esc 关闭监听，故 Esc 不会关闭本弹窗。 */
+      persist:true,
       body: predecessorSectionSkel(predWrapId)
         + '<div class="fm-strip">'+App.icon('alert')+'<span><b>'+App.esc(d.title||'')+'</b><br>'+App.esc(d.desc||'请结合故障通报研判本流程是否属于本岗正确处置动作')+'</span></div>'
         + '<div class="kv mb3"><span class="k">处置时长</span><span>'+(d.timeout?d.timeout+' 分钟':'未设置')+'</span>'
         + '<span class="k">责任角色</span><span>'+App.esc(d.target||'—')+'</span></div>'
         + '<div id="wbFlowBody">'+(sub?flowDoneBody(d):flowForm(d))+'</div>',
-      foot:'<button class="btn" id="wbFlowClose">关闭</button>'+(sub?'':'<button class="btn primary" id="wbFlowSubmit">'+App.icon('check')+'提交处置记录</button>'),
+      foot: sub ? '' : '<button class="btn primary" id="wbFlowSubmit">'+App.icon('check')+'提交处置记录</button>',
       onOpen:function(ov){
-        ov.querySelector('#wbFlowClose').onclick = ov.close;
+        /* 唯一手工关闭入口：右上角 ×（底部「关闭」已移除，避免出现第三条关闭路径） */
+        ov.querySelector('.x').onclick = function(){
+          if(submitting) return; /* 请求未返回：不允许关闭，避免半提交状态 */
+          if(!sub && flowHasInput(ov, d.nodeId)){ confirmDiscard(ov.close); return; }
+          ov.close();
+        };
         /* 无论已提交/未提交，都异步加载前置节点处置情况供研判参考 */
         if(d.nodeId && proj.id) API.getPredecessor(d.nodeId, proj.id).then(function(data){
           fillPredecessorSection(predWrapId, data);
@@ -1162,6 +1208,7 @@ document.addEventListener('app:ready', function(e){
           + '<div class="tiny dim mt2">实战版不提供预填数据与正确流程提示：请自行研判该流程是否属于本岗正确处置动作。误选混淆流程按该流程分值直接扣分；正确流程超时完成扣本节点分值的 10%。表单可按字段说明逐项填写，也可一键生成模拟数据后核对修改。</div>');
         var btn = ov.querySelector('#wbFlowSubmit');
         btn.onclick = function(){
+          if(submitting) return; /* 防重复提交 */
           var forms = {}, missing = [];
           var wst = wizFields(d.fields).length ? WIZ[wkey] : null;
           if(wst){
@@ -1186,6 +1233,7 @@ document.addEventListener('app:ready', function(e){
           if(measure.length<6){ App.toast('实际处置措施不少于6字','err'); return; }
           if(!result){ App.toast('请填写处置结果','err'); return; }
           btn.disabled = true; btn.textContent = '提交中…';
+          submitting = true;
           API.submitDrillFlow({
             projectId: proj.id, nodeId: d.nodeId, forms: forms, receiver: receivers,
             measure: measure, result: result, evidence: evidence, found: found
@@ -1199,6 +1247,7 @@ document.addEventListener('app:ready', function(e){
             App.refreshShell();
             renderPractical(); renderScore();
           }).catch(function(err){
+            submitting = false;
             btn.disabled = false; btn.innerHTML = App.icon('check')+'提交处置记录';
             App.toast((err&&err.message)||'提交失败','err');
           });
@@ -1271,6 +1320,14 @@ document.addEventListener('app:ready', function(e){
       RECEIVERS = data.receivers || [];
       EV = data.evidence || EV;
       updateFinishBtn();
+      /* 处置流程随演练启动下发：未开始时只展示等待启动空态，不渲染流程、不提供可点击入口
+       * 状态以项目真实状态字段为准（优先取接口回显 projectStatus） */
+      var pstatus = data.projectStatus || proj.status;
+      if(pstatus === '未开始'){
+        host.innerHTML = '<div class="empty">'+App.icon('clock')+'<div>演练尚未开始，请等待平台管理员启动</div>'
+          + '<div class="tiny dim mt2">启动后本角色候选处置流程将自动下发至此</div></div>';
+        return;
+      }
       var lockedCount = flows.filter(function(d){ return !d.submitted && d.locked; }).length;
       var pending = flows.filter(function(d){ return !d.submitted && !d.locked; }).length;
       announceNewTasks(flows.filter(function(d){ return !d.submitted && !d.locked; }).map(function(d){ return d.nodeId; }), '处置流程');
@@ -1398,6 +1455,8 @@ document.addEventListener('app:ready', function(e){
 
   var bf = document.getElementById('btnFault');
   if(bf) bf.onclick = function(){ faultModal(true); };
+  var bs = document.getElementById('btnScript');
+  if(bs) bs.onclick = function(){ App.openScript(proj, {canExport:false}); };
   var bfin = document.getElementById('btnFinish');
   if(bfin) bfin.onclick = function(){
     if(EV.pending > 0){

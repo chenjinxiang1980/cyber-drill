@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>预案知识库 · 盘州市人民医院网络安全应急演练系统</title>
+<title>预案知识库 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 </head>
 <body data-page="knowledge">
 <script src="system.js"></script>
@@ -125,7 +125,7 @@ document.addEventListener('app:ready', function(e){
       c.steps.forEach(function(s,i){ lines.push((i+1)+'. '+s); });
     }
     var _b = DRILL.brand() || {};
-    var _unit = _b.unitName || '盘州市人民医院';
+    var _unit = _b.unitName || '示例医院';
     var _sys = _b.systemName || '网络安全应急演练系统';
     lines.push('—— '+_unit+' '+_sys+'（演练用虚拟文档）');
     return lines.join('\r\n');
@@ -402,7 +402,7 @@ document.addEventListener('app:ready', function(e){
         + '<div class="form-row"><label class="f-label">版本标注</label>'
         + '<input class="input" id="ebVer" placeholder="如：2025版 · L2-016" value="'+App.esc(st.ver||'')+'"></div>'
         + '<div class="form-row"><label class="f-label">依据文件</label>'
-        + '<input class="input" id="ebBase" placeholder="如：《盘州市人民医院网络安全事件应急预案》" value="'+App.esc(st.base||'')+'"></div>'
+        + '<input class="input" id="ebBase" placeholder="如：《示例医院网络安全事件应急预案》" value="'+App.esc(st.base||'')+'"></div>'
         + '<div class="form-row"><label class="f-label">适用范围</label>'
         + '<input class="input" id="ebScope" placeholder="如：全院各科室" value="'+App.esc(st.scope||'')+'"></div>'
         + '</div>';

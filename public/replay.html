@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>演练时序回放 · 盘州市人民医院网络安全应急演练系统</title>
+<title>演练时序回放 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 <style>
 .rp-bar{display:flex;align-items:center;gap:14px;background:var(--elev);border:1px solid var(--border);border-radius:var(--r-md);padding:12px 16px;margin-bottom:14px;flex-wrap:wrap}
 .rp-clock{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--accent2);min-width:92px;text-align:center;background:#0c1626;border:1px solid var(--border);border-radius:var(--r-sm);padding:2px 12px}
@@ -87,7 +87,7 @@ document.addEventListener('app:ready', function(e){
     +   '<span class="rp-prog" id="rpProg">0 / '+events.length+'</span>'
     + '</div>'
     + '<div class="rp-chips" id="rpChips"></div>'
-    + '<div class="grid" style="grid-template-columns:1.5fr 1fr;gap:16px">'
+    + '<div class="grid replay-row">'
     +   '<div class="card"><div class="card-title">'+App.icon('clock')+'处置事件时间轴<span class="more" id="rpReset">重置回放</span></div><div class="timeline" id="rpTl"></div></div>'
     +   '<div class="col gap4">'
     +     '<div class="card"><div class="card-title">'+App.icon('flow')+'处置时序图（自动生成）</div><div class="seqflow" id="rpSeq"></div><div class="tiny dim mt2">回放至对应时刻自动点亮节点 · 告警→核实→指令→处置→兜底→上报→报案→恢复→终止</div></div>'

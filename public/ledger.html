@@ -1,11 +1,11 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>台账与统计 · 盘州市人民医院网络安全应急演练系统</title>
+<title>台账与统计 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 <style>
 .lg-table tbody tr{cursor:pointer}
 .lg-stat .section-title{margin-top:4px}
@@ -135,7 +135,7 @@ document.addEventListener('app:ready', function(e){
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     var _lb = DRILL.brand() || {};
-    var _lUnit = _lb.unitName || '盘州市人民医院';
+    var _lUnit = _lb.unitName || '示例医院';
     var _lSys = _lb.systemName || '网络安全演练';
     a.download = '演练模拟-'+_lUnit+_lSys+'台账-'+new Date().toISOString().slice(0,10)+'.csv';
     document.body.appendChild(a); a.click(); a.remove();

@@ -1,4 +1,4 @@
-/* 盘州市人民医院网络安全应急演练系统 · 设计令牌与组件库（tech-dark 指挥中心） */
+/* 示例医院网络安全应急演练系统 · 设计令牌与组件库（tech-dark 指挥中心） */
 :root{
   --bg:#0a1220; --panel:#111c2e; --elev:#16263d; --hover:#1b2e49;
   --border:#1f3350; --border2:#2c4a72;
@@ -32,6 +32,12 @@ a{color:var(--accent2);text-decoration:none}
 .col{display:flex;flex-direction:column}
 .grow{flex:1} .right{margin-left:auto}
 .grid{display:grid;gap:var(--sp4)} .grid-2{grid-template-columns:repeat(2,1fr)} .grid-3{grid-template-columns:repeat(3,1fr)} .grid-4{grid-template-columns:repeat(4,1fr)}
+/* 看板专用非等分栅格：用类而不是内联样式，手机端才能被媒体查询改成单列 */
+.dash-row-2{grid-template-columns:1.5fr 1fr}
+.dash-row-3{grid-template-columns:1fr 1.2fr 1fr;gap:16px}
+/* 考评/回放页非等分栅格：同样用类，手机端可降为单列 */
+.eval-row{grid-template-columns:1.55fr 1fr;gap:16px}
+.replay-row{grid-template-columns:1.5fr 1fr;gap:16px}
 .mt2{margin-top:var(--sp2)} .mt3{margin-top:var(--sp3)} .mt4{margin-top:var(--sp4)} .mt5{margin-top:var(--sp5)} .mb3{margin-bottom:var(--sp3)} .mb4{margin-bottom:var(--sp4)} .mb2{margin-bottom:var(--sp2)}
 .wrap{flex-wrap:wrap}
 .nowrap{white-space:nowrap}
@@ -109,6 +115,7 @@ svg{width:1em;height:1em;flex:none}
 .voice-btn:hover{color:var(--text)}
 .voice-btn.off{color:var(--text3);opacity:.7}
 .voice-btn svg{width:19px;height:19px}
+.topbar-right-group{display:flex;align-items:center;gap:var(--sp4);margin-left:auto}
 .role-chip{display:flex;align-items:center;gap:8px;border:1px solid var(--border2);border-radius:16px;padding:4px 12px 4px 6px;font-size:12.5px;cursor:default}
 .role-chip .av{width:22px;height:22px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}
 .tb-out{cursor:pointer;color:var(--text2);display:flex;align-items:center;gap:4px;font-size:12px}
@@ -332,7 +339,7 @@ table.table{width:100%;border-collapse:collapse;font-size:13px}
 
 /* ===== 登录页 ===== */
 .login-bg{position:fixed;inset:0;background:radial-gradient(1200px 600px at 70% -10%,rgba(47,129,247,.18),transparent),radial-gradient(900px 500px at 10% 110%,rgba(88,166,255,.1),transparent),var(--bg);display:flex;align-items:center;justify-content:center;overflow:auto}
-.login-card{width:960px;max-width:94vw;background:var(--panel);border:1px solid var(--border2);border-radius:var(--r-lg);box-shadow:var(--shadow);display:grid;grid-template-columns:1.15fr 1fr;overflow:hidden;margin:40px 0}
+.login-card{width:960px;background:var(--panel);border:1px solid var(--border2);border-radius:var(--r-lg);box-shadow:var(--shadow);display:grid;grid-template-columns:1.15fr 1fr;overflow:hidden;margin:40px 0}
 .login-left{padding:40px;background:linear-gradient(160deg,#0d1d38,#0a1220);border-right:1px solid var(--border);display:flex;flex-direction:column}
 .login-left .l-title{font-size:24px;font-weight:700;line-height:1.4}
 .login-left .l-sub{font-size:13px;color:var(--text2);margin-top:10px}
@@ -353,8 +360,59 @@ table.table{width:100%;border-collapse:collapse;font-size:13px}
 .role-cell .r-ic svg{width:18px;height:18px}
 .role-grid.dense .role-cell .r-ic{margin-bottom:1px}
 .role-grid.dense .role-cell .r-ic svg{width:15px;height:15px}
-.captcha-row{display:flex;gap:10px}
-.captcha-box{width:110px;flex:none;background:#0c1626;border:1px solid var(--border);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:19px;letter-spacing:4px;color:var(--accent2);cursor:pointer;user-select:none;font-weight:700;text-decoration:line-through wavy rgba(88,166,255,.25)}
+.captcha-row{display:flex;gap:8px;align-items:stretch}
+/* 让 input 参与 flex 分配宽度（覆盖全局 .input{width:100%}），
+   这样 .captcha-box 自然被 stretch 到与 .input 等高 */
+.captcha-row .input{flex:1 1 0;min-width:0;width:0}
+
+/* 验证码容器：宽度收窄到不抢眼，高度由 flex stretch 跟随 input（不写死像素） */
+.captcha-box{
+  position:relative;
+  width:112px;flex:none;
+  background:rgba(255,255,255,.03);
+  border:1px solid var(--border);
+  border-radius:var(--r-sm);
+  overflow:hidden;
+  cursor:pointer;
+  transition:border-color .15s, box-shadow .15s, background .15s;
+  display:flex;align-items:center;justify-content:center;
+}
+.captcha-box:hover{border-color:var(--accent2);background:rgba(255,255,255,.06)}
+.captcha-box:active{transform:scale(.985)}
+.captcha-box img{
+  width:100%;height:100%;
+  object-fit:contain;object-position:center;
+  display:block;
+  /* TEMP: 已改用 JS（index.html swapCaptchaColors）在客户端把随机色 SVG 统一替换为
+     rect=#111c2e(--panel 卡片同款底) + text/line=#4d9bff(--accent2 主题蓝)。
+     删除条件: server 端 svg captcha 配色改到卡士蓝底 + #4d9bff 蓝字后，磁盘 exe 替换重启可删除
+              index.html 里的 swapCaptchaColors() 函数 + 本 TEMP 注释行。 */
+}
+/* 骨架条加载态 */
+.captcha-box .cap-skel{
+  position:absolute;inset:0;
+  background:linear-gradient(90deg, rgba(255,255,255,.02) 25%, rgba(255,255,255,.06) 50%, rgba(255,255,255,.02) 75%);
+  background-size:200% 100%;
+  animation:capSkel 1.2s ease-in-out infinite;
+  border-radius:var(--r-sm);
+}
+.captcha-box.loaded .cap-skel{display:none}
+@keyframes capSkel{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* 换一张按钮：与 input/box 一起被 flex stretch 拉满高度，内部文字仍居中 */
+.captcha-reload{
+  display:inline-flex;align-items:center;justify-content:center;
+  align-self:stretch;
+  padding:0 10px;
+  border-radius:var(--r-sm);
+  background:transparent;border:1px solid transparent;
+  color:var(--accent2);font-size:13px;line-height:1;
+  cursor:pointer;user-select:none;white-space:nowrap;
+  transition:background .15s, border-color .15s, color .15s;
+}
+.captcha-reload:hover{background:rgba(88,166,255,.1);border-color:rgba(88,166,255,.3);color:var(--text)}
+.captcha-reload:active{background:rgba(88,166,255,.18)}
+
 .login-err{color:var(--err);font-size:12px;min-height:18px;margin-top:6px}
 
 /* ===== 统计图 ===== */
@@ -448,10 +506,20 @@ table.table{width:100%;border-collapse:collapse;font-size:13px}
 .decision .d-opt input{margin-top:3px;flex:none;accent-color:var(--accent)}
 .decision .d-opt:has(input:checked){border-color:var(--accent);background:var(--accent-dim)}
 
-/* ===== 响应式 ===== */
-@media (max-width:1280px){.grid-4{grid-template-columns:repeat(2,1fr)}.wb-grid{grid-template-columns:1fr}.login-card{grid-template-columns:1fr}.login-left{display:none}}
-@media (max-width:1024px){.grid-3{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:1fr}}
-@media (max-width:820px){.sidebar{width:64px}.sidebar .brand .bt,.sidebar .nav .g-title,.sidebar .nav-item span,.side-foot .u-role,.side-foot .u-name,.side-foot .u-out span,.side-foot .u-meta .ver{display:none}.side-foot .u-meta{justify-content:center;gap:8px}.main-wrap{margin-left:64px}.nav-item{justify-content:center;padding:12px}.brand{justify-content:center}.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+/* ===== 响应式（分层降级，桌面 ≥1280px 观感完全不变）===== */
+/* 注：screen.html 大屏自身在页面内单独处理 1920×1080 transform，公共 styles.css 不再强制 */
+
+/* 桌面端：topbar-row 容器 display:contents，子节点直接参与父 flex 布局，
+   等价于原来的 flat 结构。保证 ≥768px 观感零变化。 */
+@media (min-width:768px){
+  .topbar .topbar-row{ display:contents; }
+  /* tb-center 从 absolute 改为 flex:1 居中参与布局，避免和 right-group 重叠 */
+  .tb-center{ position:static !important; left:auto !important; transform:none !important;
+    flex:1 1 auto; justify-content:center; }
+  .tb-center:active{ transform:none !important; }
+}
+
+/* 注：以下媒体查询 ≤1279px / ≤1024px 由后续 block 覆盖 */
 
 /* ===== 角色工作台：待办任务列表导航 ===== */
 .task-nav{display:flex;flex-direction:column;gap:8px}
@@ -557,3 +625,225 @@ table.table{width:100%;border-collapse:collapse;font-size:13px}
 .bk-actions{display:flex;gap:4px;flex:none}
 .bk-actions .btn{padding:2px 7px;font-size:11px;height:auto;display:inline-flex;align-items:center;gap:3px}
 .bk-actions svg{width:12px;height:12px}
+
+/* 移动端汉堡按钮：桌面隐藏，窄屏显示 */
+.nav-toggle{
+  display:none; /* 默认隐藏，@media(max-width:767px) 下显示 */
+  width:40px; height:40px; min-width:44px; min-height:44px;
+  background:transparent; border:1px solid var(--border2);
+  color:var(--text); border-radius:6px; cursor:pointer;
+  align-items:center; justify-content:center; font-size:20px; line-height:1;
+}
+
+/* ===========================================================
+   移动端适配：分层降级（桌面 ≥1280px 观感完全不变）
+   思路：去掉大屏 transform 后，普通页面回到正常流式布局，
+   再用媒体查询对 sidebar/grid/表格/弹窗做渐进式降级。
+   =========================================================== */
+
+/* ---------- 平板 / 窄桌面（≤1279px）：sidebar 收窄，网格减半 ---------- */
+@media (max-width:1279px){
+  :root{ --sidebar-w:196px; }
+  .nav-item{ padding:8px 14px; font-size:13px; }
+  .brand{ padding:12px 14px; }
+  .grid-4{ grid-template-columns:repeat(3,1fr); }
+  .grid-3{ grid-template-columns:repeat(2,1fr); }
+}
+
+/* ---------- 手机 / 小平板（≤767px）：手机形态设计基线 ---------- */
+@media (max-width:767px){
+  /* 设计基线 */
+  :root{ --sidebar-w:0px; --topbar-h:auto; }
+  /* 视口口径：优先 svh（含浏览器工具栏的最小可视高度），杜绝 100vh 大于可视高度导致内容被顶出 */
+  html,body{ height:auto; min-height:100vh; min-height:100svh; overflow-x:hidden; }
+  body{ font-size:14px; line-height:1.65; }
+
+  /* side-bar 抽屉 */
+  .sidebar{ transform:translateX(-100%); transition:transform .28s cubic-bezier(.4,0,.2,1);
+    width:min(280px, 82vw); box-shadow:4px 0 24px rgba(0,0,0,.3); z-index:100; }
+  .sidebar.open{ transform:translateX(0); }
+  .main-wrap{ margin-left:0; min-height:100vh; min-height:100svh; }
+
+  /* 抽屉遮罩：body.drawer-open 时伪元素出现 */
+  body.drawer-open::before{
+    content:''; position:fixed; inset:0; z-index:90;
+    background:rgba(3,7,17,.55); backdrop-filter:blur(1px);
+    animation:fadeIn .22s ease-out;
+  }
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+  /* 顶部工具条：重新组织成两行紧凑布局 */
+  .topbar{
+    padding:10px 12px;
+    flex-wrap:nowrap !important; flex-direction:column;
+    height:auto; gap:0;
+    border-bottom:1px solid var(--border);
+  }
+  .topbar-row{ display:flex; align-items:center; gap:8px; width:100%; min-height:44px; }
+  .topbar-right-group{ display:flex; align-items:center; gap:8px; width:100%; min-height:44px; margin-left:0; flex-wrap:nowrap; }
+  /* 第一行：汉堡 + 项目选择器(flex:1) + 铃铛 + 语音 */
+  .nav-toggle{ display:inline-flex!important; flex:none; }
+  .proj-sel{ flex:1 1 auto; min-width:0; gap:6px; }
+  .proj-sel b{ max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* 第二行：角色 chip(flex:1) + 修改密码 + 退出 */
+  .role-chip{ flex:1 1 auto; min-width:0; justify-content:flex-start; gap:6px; margin-left:0; }
+  .tb-out{ display:inline-flex !important; align-items:center; justify-content:center;
+    height:44px; padding:0 10px; border-radius:var(--r-sm); font-size:12.5px;
+    color:var(--text2); background:rgba(255,255,255,.04); border:1px solid var(--border);
+    transition:.15s; }
+  .tb-out:hover{ background:rgba(255,255,255,.08); color:var(--text); }
+  .tb-out .dim{ display:none }
+  .bell{ width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center;
+    border-radius:var(--r-sm); }
+  .bell.voice-btn{ width:40px; height:40px; }
+  /* 状态栏：从 absolute 移到第二行末尾 */
+  .tb-center{ position:static; transform:none; flex:0 0 auto; margin-left:auto;
+    background:transparent; box-shadow:none; color:var(--text2); font-size:11.5px;
+    padding:2px 0; height:auto; line-height:1.3; }
+  .tb-clock{ display:none }
+
+  /* 页面容器 */
+  #page{ padding:12px; gap:12px; }
+  .page-head{ flex-direction:column; align-items:stretch; gap:10px; padding:0; }
+  .page-head .acts{ margin-left:0; }
+  .page-head h1{ font-size:18px; }
+
+  /* 网格：全部降为单列 */
+  .grid-4,.grid-3,.grid-2,.form-grid{ grid-template-columns:1fr; gap:12px; }
+  .dash-row-2,.dash-row-3{ grid-template-columns:1fr; }
+  .eval-row,.replay-row{ grid-template-columns:1fr; }
+  .wb-grid{ grid-template-columns:1fr; gap:12px; }
+
+  /* 卡片：标题单行省略 */
+  .card{ padding:14px; border-radius:12px; }
+  .card-title{
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    font-size:14px; font-weight:600;
+    min-height:28px; display:flex; align-items:center;
+  }
+
+  /* 按钮触控区保底 44px（覆盖桌面 btn sm 的 30px） */
+  .btn{ min-height:44px; font-size:14px; padding:10px 14px; border-radius:var(--r-sm); }
+  .btn.sm{ min-height:44px; padding:8px 12px; font-size:13px; }
+
+  /* 输入框 */
+  .input,.select,.textarea{ font-size:16px; padding:10px 12px; min-height:44px;
+    border-radius:var(--r-sm); }
+
+  /* 登录页：改为普通文档流 + 顶部对齐
+     原写法 .login-bg{position:fixed;inset:0;display:flex;align-items:center}
+     在手机上卡片高度（≈880px）大于可视高度时，flex 居中会把卡片顶部推到负坐标，
+     且该负向溢出不可滚动 → 真机上标题/首排角色被永久裁切。
+     这里取消 fixed 与垂直居中，交由 body 正常滚动；高度用 svh 兼容工具栏场景。 */
+  .login-bg{
+    position:static; inset:auto;
+    display:block;
+    min-height:100vh; min-height:100svh;
+    padding:calc(env(safe-area-inset-top, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 16px);
+    overflow:visible;
+  }
+  .login-card{ width:100%; max-width:440px; margin:0 auto; grid-template-columns:1fr; }
+  .login-left{ display:none; }
+  .login-right{ padding:24px 20px; }
+  .role-grid{ grid-template-columns:repeat(3,1fr); gap:6px; }
+  .captcha-row{ flex-wrap:nowrap; gap:6px; }
+  .captcha-box{ width:104px; }
+  .captcha-reload{ padding:0 8px; font-size:12px; }
+  /* 登录页取消 fixed 遮罩后，大屏入口回归文档流；块级 + max-content 才能水平居中 */
+  .screen-entry{ position:static; display:flex; width:max-content;
+    margin:calc(env(safe-area-inset-top, 0px) + 10px) auto 0; right:auto; top:auto; }
+
+  /* 表格：允许横向滚动（.table-wrap 已有 overflow-x:auto），表头固定首列 */
+  .table{ font-size:12px; }
+  .table th,.table td{ white-space:nowrap; padding:8px 10px; }
+  /* 首列冻结：sticky 需父容器有滚动，.table-wrap 已满足 */
+  .table th:first-child, .table td:first-child{
+    position:sticky; left:0; z-index:1;
+    background:var(--panel); box-shadow:2px 0 4px rgba(0,0,0,.18);
+  }
+
+  /* 弹窗 */
+  .modal{ width:min(100vw - 24px, 560px)!important; max-width:none; max-height:86dvh; }
+  .modal .m-head{ position:sticky; top:0; background:var(--panel); z-index:2; padding:12px 16px; }
+  .modal .m-body{ padding:14px; }
+  .modal .m-foot{ padding:12px 14px; gap:8px; }
+  /* 弹窗底部按钮：堆叠排列 */
+  .modal .m-foot .btn{ flex:1 1 auto; min-height:44px; }
+  .modal .m-foot{ flex-direction:column }
+
+  .drawer{ width:min(100vw - 12px, 480px)!important; max-width:none; }
+
+  /* 侧栏菜单项 */
+  .nav-item{ min-height:48px; align-items:center; padding:10px 16px; font-size:15px; }
+
+  /* KPI 卡片 */
+  .kpi{ padding:14px; }
+  .kpi .k-value{ font-size:22px; }
+
+  /* 场景剧本卡网格降为 2 列 */
+  .sc-grid{ grid-template-columns:repeat(2,1fr)!important; }
+}
+
+/* ---------- 纯手机（≤480px）：进一步收紧间距 ---------- */
+@media (max-width:480px){
+  #page{ padding:10px; gap:10px; }
+  .card{ padding:12px; border-radius:10px; }
+  .page-head h1{ font-size:17px; }
+  .role-grid{ grid-template-columns:repeat(2,1fr); }
+  .role-cell{ font-size:12px; padding:10px 4px; min-height:52px; }
+  .role-cell .r-ic svg{ width:22px; height:22px; }
+  .login-right h2{ font-size:16px; }
+  .sc-grid{ grid-template-columns:1fr!important; }
+  .wz-item{ grid-template-columns:100px 1fr; font-size:13px; }
+  .fault-alert{ flex-wrap:wrap; }
+  .fault-alert .btn{ margin-top:6px; align-self:flex-start; }
+  .project-list{ gap:10px; }
+  .proj-sel b{ max-width:100px; }
+  .card-title{ font-size:13.5px; }
+}
+
+/* 平板宽屏（768~1024）：sidebar 收窄但保留，不让内容区过窄 */
+@media (min-width:768px) and (max-width:1024px){
+  :root{ --sidebar-w:180px; }
+  .grid-4{ grid-template-columns:repeat(2,1fr); }
+  .topbar{ padding:0 14px; gap:10px; }
+  .page-head h1{ font-size:19px; }
+}
+
+/* ===== 演练脚本弹层（项目管理页 / 角色工作台共用） ===== */
+.grp-kv{display:grid;grid-template-columns:88px 1fr;gap:8px 14px;font-size:13px;margin-top:14px}
+.grp-kv .k{color:var(--text3)}
+.script-body{max-height:70vh;overflow-y:auto}
+.script-section{margin-bottom:18px}
+.script-section h3{font-size:14px;font-weight:600;margin-bottom:8px;color:var(--text1);display:flex;align-items:center;gap:6px}
+.script-section h3::before{content:'';width:3px;height:14px;background:var(--primary);border-radius:2px}
+.script-node{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:var(--bg2)}
+.script-node.basic{border-left:3px solid var(--green,#22a06b)}
+.script-node.option{border-left:3px solid var(--primary)}
+.script-node.option.alt{border-left-color:var(--warn,#d29922);background:rgba(210,153,34,.05)}
+.script-node .sn-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.script-node .sn-title{font-weight:600;font-size:13.5px;min-width:0;overflow-wrap:anywhere}
+.script-node .sn-badge{flex:none;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:rgba(79,124,255,.12);color:var(--primary);border:1px solid rgba(79,124,255,.28)}
+.script-node .sn-badge.alt{background:rgba(210,153,34,.12);color:var(--warn,#d29922);border-color:rgba(210,153,34,.32)}
+.script-node .sn-meta{display:flex;gap:10px;font-size:12px;color:var(--text3);flex-wrap:wrap}
+.script-node .sn-meta span{display:inline-flex;align-items:center;gap:2px;overflow-wrap:anywhere}
+.script-node .sn-desc{font-size:13px;color:var(--text2);line-height:1.6;margin-top:6px;overflow-wrap:anywhere}
+.script-node .sn-guide{margin-top:8px;padding:8px 10px;background:rgba(52,152,219,.08);border-radius:6px;font-size:12.5px;color:#2c3e50;border-left:2px solid #3498db}
+.script-node .sn-guide .sn-guide-label{font-weight:600;color:#3498db;margin-right:4px}
+.script-node .sn-action{margin-top:4px;font-size:12px;color:var(--text3)}
+.script-node .sn-score{font-size:12px;color:#e67e22;font-weight:600}
+.script-instructions{background:linear-gradient(135deg,rgba(52,152,219,.08),rgba(46,204,113,.06));border:1px solid rgba(52,152,219,.2);border-radius:8px;padding:14px 16px;margin-bottom:18px}
+.script-instructions h4{margin:0 0 8px;font-size:13px;color:#2c3e50}
+.script-instructions ul{margin:0;padding-left:18px;font-size:12.5px;color:var(--text2);line-height:1.8}
+.script-members{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.script-members .sm-chip{background:rgba(79,124,255,.1);color:var(--primary);padding:3px 10px;border-radius:12px;font-size:12px}
+
+@media (max-width:767px){
+  .script-body{max-height:none}
+  .script-node{padding:10px 12px}
+  .script-node .sn-head{align-items:flex-start}
+  .script-node .sn-title{font-size:13px;flex:1 1 100%}
+  .script-node .sn-badge{align-self:flex-start}
+  .grp-kv{grid-template-columns:76px minmax(0,1fr);gap:6px 10px}
+}
+

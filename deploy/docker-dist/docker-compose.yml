@@ -1,0 +1,108 @@
+# =============================================================================
+# Drill System —— Docker Compose（可分发形态，面向终端用户）
+#
+# 三步启动：
+#   1. cp .env.example .env   （或复制一份，改成真实值）
+#   2. 编辑 .env：必须替换 JWT_SECRET / SESSION_SECRET / DB_PASSWORD 等占位符
+#   3. docker compose up -d
+#
+# 停止与清理：
+#   docker compose down              # 保留数据卷
+#   docker compose down -v           # 彻底删除（含 MySQL 数据 + 上传文件）—— 慎用
+#   docker compose pull              # 更新镜像到最新 tag（或 digest）
+#
+# 架构说明：
+#   - mysql 用官方 mysql:8.0.42（固定小版本，建议进一步 pin digest 防供应链）
+#   - app 由 docker-entrypoint.sh 负责：等 MySQL → 跑 migrations → exec drill-server
+#   - public/ 已内嵌在镜像中，不需要 bind mount
+#   - 命名卷持久化 MySQL 数据 + 应用上传文件
+# =============================================================================
+
+services:
+  # ---------- MySQL 8.0 ----------
+  mysql:
+    # 固定到小版本 tag。生产建议进一步 pin digest，例如：
+    #   image: mysql:8.0.42@sha256:a1b2c3d4...
+    # （digest 在 docker pull 后用 docker image inspect mysql:8.0.42 取得）
+    image: mysql:8.0.42
+    container_name: drill-mysql
+    restart: unless-stopped
+    environment:
+      # ⚠️ 全部 __REPLACE_WITH__ 占位符必须替换成真实值
+      # 与 .env 里 DB_PASSWORD / DB_USER / DB_ROOT_PASSWORD 保持一致
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-__REPLACE_WITH_ROOT_PW__}
+      MYSQL_DATABASE:      ${DB_NAME:-drill_system}
+      MYSQL_USER:          ${DB_USER:-__REPLACE_WITH_DB_USER__}
+      MYSQL_PASSWORD:      ${DB_PASSWORD:-__REPLACE_WITH_DB_PASSWORD__}
+      TZ:                  Asia/Shanghai
+    # 端口暴露 —— 仅调试时需要。生产建议注释掉，让 app 只用内部 DNS。
+    ports:
+      - "${MYSQL_HOST_PORT:-3306}:3306"
+    volumes:
+      - drill-mysql-data:/var/lib/mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --max-connections=300
+      --default-time-zone='+08:00'
+    healthcheck:
+      # root ping —— 用 MYSQL_ROOT_PASSWORD（compose 里已定义）
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - drill-net
+
+  # ---------- App ----------
+  app:
+    # 用户有两种获取方式：
+    #   方式 A：docker pull 后填入 image
+    #     image: your-registry/drill-server:latest
+    #   方式 B：本地构建（下面的 build 段）
+    build:
+      context: ../..
+      dockerfile: deploy/docker-dist/Dockerfile
+      args:
+        VERSION: ${VERSION:-0.5.0}
+    image: drill-server:${VERSION:-0.5.0}
+    container_name: drill-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # compose 内部 DNS —— 强制覆盖 .env 里的 DB_HOST 为 mysql
+      DB_HOST: mysql
+      APP_ENV: production
+      HTTP_ADDR: 0.0.0.0:8090
+      TRUSTED_PROXIES: "172.17.0.0/16,127.0.0.1/32"
+    ports:
+      - "${APP_HOST_PORT:-8090}:8090"
+    volumes:
+      # 持久化数据（上传文件 / 运行时 data 目录）
+      - drill-app-data:/opt/drill/data
+      - drill-app-uploads:/opt/drill/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - drill-net
+
+# ---------- 命名卷 ----------
+volumes:
+  drill-mysql-data:   # MySQL 数据（不会因容器删而丢；彻底重置用 docker compose down -v）
+  drill-app-data:     # /opt/drill/data（运行时数据）
+  drill-app-uploads:  # /opt/drill/uploads（用户上传文件）
+
+# ---------- 网络 ----------
+networks:
+  drill-net:
+    driver: bridge

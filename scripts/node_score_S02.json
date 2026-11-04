@@ -1,0 +1,86 @@
+{
+  "scenarioId": "S02_AG_END_",
+  "projectId": "P2026_AG_END_S02",
+  "scenario": "S02",
+  "total": 13,
+  "hit": 4,
+  "ontime": 3,
+  "late": 1,
+  "wrong": 1,
+  "missed": 9,
+  "skipped": 0,
+  "distractors": 10,
+  "score": 16.1,
+  "grade": "不合格",
+  "completeness": 30.8,
+  "timeRate": 23.1,
+  "deductions": [
+    {
+      "nodeId": "S02_AG_END_S02-10",
+      "type": "正确流程未完成（扣全分）",
+      "point": -8,
+      "missed": true
+    },
+    {
+      "nodeId": "S02_AG_END_S02-11",
+      "type": "正确流程未完成（扣全分）",
+      "point": -8,
+      "missed": true
+    },
+    {
+      "nodeId": "S02_AG_END_S02-12",
+      "type": "正确流程未完成（扣全分）",
+      "point": -8,
+      "missed": true
+    },
+    {
+      "nodeId": "S02_AG_END_S02-13",
+      "type": "正确流程未完成（扣全分）",
+      "point": -8,
+      "missed": true
+    },
+    {
+      "nodeId": "S02_AG_END_S02-4",
+      "type": "超时完成（扣10%）",
+      "point": -0.9,
+      "late": true
+    },
+    {
+      "nodeId": "S02_AG_END_S02-5",
+      "type": "正确流程未完成（扣全分）",
+      "point": -9,
+      "missed": true
+    },
+    {
+      "nodeId": "S02_AG_END_S02-6",
+      "type": "正确流程未完成（扣全分）",
+      "point": -8,
+      "missed": true
+    },
+    {
+      "nodeId": "S02_AG_END_S02-7",
+      "type": "正确流程未完成（扣全分）",
+      "point": -8,
+      "missed": true
+    },
+    {
+      "nodeId": "S02_AG_END_S02-8",
+      "type": "正确流程未完成（扣全分）",
+      "point": -8,
+      "missed": true
+    },
+    {
+      "nodeId": "S02_AG_END_S02-9",
+      "type": "正确流程未完成（扣全分）",
+      "point": -8,
+      "missed": true
+    },
+    {
+      "nodeId": "S02_AG_END_DSS02-duty-1-1",
+      "type": "执行混淆流程（扣全分）",
+      "point": -10,
+      "distract": true
+    }
+  ],
+  "formula": "扣分制：起始 100 分，已完成正确流程 4/13 项，超时 1 项（每项扣本节点 10%），执行混淆流程 1 项（各扣 10 分），未完成正确流程 9 项（扣 73 分），合计扣 83.9 分 = 16.1 分"
+}

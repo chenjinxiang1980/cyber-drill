@@ -1,0 +1,36 @@
+/* drill.rc —— 测试 VERSIONINFO 语法 */
+
+#define IDI_APP  101
+IDI_APP ICON "drill.ico"
+
+/* Manifest (RT_MANIFEST = 24) */
+1 24 "app.manifest"
+
+/* VERSIONINFO: 最小可编译版本 */
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEFLAGSMASK 0x3f
+FILEFLAGS 0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "CompanyName",      "Drill System"
+            VALUE "ProductName",      "Drill System"
+            VALUE "FileDescription",  "Drill System backend (Go)"
+            VALUE "InternalName",     "drill-server"
+            VALUE "OriginalFilename", "drill-server.exe"
+            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "ProductVersion",   "0.1.0"
+            VALUE "LegalCopyright",   "Copyright (c) 2026 Drill System"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 0x04B0
+    END
+END

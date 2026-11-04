@@ -1,0 +1,59 @@
+# ====== Docker build context exclusion ======
+# 仓库根级 .dockerignore —— 所有 deploy/docker-dist/Dockerfile 构建上下文都指向仓库根，
+# 所以这里把不该打包进镜像的东西一次性列清。
+
+# 运行时数据（零体积进入镜像）
+data/
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+
+# Go 本地缓存
+server/.gocache/
+server/go.sum.bak
+
+# 构建产物 / 二进制
+dist/
+*.exe
+server/deploy-linux/
+server/deploy-windows/
+
+# 日志 / 临时
+*.log
+*.pid
+*.bak
+ag_node_*.json
+
+# Node 相关（本项目前端是纯静态 public/，不打包 node_modules）
+node/
+node_modules/
+npm-debug.log*
+package-lock.json
+package.json
+
+# 测试截图 / 诊断产物
+.trae/tmp/screenshots/mobile-shots/
+.trae/tmp/screenshots/mobile-diag/
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Git / 文档（不进镜像）
+.git/
+.gitignore
+README.md
+LICENSE
+docs/
+
+# deploy/ 下其它部署方案不进构建上下文（避免冲突）
+deploy/linux/
+deploy/docker-desktop/
+# 但要让 deploy/docker-dist/ 里的 .dockerignore 透传 —— 不需要处理，因为上下文是仓库根

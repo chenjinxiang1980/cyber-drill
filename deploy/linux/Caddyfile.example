@@ -1,0 +1,45 @@
+# =============================================================================
+# drill-server —— Caddy 自动 HTTPS 配置
+#
+# Caddy 优点：证书自动签发/续期（Let's Encrypt）、配置极简、WebSocket 开箱即用
+#
+# 用法：
+#   # Debian/Ubuntu
+#   sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+#   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+#   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+#   sudo apt update && sudo apt install caddy
+#
+#   # 写入配置
+#   sudo cp Caddyfile.example /etc/caddy/Caddyfile
+#   sudo sed -i 's/__REPLACE_WITH_DOMAIN__/drill.example.com/g' /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# Go 进程的 TRUSTED_PROXIES 建议填：__REPLACE_WITH_CADDY_IP__/32
+# （Caddy 在同机 → 127.0.0.1/32；Caddy 在容器 → 容器 IP 或网段）
+# =============================================================================
+
+__REPLACE_WITH_DOMAIN__ {
+    # ---------- 上传大小 ----------
+    # 必须与 drill.env UPLOAD_MAX_MB 对齐
+    client_max_body_size 20m
+
+    # ---------- HSTS ----------
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains"
+        X-Frame-Options DENY
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+
+    # ---------- 健康检查 ----------
+    handle_path /api/health {
+        reverse_proxy 127.0.0.1:8090
+    }
+
+    # ---------- 其他全部回源 ----------
+    # Caddy reverse_proxy 自动处理：
+    #   - X-Forwarded-For / X-Real-IP / X-Forwarded-Proto
+    #   - WebSocket Upgrade
+    reverse_proxy 127.0.0.1:8090
+}

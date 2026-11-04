@@ -2,10 +2,10 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>登录 · 盘州市人民医院网络安全应急演练系统</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>登录 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 </head>
 <body>
 <a class="screen-entry" id="screenEntry" href="screen.html" target="_blank" rel="noopener">
@@ -14,7 +14,7 @@
 <div class="login-bg">
   <div class="login-card">
     <div class="login-left">
-      <div class="flex gap3"><span class="logo login-logo" id="brandIcon"><img src="img/logo.png" alt="盘州市人民医院院徽"></span><div><div data-brand="unit" style="font-size:15px;font-weight:700">盘州市人民医院</div><div class="dim small" data-brand="system">网络安全应急演练推演平台</div></div></div>
+      <div class="flex gap3"><span class="logo login-logo" id="brandIcon"><img src="img/logo.png" alt="示例医院院徽"></span><div><div data-brand="unit" style="font-size:15px;font-weight:700">示例医院</div><div class="dim small" data-brand="system">网络安全应急演练推演平台</div></div></div>
       <div class="l-title" style="margin-top:34px">常态化应急演练<br>标准化协同推演</div>
       <div class="l-sub">覆盖告警发现 → 核实研判 → 启动预案 → 处置 → 业务兜底 → 上报 → 报案取证 → 恢复 → 复盘完整闭环</div>
       <div class="l-features" id="featList"></div>
@@ -32,9 +32,16 @@
         <input class="input" id="inUser" placeholder="选择角色后列出本角色账号，也可手动输入">
         <div class="tiny mt2"><a id="accToggle" style="color:var(--accent2);cursor:pointer">手动输入账号</a></div>
       </div>
-      <div class="form-row"><label class="f-label">密码 <span class="req">*</span></label><input class="input" id="inPass" type="password" placeholder="初始密码 Pzy@2026，登录后请尽快修改"></div>
-      <div class="form-row"><label class="f-label">验证码 <span class="req">*</span></label>
-        <div class="captcha-row"><input class="input" id="inCap" maxlength="4" placeholder="不区分大小写"><span class="captcha-box" id="capBox" title="点击刷新"></span></div>
+      <div class="form-row"><label class="f-label">密码 <span class="req">*</span></label><input class="input" id="inPass" type="password" placeholder="初始密码见 .env 的 DRILL_INIT_PWD，登录后请尽快修改"></div>
+      <div class="form-row" id="capRow"><label class="f-label">验证码 <span class="req">*</span></label>
+        <div class="captcha-row">
+          <input class="input" id="inCap" maxlength="6" placeholder="请填写计算结果">
+          <span class="captcha-box" id="capBoxWrap" title="点击刷新">
+            <img id="capBox" alt="验证码" title="点击刷新" crossorigin="anonymous">
+            <span class="cap-skel" id="capSkel" aria-hidden="true"></span>
+          </span>
+          <button type="button" class="captcha-reload" id="capReload" title="换一张">换一张</button>
+        </div>
       </div>
       <div class="login-err" id="loginErr"></div>
       <button class="btn primary block" id="btnLogin" style="padding:10px;font-size:14px">登 录</button>
@@ -101,9 +108,73 @@
     }
   };
 
-  function genCap(){ var s='ABCDEFGHJKMNPQRSTUVWXY345678'; cap=''; for(var i=0;i<4;i++) cap+=s[Math.floor(Math.random()*s.length)]; document.getElementById('capBox').textContent=cap; }
-  genCap();
-  document.getElementById('capBox').onclick = genCap;
+  /* ---------- 图形验证码（后端 + 客户端统一换色） ----------
+     后端随机生成 SVG 颜色（bg 浅色 + fg 深色，hue 范围覆盖全色谱），
+     任何 CSS filter（invert+hue-rotate / grayscale+sepia 等）都无法对任意原始颜色
+     稳定地产生"蓝色文字 + 融入 cardBG 背景"——filter 作用于已渲染像素，受抗锯齿
+     和非线性影响，5 张随机 captcha 实测 hue 散布 109°-345°，零命中 200-230° 蓝区。
+     因此改用 JS 方案：fetch 原始 SVG → DOMParser 解析 → 替换 rect 为 cardBG、
+     text/line 为 --accent2 亮蓝 → 重新 base64 作为 data URI。
+     不碰 server/，不引入依赖，仅客户端预处理。*/
+  function swapCaptchaColors(dataUri){
+    try{
+      var b64 = dataUri.replace(/^data:image\/svg\+xml;base64,/, '');
+      var xml = atob(b64);
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(xml, 'image/svg+xml');
+      // rect 背景 → cardBG 同款（--panel #111c2e = rgb(17,28,46)）
+      doc.querySelectorAll('rect').forEach(function(el){ el.setAttribute('fill', '#111c2e'); });
+      // text / tspan / 所有带 fill 的非 rect 元素 → 主题蓝（--accent2 #4d9bff）
+      // 遍历所有元素，只要有 fill 属性且不是 rect（rect 已单独处理），就换成字符蓝
+      var charBlue = '#4d9bff';
+      doc.querySelectorAll('*').forEach(function(el){
+        if (el.tagName && el.tagName.toLowerCase() !== 'rect' && el.hasAttribute('fill')) {
+          el.setAttribute('fill', charBlue);
+        }
+      });
+      // line / polyline / path → 同主题蓝（描边色）
+      doc.querySelectorAll('line, polyline, path').forEach(function(el){
+        if (el.hasAttribute('stroke')) el.setAttribute('stroke', charBlue);
+      });
+      var serializer = new XMLSerializer();
+      var newXml = serializer.serializeToString(doc.documentElement);
+      return 'data:image/svg+xml;base64,' + btoa(newXml);
+    }catch(e){
+      // 解析失败 → 原样返回，不阻断
+      return dataUri;
+    }
+  }
+  var capId = '', capAvailable = false;
+  var capBoxWrap = document.getElementById('capBoxWrap');
+  var capBox = document.getElementById('capBox');
+  var capRow = document.getElementById('capRow');
+  var inCap = document.getElementById('inCap');
+  function loadCaptcha(){
+    capBoxWrap.classList.remove('loaded');
+    fetch('/api/auth/captcha', { method:'GET' })
+      .then(function(r){
+        if(!r.ok) throw new Error('captcha-fail');
+        return r.json();
+      })
+      .then(function(data){
+        if(!data || !data.image || !data.id) throw new Error('captcha-invalid');
+        capId = data.id;
+        capBox.src = swapCaptchaColors(data.image);
+        capBox.onload = function(){ capBoxWrap.classList.add('loaded'); };
+        if(capBox.complete && capBox.naturalWidth){ capBoxWrap.classList.add('loaded'); }
+        capAvailable = true;
+        capRow.style.display = '';
+      })
+      .catch(function(){
+        capAvailable = false;
+        capRow.style.display = 'none';
+        capId = '';
+        capBoxWrap.classList.add('loaded');
+      });
+  }
+  capBoxWrap.onclick = function(){ loadCaptcha(); inCap.value=''; };
+  document.getElementById('capReload').onclick = function(){ loadCaptcha(); inCap.value=''; };
+  loadCaptcha();
 
   var grid = document.getElementById('roleGrid');
   function err(m){ document.getElementById('loginErr').textContent = m; }
@@ -135,10 +206,8 @@
     fillAccounts();
   });
 
-  var fails = 0, locked = false;
   document.getElementById('btnLogin').onclick = function(){
     err('');
-    if(locked){ err('账号已锁定，请稍后再试'); return; }
     var user = accMode === 'select' ? (selAccount.value || '') : document.getElementById('inUser').value.trim();
     var pass = document.getElementById('inPass').value;
     /* 未点选角色卡时按账号自动识别角色（角色以服务端校验结果为准） */
@@ -147,15 +216,13 @@
       if(acc) selRole = acc.role;
     }
     if(!selRole){ err('请先选择参演角色（或输入已分配的账号）'); return; }
-    var capIn = document.getElementById('inCap').value.trim().toUpperCase();
     if(!user){ err('请选择或输入账号'); return; }
     if(pass.length < 1){ err('请输入密码'); return; }
-    if(capIn !== cap){ fails++; genCap(); document.getElementById('inCap').value='';
-      err('验证码错误（第'+fails+'次）'+(fails>=5?' 账号已锁定 10 分钟':'')); if(fails>=5){ locked=true; document.getElementById('btnLogin').disabled=true; setTimeout(function(){ locked=false; fails=0; document.getElementById('btnLogin').disabled=false; }, 10*60*1000); } return; }
+    if(capAvailable && !inCap.value.trim()){ err('请输入验证码'); return; }
 
     var btn = document.getElementById('btnLogin');
     btn.disabled = true; btn.textContent = '登录中…';
-    API.login(user, pass, selRole).then(function(r){
+    API.login(user, pass, selRole, capAvailable ? capId : '', capAvailable ? inCap.value.trim() : '').then(function(r){
       if(selRole !== r.role.id){
         App.toast('所选角色与账号角色不一致，已按账号角色登录', 'warn');
       }
@@ -165,11 +232,25 @@
       setTimeout(function(){ location.href = target; }, 450);
     }).catch(function(e){
       btn.disabled = false; btn.textContent = '登 录';
-      genCap(); document.getElementById('inCap').value = '';
-      err((e && e.message) || '登录失败，请检查账号与密码');
+      var msg = (e && e.message) || '登录失败，请检查账号与密码';
+      var status = (e && e.status) || 0;
+      if(status === 400 && msg.indexOf('验证码') >= 0){
+        err('验证码错误');
+        loadCaptcha(); inCap.value = '';
+      } else if(status === 423){
+        // 账号锁定：后端通常返回带"请 N 分钟后再试"的 message
+        err(msg);
+      } else if(status === 401){
+        // 账号/密码错误
+        if(capAvailable){ loadCaptcha(); inCap.value = ''; }
+        err(msg);
+      } else {
+        if(capAvailable){ loadCaptcha(); inCap.value = ''; }
+        err(msg);
+      }
     });
   };
-  document.getElementById('inCap').addEventListener('keydown', function(e){ if(e.key==='Enter') document.getElementById('btnLogin').click(); });
+  inCap.addEventListener('keydown', function(e){ if(e.key==='Enter') document.getElementById('btnLogin').click(); });
   document.getElementById('inPass').addEventListener('keydown', function(e){ if(e.key==='Enter') document.getElementById('btnLogin').click(); });
 })();
 </script>

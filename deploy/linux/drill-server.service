@@ -1,0 +1,87 @@
+# -----------------------------------------------------------------------------
+# drill-server systemd unit
+#
+# 运行身份：非 root（User=drill）
+#   - 不要用 root 跑任何 Internet 暴露的服务
+#   - install.sh 会自动创建 drill 系统用户（nologin）
+#
+# 环境文件 /etc/drill/drill.env：
+#   - 含 DB_PASSWORD / JWT_SECRET / SESSION_SECRET 等，权限必须 root:root 0640
+#   - 本单元用 EnvironmentFile，systemd 会自动忽略 # 注释行和空行
+#
+# TLS 证书：
+#   - 默认放 /etc/drill/certs/server.crt / server.key
+#   - 需要 drill 用户可读：chown root:drill /etc/drill/certs
+#                          chmod 0750 /etc/drill/certs
+#                          chmod 0640 /etc/drill/certs/*
+#
+# 路径说明（-root 参数）：
+#   二进制内部用 -root 指定项目根目录，默认是相对路径 ".."
+#   这里显式传绝对路径 /opt/drill，避免依赖 WorkingDirectory
+#
+# 日志：
+#   所有 stdout/stderr 自动进 systemd journal，不再单独写文件
+#   查看：journalctl -u drill-server -f
+# -----------------------------------------------------------------------------
+
+[Unit]
+Description=Drill Emergency Response System (Go backend)
+Documentation=https://example.com/drill/docs/linux-deployment
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=drill
+Group=drill
+
+# 项目根目录：二进制在 /opt/drill/bin/ 下，-root 指向根
+WorkingDirectory=/opt/drill
+ExecStart=/opt/drill/bin/drill-server -root=/opt/drill
+
+# 进程管理
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# 环境变量文件（不要写在 ExecStart 里，避免被 ps 泄露）
+EnvironmentFile=/etc/drill/drill.env
+
+# ---------- 基础加固 ----------
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RemoveIPC=true
+
+# 文件访问白名单（ProtectSystem=strict 下需要显式放开）
+# ReadWritePaths: drill 运行时需要写的
+ReadWritePaths=/opt/drill/data /opt/drill/uploads /opt/drill/run
+# ReadWritePaths 默认不包含 /tmp，PrivateTmp=true 已自动隔离
+
+# 限制
+LimitNOFILE=65535
+LimitNPROC=4096
+# LimitMEMLOCK=infinity   # 如果后续用 mmap/SHM 再开
+# CapabilityBoundingSet=  # 空集合 = 去掉所有 capability（可选，更激进）
+
+# 日志：systemd journal 自动收集
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drill-server
+
+# 信号：SIGTERM 触发 Go 里的优雅关闭（已监听 syscall.SIGTERM）
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
