@@ -71,11 +71,91 @@
 | 源码 | GitHub / Gitee 默认分支 + `v0.5.0` 标签 |
 | Linux ELF | `server/deploy-linux/drill-server`（随离线包或 Release 附件，仓库不入库） |
 | 离线包 | `dist/drill-linux-bundle.tar.gz` + `.sha256` |
-| Docker 镜像 | `drill-server:0.5.0`（本地构建；registry 推送按发布环境另行执行） |
+| Docker 镜像 | `drill-server:0.5.0`（48.2 MB / 9 层，linux/amd64） |
+
+镜像构建参数（可复现）：
+
+```bash
+docker build -f deploy/docker-dist/Dockerfile \
+  -t drill-server:0.5.0 \
+  --build-arg VERSION=0.5.0 \
+  --build-arg BUILD_TIME=<ISO8601> \
+  --build-arg VCS_REF=cd70867 \
+  --build-arg GIT_COMMIT=cd70867 .
+```
 
 ---
 
-## 七、GitHub / Gitee Release 建议文案（待确认后发布）
+## 七、镜像拉取与运行
+
+### 7.1 GHCR（GitHub Container Registry）
+
+```bash
+docker pull ghcr.io/chenjinxiang1980/cyber-drill:0.5.0
+docker pull ghcr.io/chenjinxiang1980/cyber-drill:latest    # 与 0.5.0 同一 digest
+```
+
+包若为私有，先登录（token 只经管道传入，不进 shell 历史）：
+
+```bash
+echo "$GH_TOKEN" | docker login ghcr.io -u <github 用户名> --password-stdin
+```
+
+### 7.2 华为云 SWR（区域 cn-east-3）
+
+```bash
+docker login swr.cn-east-3.myhuaweicloud.com        # 用户名形如 cn-east-3@<AK>，口令交互输入
+docker pull swr.cn-east-3.myhuaweicloud.com/<组织名>/cyber-drill:0.5.0
+```
+
+`<组织名>` 需在 SWR 控制台预先创建（命名空间与 AK 同名的组织通常已存在）；推送失败先确认
+命名空间存在、帐号有 `swr:repository:push` 权限。
+
+### 7.3 docker compose 运行
+
+```bash
+git clone https://github.com/chenjinxiang1980/cyber-drill.git
+cd cyber-drill/deploy/docker-dist
+cp .env.example .env      # 然后替换全部 __REPLACE_WITH__ 占位符
+docker compose up -d
+```
+
+默认由 compose 本地构建镜像；若要用已发布镜像，把 `docker-compose.yml` 的 `image` 改成
+`ghcr.io/chenjinxiang1980/cyber-drill:0.5.0`，并把 `build:` 段整段注释掉。
+
+### 7.4 必须修改的环境变量
+
+| 变量 | 必改 | 说明 |
+|------|------|------|
+| `JWT_SECRET` | 是 | `openssl rand -hex 32`；占位符未替换时启动 `exit 2` |
+| `SESSION_SECRET` | 是 | 同上 |
+| `DB_USER` / `DB_PASSWORD` | 是 | 业务库账号，不要用 root |
+| `MYSQL_ROOT_PASSWORD` | 是 | 仅 MySQL 容器首次初始化使用 |
+| `ADMIN_INIT_PASSWORD` | 是 | 管理员初始口令（bootstrap 用） |
+| `ADMIN_BASELINE_USERS` | 建议 | 账号清理白名单，逗号分隔且不含 `admin`；留空只保留 `admin` |
+| `CAPTCHA_ENABLED` | 建议 | 保持 `true`；`false` 仅供内部联调 |
+| `PUBLIC_BASE_URL` | 建议 | 反向代理后的对外地址 |
+| `TLS_ENABLED` | 视情况 | 开启后证书缺失即拒绝启动，不会静默降级 |
+| `ALLOW_ORIGINS` | 视情况 | 生产应收敛为具体域名，不建议留 `*` |
+
+### 7.5 验证版本
+
+```bash
+curl -s http://127.0.0.1:8090/api/health
+# {"ok":true,"service":"cyber-drill-system","version":"0.5.0","time":"..."}
+```
+
+镜像内也可用启动日志确认（不连数据库也会先打印版本行）：
+
+```bash
+docker run --rm --entrypoint /opt/drill/bin/drill-server \
+  ghcr.io/chenjinxiang1980/cyber-drill:0.5.0 -root=/opt/drill
+# INFO 启动 version=0.5.0 buildTime=<ISO8601> gitCommit=cd70867
+```
+
+---
+
+## 八、GitHub / Gitee Release 建议文案（待确认后发布）
 
 **标题**：
 
@@ -103,12 +183,18 @@ v0.5.0 · Go 版首发：把演练规则收进服务端
   文档与脚本内网信息脱敏
 
 ### 部署
-- Docker：`drill-server:0.5.0`（见 deploy/docker-dist）
+- Docker（48.2 MB 单镜像，9 层，linux/amd64）：
+  - `docker pull ghcr.io/chenjinxiang1980/cyber-drill:0.5.0`
+  - SWR（cn-east-3）：`docker pull swr.cn-east-3.myhuaweicloud.com/<组织名>/cyber-drill:0.5.0`
+  - compose 用法见 `deploy/docker-dist/docker-compose.yml`
 - Linux：`scripts/build-linux.ps1` 交叉编译 + `dist/drill-linux-bundle.tar.gz`
 
 ### 注意
 仓库不含任何真实凭证。首次部署必须自行设置 ADMIN_INIT_PASSWORD、
-JWT_SECRET、SESSION_SECRET，并保持 CAPTCHA_ENABLED=true。
+JWT_SECRET、SESSION_SECRET、DB_USER、DB_PASSWORD，保持 CAPTCHA_ENABLED=true，
+并按需设置 ADMIN_BASELINE_USERS（留空则只保留 admin）。
 
-完整说明见 docs/release-0.5.0.md。MIT License © 2026 陈金祥。
+验证：`curl -s http://127.0.0.1:8090/api/health` → `"version":"0.5.0"`。
+
+完整说明（含拉取命令、compose、必改环境变量）见 docs/release-0.5.0.md。MIT License © 2026 陈金祥。
 ```

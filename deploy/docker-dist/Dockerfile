@@ -146,17 +146,20 @@ ENV HTTPS_PROXY=
 ARG VERSION=0.5.0
 ARG VCS_REF=unknown
 ARG BUILD_TIME=unknown
+# 发布元数据：全部可由 --build-arg 覆盖，避免源码里残留占位值
+ARG SOURCE_URL=https://github.com/chenjinxiang1980/cyber-drill
+ARG KEYFILES_SHA256=unknown
 
 LABEL org.opencontainers.image.title="cyber-drill-system" \
       org.opencontainers.image.description="示例医院网络安全应急演练系统 —— Drill Server" \
       org.opencontainers.image.version=${VERSION} \
-      org.opencontainers.image.source="https://github.com/your-org/cyber-drill-system" \
+      org.opencontainers.image.source=${SOURCE_URL} \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.revision=${VCS_REF} \
       org.opencontainers.image.created=${BUILD_TIME} \
       org.opencontainers.image.authors="Cyber-Drill Team" \
-      # 自定义标签：让使用者能一眼看到这份镜像对应哪段源码快照
-      drill.system.keyfiles.sha256=PLACEHOLDER_REPLACE_WITH_ACTUAL_SHA
+      # 自定义标签：让使用者能一眼看到这份镜像对应哪些关键文件（签名文件末行哈希）
+      drill.system.keyfiles.sha256=${KEYFILES_SHA256}
 
 EXPOSE 8090
 
