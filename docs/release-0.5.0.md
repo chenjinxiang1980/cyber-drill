@@ -46,6 +46,7 @@
 - **影响态势去重**：角色工作台“业务系统影响态势”将全局模板行与项目实例行合并去重，避免同一系统重复显示。
 - **删除项目清理**：删除演练项目时同步清理关联的消息、任务、影响态势等数据。
 - **打包验签**：打包脚本改为读取 `drill-server.sha256.txt` 末行哈希（大小写无关整串比较），不一致直接失败；`scripts/build-linux.ps1` 构建成功后自动重签。
+- **容器入口行尾（发布阻断已修复）**：`deploy/docker-dist/docker-entrypoint.sh` 在 Windows 侧以 CRLF 入库，容器内 shebang 变成 `#!/bin/sh\r`，`tini` 报 `exec /opt/drill/docker-entrypoint.sh failed: No such file or directory`，镜像无法启动。新增 `.gitattributes`（`*.sh` / `docker-entrypoint*` / `Dockerfile` 强制 `eol=lf`）后重建镜像，并同步重打离线包（`deploy/linux/install.sh` 同属受影响文件）。
 
 ## 四、安全
 
@@ -71,7 +72,7 @@
 | 源码 | GitHub / Gitee 默认分支 + `v0.5.0` 标签 |
 | Linux ELF | `server/deploy-linux/drill-server`（随离线包或 Release 附件，仓库不入库） |
 | 离线包 | `dist/drill-linux-bundle.tar.gz` + `.sha256` |
-| Docker 镜像 | `drill-server:0.5.0`（48.2 MB / 9 层，linux/amd64） |
+| Docker 镜像 | `drill-server:0.5.0`（48.2 MB / 9 层，linux/amd64），manifest digest `sha256:c7341909fbb9fcd3a6f79f6ffe19a361d9590f84a5a1bef1e02a105db1fc1e42` |
 
 镜像构建参数（可复现）：
 
@@ -80,8 +81,8 @@ docker build -f deploy/docker-dist/Dockerfile \
   -t drill-server:0.5.0 \
   --build-arg VERSION=0.5.0 \
   --build-arg BUILD_TIME=<ISO8601> \
-  --build-arg VCS_REF=cd70867 \
-  --build-arg GIT_COMMIT=cd70867 .
+  --build-arg VCS_REF=f1a65bb \
+  --build-arg GIT_COMMIT=f1a65bb .
 ```
 
 ---
@@ -95,6 +96,9 @@ docker pull ghcr.io/chenjinxiang1980/cyber-drill:0.5.0
 docker pull ghcr.io/chenjinxiang1980/cyber-drill:latest    # 与 0.5.0 同一 digest
 ```
 
+两个 tag 指向同一 manifest：`sha256:c7341909fbb9fcd3a6f79f6ffe19a361d9590f84a5a1bef1e02a105db1fc1e42`。
+该包已设为 **public**，无需登录即可匿名拉取。
+
 包若为私有，先登录（token 只经管道传入，不进 shell 历史）：
 
 ```bash
@@ -105,8 +109,12 @@ echo "$GH_TOKEN" | docker login ghcr.io -u <github 用户名> --password-stdin
 
 ```bash
 docker login swr.cn-east-3.myhuaweicloud.com        # 用户名形如 cn-east-3@<AK>，口令交互输入
-docker pull swr.cn-east-3.myhuaweicloud.com/<组织名>/cyber-drill:0.5.0
+docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:0.5.0
+docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:latest
 ```
+
+组织名为 `chenjinxiang`；两个 tag 与 GHCR 同一 manifest digest
+`sha256:c7341909fbb9fcd3a6f79f6ffe19a361d9590f84a5a1bef1e02a105db1fc1e42`。该仓库为**私有**，必须登录后才能拉取。
 
 `<组织名>` 需在 SWR 控制台预先创建（命名空间与 AK 同名的组织通常已存在）；推送失败先确认
 命名空间存在、帐号有 `swr:repository:push` 权限。
@@ -150,7 +158,7 @@ curl -s http://127.0.0.1:8090/api/health
 ```bash
 docker run --rm --entrypoint /opt/drill/bin/drill-server \
   ghcr.io/chenjinxiang1980/cyber-drill:0.5.0 -root=/opt/drill
-# INFO 启动 version=0.5.0 buildTime=<ISO8601> gitCommit=cd70867
+# INFO 启动 version=0.5.0 buildTime=<ISO8601> gitCommit=f1a65bb
 ```
 
 ---
