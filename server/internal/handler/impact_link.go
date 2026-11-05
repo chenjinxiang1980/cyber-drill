@@ -90,15 +90,38 @@ type ImpactSource struct {
 	At           string
 }
 
+// impactQuerier 统一 *db.DB 与 *sql.Tx 的查询能力
+type impactQuerier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+// impactDefaultSeq 取全局模板行（project_id=''）的展示序号；查不到用 99。
+// 必须先在 Go 侧单独查询再以字面量插入：MySQL 不允许在
+// INSERT ... ON DUPLICATE KEY UPDATE 中对目标表 impact 自身做子查询（ERROR 1093）。
+func impactDefaultSeq(q impactQuerier, sys string) int {
+	rs, err := q.Query(`SELECT seq FROM impact WHERE sys=? AND project_id='' LIMIT 1`, sys)
+	if err != nil {
+		return 99
+	}
+	defer rs.Close()
+	if rs.Next() {
+		var seq sql.NullInt64
+		if rs.Scan(&seq) == nil && seq.Valid {
+			return int(seq.Int64)
+		}
+	}
+	return 99
+}
+
 // applyFormImpact 非事务版本（实战版 PostDrillDecide 复用，写 drill_steps 后调用）
 func applyFormImpact(database *db.DB, src ImpactSource, formID string, data map[string]any) []string {
 	changes := collectImpactChanges(formID, data)
 	for _, ch := range changes {
+		seq := impactDefaultSeq(database, ch.sys)
 		_, _ = database.Exec(
-			`INSERT INTO impact (sys,state,pct,seq,project_id) VALUES (?,?,?,
-				COALESCE((SELECT seq FROM impact WHERE sys=? AND project_id=''),99),?)
+			`INSERT INTO impact (sys,state,pct,seq,project_id) VALUES (?,?,?,?,?)
 			 ON DUPLICATE KEY UPDATE state=VALUES(state),pct=VALUES(pct)`,
-			ch.sys, ch.state, ch.pct, ch.sys, src.ProjectID)
+			ch.sys, ch.state, ch.pct, seq, src.ProjectID)
 		insertImpactEvent(database, src, ch.sys, ch.state, ch.pct)
 	}
 	return changes.systems()
@@ -108,11 +131,11 @@ func applyFormImpact(database *db.DB, src ImpactSource, formID string, data map[
 func applyFormImpactTx(tx *sql.Tx, src ImpactSource, formID string, data map[string]any) error {
 	changes := collectImpactChanges(formID, data)
 	for _, ch := range changes {
+		seq := impactDefaultSeq(tx, ch.sys)
 		if _, err := tx.Exec(
-			`INSERT INTO impact (sys,state,pct,seq,project_id) VALUES (?,?,?,
-				COALESCE((SELECT seq FROM impact WHERE sys=? AND project_id=''),99),?)
+			`INSERT INTO impact (sys,state,pct,seq,project_id) VALUES (?,?,?,?,?)
 			 ON DUPLICATE KEY UPDATE state=VALUES(state),pct=VALUES(pct)`,
-			ch.sys, ch.state, ch.pct, ch.sys, src.ProjectID); err != nil {
+			ch.sys, ch.state, ch.pct, seq, src.ProjectID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(
