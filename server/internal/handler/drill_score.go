@@ -374,83 +374,7 @@ func planText(n ScriptNodeForScore) string {
 	return "未设置处置时长"
 }
 
-// ========== 表单关键字段判定（A-3） ==========
-// 规则仅在“该节点有表单、已提交非空表单、且模板中确实存在该字段”时生效；
-// 旧记录 forms 为空或不含新字段时安全跳过，不改变历史分数。
-
-type formFieldRule struct {
-	Label    string
-	Kind     string // equals | contains | nonempty
-	Values   []string
-	MinRunes int
-}
-
-var nodeFormFieldRules = map[string][]formFieldRule{
-	"S01-2": {
-		{Label: "是否仍在加密", Kind: "equals", Values: []string{"是"}},
-		{Label: "加密文件扩展名", Kind: "nonempty"},
-		{Label: "受影响主机清单", Kind: "nonempty", MinRunes: 5},
-	},
-	"S01-3": {
-		{Label: "共享目录处置", Kind: "equals", Values: []string{"已关闭写入"}},
-		{Label: "隔离主机清单", Kind: "nonempty", MinRunes: 5},
-	},
-	"S01-4": {
-		{Label: "可读性验证", Kind: "equals", Values: []string{"通过"}},
-	},
-	"S01-5": {
-		{Label: "建议等级", Kind: "equals", Values: []string{"重大"}},
-		{Label: "定级依据", Kind: "nonempty", MinRunes: 20},
-	},
-	"S01-6": {
-		{Label: "建议响应等级", Kind: "equals", Values: []string{"Ⅱ级"}},
-	},
-	"S01-7": {
-		{Label: "批准响应级别", Kind: "equals", Values: []string{"Ⅱ级"}},
-		{Label: "启动时间", Kind: "nonempty"},
-		{Label: "授权范围", Kind: "contains", Values: []string{"数据恢复"}},
-	},
-	"S01-8": {
-		{Label: "上报对象", Kind: "contains", Values: []string{"市卫生健康局", "市网信办"}},
-	},
-	"S01-11": {
-		{Label: "二次加密检查", Kind: "equals", Values: []string{"未发现"}},
-		{Label: "恢复验证用例", Kind: "nonempty", MinRunes: 12},
-	},
-	"S01-15": {
-		{Label: "证据清单", Kind: "nonempty", MinRunes: 8},
-	},
-}
-
-func loadFormLabels(database *db.DB) map[string]map[string]bool {
-	out := make(map[string]map[string]bool)
-	rows, err := database.Query(`SELECT id,COALESCE(fields,'[]') FROM form_templates`)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, fields string
-		if rows.Scan(&id, &fields) != nil {
-			continue
-		}
-		var arr []struct {
-			Label string `json:"label"`
-		}
-		if json.Unmarshal([]byte(fields), &arr) != nil {
-			continue
-		}
-		set := make(map[string]bool)
-		for _, f := range arr {
-			if strings.TrimSpace(f.Label) != "" {
-				set[strings.TrimSpace(f.Label)] = true
-			}
-		}
-		out[id] = set
-	}
-	return out
-}
-
+// ========== 表单取值格式化 ==========
 func formValueString(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -471,74 +395,6 @@ func formValueString(v any) string {
 	default:
 		return ""
 	}
-}
-
-func formFieldDeductions(step DrillStepForScore, n ScriptNodeForScore, labels map[string]map[string]bool) ([]Deduction, float64) {
-	if n.Form == "" || len(nodeFormFieldRules[n.ID]) == 0 {
-		return nil, 0
-	}
-	labelSet := labels[n.Form]
-	if len(labelSet) == 0 {
-		return nil, 0
-	}
-	if strings.TrimSpace(step.Forms) == "" {
-		return nil, 0
-	}
-	var m map[string]any
-	if json.Unmarshal([]byte(step.Forms), &m) != nil || len(m) == 0 {
-		return nil, 0
-	}
-	per := math.Round(float64(n.Score)*0.1*10) / 10
-	capDeduct := math.Round(float64(n.Score)*0.3*10) / 10
-	total := 0.0
-	var out []Deduction
-	for _, r := range nodeFormFieldRules[n.ID] {
-		if !labelSet[r.Label] {
-			continue // 模板尚未升级到该字段：不判、不扣
-		}
-		v := formValueString(m[r.Label])
-		ok := false
-		switch r.Kind {
-		case "equals":
-			for _, want := range r.Values {
-				if v == want {
-					ok = true
-					break
-				}
-			}
-		case "contains":
-			ok = true
-			for _, want := range r.Values {
-				if !strings.Contains(v, want) {
-					ok = false
-					break
-				}
-			}
-		default:
-			need := r.MinRunes
-			if need < 1 {
-				need = 1
-			}
-			ok = len([]rune(v)) >= need
-		}
-		if ok {
-			continue
-		}
-		d := per
-		if total+d > capDeduct {
-			d = capDeduct - total
-		}
-		if d <= 0 {
-			break
-		}
-		total += d
-		out = append(out, Deduction{
-			NodeID: n.ID, Title: n.Title,
-			Type:  fmt.Sprintf("表单关键字段缺失或错误（%s）（扣10%%）", r.Label),
-			Point: -d,
-		})
-	}
-	return out, total
 }
 
 // ========== Score 纯函数（复刻 drill.js:162 score） ==========
@@ -592,7 +448,21 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	}
 
 	tasks := loadTasksForScore(database, projectID)
-	formLabels := loadFormLabels(database)
+
+	// 表单必填字段按模板懒加载（处置质量分与服务端强校验共用）
+	formReqCache := make(map[string][]formRequiredField)
+	getFormReq := func(formID string) []formRequiredField {
+		formID = strings.TrimSpace(formID)
+		if formID == "" {
+			return nil
+		}
+		if v, ok := formReqCache[formID]; ok {
+			return v
+		}
+		v := loadFormRequiredFields(database, formID)
+		formReqCache[formID] = v
+		return v
+	}
 
 	// correct ID 集合（用于 matchNode）
 	correctIDs := make(map[string]bool)
@@ -705,7 +575,7 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	deductions := []Deduction{}
 	skippedCorrect := 0
 	skippedDistract := 0
-	formMissCnt := 0
+	qualityMissCnt := 0
 
 	// 正确流程节点
 	for _, n := range correct {
@@ -745,32 +615,23 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 
 		if hasHit {
 			var recvBad bool
+			var formsJSON string
 			if step, ok := hit["step"].(DrillStepForScore); ok {
 				recvBad = step.ReceiverOK == 0
+				formsJSON = step.Forms
 			}
-			var deduct float64
-			if late, _ := hit["late"].(bool); late {
-				d := math.Round(float64(sc)*0.1*10) / 10
-				deduct += d
+			lateHit, _ := hit["late"].(bool)
+			req := getFormReq(n.Form)
+			// 超时 20% / 接收人错误 30% / 处置质量（节点分内部 20% 按必填齐全度），单节点合计上限 80%
+			deduct, parts := correctNodeDeduction(sc, lateHit, recvBad, formsJSON, req)
+			for _, p := range parts {
 				deductions = append(deductions, Deduction{
 					NodeID: n.ID, Title: n.Title,
-					Type: "超时完成（扣10%）", Point: -d,
+					Type: p.Type, Point: -p.Point,
 				})
 			}
-			if recvBad {
-				d := math.Round(float64(sc)*0.1*10) / 10
-				deduct += d
-				deductions = append(deductions, Deduction{
-					NodeID: n.ID, Title: n.Title,
-					Type: "接收人选择错误（扣10%）", Point: -d,
-				})
-			}
-			if step, ok := hit["step"].(DrillStepForScore); ok {
-				if fds, fd := formFieldDeductions(step, n, formLabels); fd > 0 {
-					deduct += fd
-					deductions = append(deductions, fds...)
-					formMissCnt += len(fds)
-				}
+			if _, miss, _ := qualityParts(sc, formsJSON, req); miss > 0 {
+				qualityMissCnt += miss
 			}
 			earned -= deduct
 			stepTime, _ := hit["stepTime"].(string)
@@ -782,20 +643,19 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 			}
 			state := "已完成"
 			if recvBad {
-				if late, _ := hit["late"].(bool); late {
+				if lateHit {
 					state = "超时且接收人错误"
 				} else {
 					state = "接收人错误"
 				}
-			} else if late, _ := hit["late"].(bool); late {
+			} else if lateHit {
 				state = "超时完成"
 			}
-			isLateHit, _ := hit["late"].(bool)
 			nodeResults = append(nodeResults, NodeResult{
 				ID: n.ID, Title: n.Title, Role: n.Target,
 				Plan: planText(n), Actual: stepTime,
-				Required: true, Submitted: true, Hit: true, Ontime: !isLateHit,
-				Wrong: false, Score: sc, Earned: -deduct, Late: isLateHit,
+				Required: true, Submitted: true, Hit: true, Ontime: !lateHit,
+				Wrong: false, Score: sc, Earned: -deduct, Late: lateHit,
 				Receiver: receiverStr, ReceiverOk: receiverOk, State: state,
 			})
 			continue
@@ -909,6 +769,7 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	ontimeCnt := 0
 	wrongCnt := 0
 	lateCnt := 0
+	recvBadCnt := 0
 	missedCnt := 0
 	pendingCnt := 0
 	for _, nr := range nodeResults {
@@ -948,18 +809,26 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	}
 
 	// 生成 formula
+	for _, d := range deductions {
+		if strings.HasPrefix(d.Type, "接收人选择错误") {
+			recvBadCnt++
+		}
+	}
 	formula := fmt.Sprintf("扣分制：起始 %d 分", int(deductBase))
 	if hitCnt > 0 {
 		formula += fmt.Sprintf("，已完成正确流程 %d/%d 项", hitCnt, total)
 	}
 	if lateCnt > 0 {
-		formula += fmt.Sprintf("，超时 %d 项（每项扣本节点 10%%）", lateCnt)
+		formula += fmt.Sprintf("，超时 %d 项（每项扣本节点 20%%）", lateCnt)
+	}
+	if recvBadCnt > 0 {
+		formula += fmt.Sprintf("，接收人错误 %d 项（每项扣本节点 30%%）", recvBadCnt)
 	}
 	if wrongCnt > 0 {
 		formula += fmt.Sprintf("，执行混淆流程 %d 项", wrongCnt)
 	}
-	if formMissCnt > 0 {
-		formula += fmt.Sprintf("，表单关键字段缺失/错误 %d 项（每项扣本节点 10%%，单节点上限 30%%）", formMissCnt)
+	if qualityMissCnt > 0 {
+		formula += fmt.Sprintf("，处置质量必填项缺失 %d 项（本节点 20%% 内按缺失比例扣减）", qualityMissCnt)
 	}
 	if forceView {
 		formula += "，演练中强制查看脚本 1 次（扣 10 分）"

@@ -1085,7 +1085,7 @@ document.addEventListener('app:ready', function(e){
     var recv = '<div class="form-row span2" style="margin-bottom:10px"><label class="f-label">下一节点接收人 <span class="req">*</span> <span class="tiny dim">（可多选）</span></label>'
       + '<div class="flex gap3 wrap" id="flReceiverBox">'
       + RECEIVERS.map(function(x, i){ return '<label class="check"><input type="checkbox" value="'+App.esc(x)+'" data-recv="'+i+'">'+App.esc(x)+'</label>'; }).join('')
-      + '</div><div class="tiny dim" style="margin-top:4px">实战版需由参演人员自行研判流转对象，可多选；所选接收人与剧本预设完全一致才正确，多选、漏选均扣本流程 10% 分值。</div></div>';
+      + '</div><div class="tiny dim" style="margin-top:4px">实战版需由参演人员自行研判流转对象，可多选；所选接收人与剧本预设完全一致才正确，多选、漏选均扣本流程 30% 分值。</div></div>';
     if(!fields.length){
       return '<div class="section-title">'+App.icon('edit')+'流程流转 <span class="tiny dim" style="font-weight:400">由参演人员选择下一节点接收人</span></div>'
         + '<div class="form-grid">'+recv+'</div>'
@@ -1116,7 +1116,7 @@ document.addEventListener('app:ready', function(e){
           ? '<span class="tag green">正确流程 · 得分 +'+sub.delta+'</span>'+(sub.ontime?'':' <span class="tag yellow">超出处置时长</span>')
           : '<span class="tag red">混淆流程 · 扣分 '+Math.abs(sub.delta)+'</span>')+'</span>'
       + '<span class="k">下一节点接收人</span><span>'+(sub.receiver?App.esc(sub.receiver):'—')
-        +(sub.correct?(sub.receiverOk?'':' <span class="tag red">选择错误 · 扣本流程10%</span>'):'')+'</span>'
+        +(sub.correct?(sub.receiverOk?'':' <span class="tag red">选择错误 · 扣本流程30%</span>'):'')+'</span>'
       + rows
       + '<span class="k">处置措施</span><span class="small">'+App.esc(sub.measure||'—')+'</span>'
       + '<span class="k">处置结果</span><span class="small">'+App.esc(sub.result||'—')+'</span>'
@@ -1205,14 +1205,20 @@ document.addEventListener('app:ready', function(e){
           + '<div class="form-row span2"><label class="f-label">处置结果 <span class="req">*</span></label><input class="input" id="flResult" placeholder="如：已隔离2台主机，业务验证恢复正常"></div>'
           + '<div class="form-row span2"><label class="f-label">证据材料说明 <span class="tiny dim">（可选）</span></label><input class="input" id="flEvidence" placeholder="如：已截图并归档至取证模块"></div>'
           + '</div>'
-          + '<div class="tiny dim mt2">实战版不提供预填数据与正确流程提示：请自行研判该流程是否属于本岗正确处置动作。误选混淆流程按该流程分值直接扣分；正确流程超时完成扣本节点分值的 10%。表单可按字段说明逐项填写，也可一键生成模拟数据后核对修改。</div>');
+          + '<div class="tiny dim mt2">实战版不提供预填数据与正确流程提示：请自行研判该流程是否属于本岗正确处置动作。误选混淆流程按该流程分值直接扣分；正确流程超时完成扣本节点分值的 20%，接收人选择错误扣 30%，绑定表单的节点另有 20% 处置质量分按必填齐全度结算。表单可按字段说明逐项填写，也可一键生成模拟数据后核对修改。</div>');
         var btn = ov.querySelector('#wbFlowSubmit');
         btn.onclick = function(){
           if(submitting) return; /* 防重复提交 */
           var forms = {}, missing = [];
           var wst = wizFields(d.fields).length ? WIZ[wkey] : null;
           if(wst){
-            if(!wst.done){ App.toast('请先按「下一步」逐字段完成表单填写','err'); return; }
+            if(!wst.done){
+              var missNow = wst.fields.filter(function(f){
+                return f.required && !String(wst.values[f.label]||'').trim();
+              }).map(function(f){ return f.label; });
+              App.toast(missNow.length ? '请完整填写表单：'+missNow.slice(0,3).join('、') : '请先按「下一步」逐字段完成表单填写','err');
+              return;
+            }
             wst.fields.forEach(function(f){
               var v = String(wst.values[f.label]||'').trim();
               if(wizType(f) === 'datetime') v = v.replace('T',' ');
@@ -1238,7 +1244,7 @@ document.addEventListener('app:ready', function(e){
             projectId: proj.id, nodeId: d.nodeId, forms: forms, receiver: receivers,
             measure: measure, result: result, evidence: evidence, found: found
           }).then(function(r){
-            var recvTip = r.correct && r.receiverOk===0 ? '（接收人选择错误，扣本流程10%）' : '';
+            var recvTip = r.correct && r.receiverOk===0 ? '（接收人选择错误，扣本流程30%）' : '';
             App.toast(r.correct
               ? '处置记录已提交：正确流程，得分 +'+r.delta+(r.ontime?'':';超出处置时长')+recvTip
               : '处置记录已提交：混淆流程，扣分 '+Math.abs(r.delta),
@@ -1339,7 +1345,7 @@ document.addEventListener('app:ready', function(e){
       host.innerHTML = '<div class="tiny dim" style="margin-bottom:10px">本角色候选处置流程 <b>'+flows.length+'</b> 个（待处置 <b style="color:var(--err)">'+pending+'</b> 个'
         + (lockedCount?'，前置未完成 <b>'+lockedCount+'</b> 个':'')+'）· 点击列表行填写完整处置表单，判定不属于本岗动作可点「跳过（不执行）」</div>'
         + '<div class="task-nav">'+flows.map(flowRow).join('')+'</div>'
-        + '<div class="tiny dim mt2">列表同时包含正确处置流程与混淆流程，外观一致、不提示属性：误选混淆流程按该流程分值直接扣分；正确流程超时完成扣本节点分值的 10%；跳过混淆流程无扣分无奖励，跳过正确流程则在结束演练时按该流程分值扣分。未满足前置条件的流程会置灰锁定，前置完成后自动开放。</div>';
+        + '<div class="tiny dim mt2">列表同时包含正确处置流程与混淆流程，外观一致、不提示属性：误选混淆流程按该流程分值直接扣分；正确流程超时完成扣本节点分值的 20%；跳过混淆流程无扣分无奖励，跳过正确流程则在结束演练时按该流程分值扣分。未满足前置条件的流程会置灰锁定，前置完成后自动开放。</div>';
       host.querySelectorAll('[data-flow]').forEach(function(row){
         row.onclick = function(){
           var d = flows.filter(function(x){ return String(x.nodeId)===String(row.dataset.flow); })[0];
@@ -1372,14 +1378,14 @@ document.addEventListener('app:ready', function(e){
       if(!isPractical){
         el.innerHTML = '<div class="kpi info" style="margin-bottom:10px"><div class="k-label">剧本流程得分</div><div class="k-value">'+s.score+'<span class="small dim">分</span></div><div class="k-foot">'+App.esc(s.grade||'—')+' · 正确流程满分 '+s.maxScore+'</div></div>'
           + '<div class="tiny">正确流程 <b>'+s.hit+'</b>/'+s.total+' · 超时完成 <b style="color:var(--err)">'+(s.late||0)+'</b>'+(s.missed?(' · 未完成 <b style="color:var(--err)">'+s.missed+'</b>'):'')+'</div>'
-          + '<div class="tiny dim mt2">扣分制：起始 100 分。超时完成扣本节点分值的 10%；演练结束时未完成的正确流程扣该流程全部分值。</div>'
+          + '<div class="tiny dim mt2">扣分制：起始 100 分。超时完成扣本节点分值的 20%；演练结束时未完成的正确流程扣该流程全部分值。</div>'
           + (ded.length?'<div class="tiny dim mt2">'+ded.slice(0,4).map(function(x){ return App.esc(x.title)+' '+x.point+'分（'+App.esc(x.type)+'）'; }).join('；')+(ded.length>4?' 等':'')+'</div>':'');
         return;
       }
       var items = ded.concat(s.bonuses||[]);
       el.innerHTML = '<div class="kpi info" style="margin-bottom:10px"><div class="k-label">即时评分</div><div class="k-value">'+s.score+'<span class="small dim">分</span></div><div class="k-foot">'+App.esc(s.grade||'—')+' · 正确流程满分 '+s.maxScore+'</div></div>'
         + '<div class="tiny">正确流程 <b>'+s.hit+'</b>/'+s.total+' · 待处置 <b>'+(s.pending||0)+'</b> · 已跳过 <b>'+(s.skipped||0)+'</b> · 混淆流程误选 <b style="color:var(--err)">'+(s.wrong||0)+'</b> · 超时完成 <b style="color:var(--err)">'+(s.late||0)+'</b>'+(s.missed?(' · 未完成 <b style="color:var(--err)">'+s.missed+'</b>'):'')+'</div>'
-        + '<div class="tiny dim mt2">扣分制：起始 100 分。超时完成扣本节点分值的 10%；接收人与剧本预设不一致扣本节点分值的 10%；执行混淆流程扣该混淆节点全部分值；跳过正确流程在结束演练时扣该流程全部分值。</div>'
+        + '<div class="tiny dim mt2">扣分制：起始 100 分。超时完成扣本节点分值的 20%；接收人与剧本预设不一致扣本节点分值的 30%；绑定表单节点另有 20% 处置质量分按必填齐全度结算；演练结束时未完成的正确流程扣该流程全部分值。</div>'
         + (items.length?'<div class="tiny dim mt2">'+items.slice(0,4).map(function(x){ return App.esc(x.title)+' '+(x.point>0?'+':'')+x.point+'分（'+App.esc(x.type)+'）'; }).join('；')+(items.length>4?' 等':'')+'</div>':'<div class="tiny dim mt2">尚无扣分项</div>');
     }).catch(function(){ el.innerHTML = '<div class="tiny dim">评分加载失败</div>'; });
   }

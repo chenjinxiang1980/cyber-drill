@@ -454,6 +454,18 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
+		// 表单必填服务端强校验：按该节点绑定模板的必填项校验，缺失或空串一律 400
+		formsJSON := "{}"
+		if formsRaw, ok := body["forms"]; ok {
+			b, _ := json.Marshal(formsRaw)
+			formsJSON = string(b)
+		}
+		reqFields := loadFormRequiredFields(database, node.Form)
+		if missing := missingRequiredFields(formsJSON, reqFields); len(missing) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "表单必填项缺失：" + joinFieldDisplays(missing)})
+			return
+		}
+
 		isCorrect := node.FlowType != "distractor"
 		// receiver
 		wantRecv := parseReceivers(node.Receiver)
@@ -482,24 +494,20 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		nowS := timeNowSec()
 		ontime := !isLateV1(p, node)
 
-		// delta
+		// delta（与 Score() 同一口径：超时 20% / 接收人 30% / 处置质量 20% 内按必填齐全度）
 		var delta float64
+		var qualityDeduct float64
 		if !isCorrect {
 			delta = -float64(node.Score)
 		} else {
-			delta = 0
-			if !ontime {
-				delta -= math.Round(float64(node.Score)*0.1*10) / 10
+			deduct, _ := correctNodeDeduction(node.Score, !ontime, receiverOk == 0, formsJSON, reqFields)
+			delta = -deduct
+			if delta == 0 {
+				delta = 0
 			}
-			if receiverOk == 0 {
-				delta -= math.Round(float64(node.Score)*0.1*10) / 10
+			if qp, _, _ := qualityParts(node.Score, formsJSON, reqFields); len(qp) > 0 {
+				qualityDeduct = qp[0].Point
 			}
-		}
-
-		formsJSON := "{}"
-		if forms, ok := body["forms"]; ok {
-			b, _ := json.Marshal(forms)
-			formsJSON = string(b)
 		}
 
 		// 截断 descr
@@ -554,10 +562,13 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		} else {
 			detail += "；无扣分"
 			if !ontime {
-				detail += "（超时扣 10%）"
+				detail += "（超时扣 20%）"
 			}
 			if receiverOk == 0 {
-				detail += "；下一节点接收人选择错误（扣 10%）"
+				detail += "；下一节点接收人选择错误（扣 30%）"
+			}
+			if qualityDeduct > 0 {
+				detail += "；处置质量不足（扣 " + fmt.Sprintf("%.1f", qualityDeduct) + " 分）"
 			}
 		}
 		_, _ = database.Exec(
@@ -588,7 +599,10 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 			correctText = "正确流程，" + deductText
 		}
 		if isCorrect && receiverOk == 0 {
-			correctText += "（接收人选择错误，扣10%）"
+			correctText += "（接收人选择错误，扣30%）"
+		}
+		if isCorrect && qualityDeduct > 0 {
+			correctText += "；处置质量扣 " + fmt.Sprintf("%.1f", qualityDeduct) + " 分"
 		}
 		correctText += "；当前累计得分 " + fmt.Sprint(scScore) + " 分"
 		lvl := "P1"

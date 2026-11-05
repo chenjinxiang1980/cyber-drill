@@ -1183,7 +1183,7 @@ document.addEventListener('app:ready', function(e){
         + '<div id="ndCorrectBlocks" style="'+(n.flowType==='distractor'?'display:none':'')+'">'
         + '<div class="form-row span2"><label class="f-label">下一节点接收人 <span class="tiny dim">（下拉多选）</span></label>'
         +   '<div id="ndReceiverBox" data-field="receiver"></div>'
-        +   '<div class="tiny dim" style="margin-top:4px">本流程完成后的流转对象，可多选；未勾选时按依赖关系自动取后继流程的责任角色（无后继时流转至院应急指挥部）。基础版按预设接收人自动流转；实战版由参演人员在处置表单中自行选择，所选接收人与预设集合完全一致才正确，多选、漏选均扣本流程 10% 分值。</div></div>'
+        +   '<div class="tiny dim" style="margin-top:4px">本流程完成后的流转对象，可多选；未勾选时按依赖关系自动取后继流程的责任角色（无后继时流转至院应急指挥部）。基础版按预设接收人自动流转；实战版由参演人员在处置表单中自行选择，所选接收人与预设集合完全一致才正确，多选、漏选均扣本流程 30% 分值。</div></div>'
         + '</div>'
         /* ---------- 混淆流程专属：anchor + timing ---------- */
         + '<div id="ndDistractorBlocks" style="'+(n.flowType==='distractor'?'':'display:none')+'">'
@@ -1205,7 +1205,7 @@ document.addEventListener('app:ready', function(e){
         + '<div class="form-row"><label class="f-label">后继节点 <span class="tiny dim">（由依赖关系自动推导，无需手工填写）</span></label>'
         +   '<div class="tiny dim">'+(succOf(n.id).map(function(x){ return App.esc(x.title); }).join('、') || '无（本流程为末端流程）')+'</div></div>'
         + '</div>'
-        + '<div id="ndScoreTip" class="tiny dim mb2">扣分制总分 100 起。正确流程按时完成无扣分，超时完成扣本节点分值的 10%；混淆流程被选中按严重程度扣分（高 −8 / 中 −5 / 低 −3），不计入 100 分总分。</div>'
+        + '<div id="ndScoreTip" class="tiny dim mb2">扣分制总分 100 起。正确流程按时完成无扣分，超时完成扣本节点分值的 20%，接收人选择错误扣 30%，绑定表单节点另有 20% 处置质量分按必填齐全度结算；混淆流程被选中按严重程度扣分（高 −8 / 中 −5 / 低 −3），不计入 100 分总分。</div>'
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">动作类型</label><select class="select" id="ndAction"><option value="">— 未分类 —</option>'+ACTION_TYPES.map(function(a){ return '<option value="'+a+'"'+(n.action===a?' selected':'')+'>'+a+'</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">必经步骤</label><div class="flex gap2" style="align-items:center;min-height:34px"><label class="check"><input type="checkbox" id="ndRequired"'+(n.required===false?'':' checked')+'>实战版遗漏判定必查</label></div></div>'
