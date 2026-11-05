@@ -63,6 +63,10 @@ type Config struct {
 	// 限流
 	RateLimitGlobal int // req/min（仅 /api/*）
 	RateLimitAuth   int
+	RateLimitScreen int // req/min（大屏匿名只读接口，单独计数）
+
+	// 大屏免登录观摩：true = 未登录可只读访问 /api/screen/*，false = 恢复必须登录
+	ScreenPublicView bool
 
 	// 登录失败锁定
 	LoginMaxFailures  int  // 连续失败次数阈值
@@ -133,6 +137,8 @@ func Load(projectRoot string) *Config {
 		UploadMaxMB:     getEnvInt("UPLOAD_MAX_MB", 20),
 		RateLimitGlobal: getEnvInt("RATE_LIMIT_GLOBAL", 300),
 		RateLimitAuth:   getEnvInt("RATE_LIMIT_AUTH", 30),
+		RateLimitScreen: getEnvInt("RATE_LIMIT_SCREEN", 60),
+		ScreenPublicView: getEnvBool("SCREEN_PUBLIC_VIEW", true),
 		LoginMaxFailures: getEnvInt("LOGIN_MAX_FAILURES", 5),
 		LoginLockMinutes: getEnvInt("LOGIN_LOCK_MINUTES", 15),
 		CaptchaEnabled:    getEnvBool("CAPTCHA_ENABLED", true),
@@ -185,6 +191,8 @@ func Load(projectRoot string) *Config {
 		"jwt_ttl", c.JWTTTL,
 		"upload_max_mb", c.UploadMaxMB,
 		"cors_origins", len(c.AllowOrigins),
+		"screen_public_view", c.ScreenPublicView,
+		"rate_limit_screen", c.RateLimitScreen,
 	)
 	return c
 }

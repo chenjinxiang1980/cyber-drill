@@ -3,6 +3,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,6 +128,34 @@ func RateLimitByGroup(pathPrefix string, rpm int) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// AnonRateLimit 只对匿名请求限流（带令牌的已登录请求直接放行）。
+// 用于大屏免登录观摩接口：避免匿名链路成为压测入口，同时不影响登录用户。
+func AnonRateLimit(rpm int) gin.HandlerFunc {
+	store := newStore(rpm)
+	return func(c *gin.Context) {
+		if hasToken(c) {
+			c.Next()
+			return
+		}
+		if !store.get(c.ClientIP()).Allow() {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "匿名访问过于频繁，请稍后再试"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// hasToken 与 auth.TokenOf 的三重来源保持一致（此处不依赖 auth 包，避免循环引用）
+func hasToken(c *gin.Context) bool {
+	if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") && strings.TrimSpace(h[7:]) != "" {
+		return true
+	}
+	if strings.TrimSpace(c.GetHeader("X-Drill-Token")) != "" {
+		return true
+	}
+	return strings.TrimSpace(c.Query("t")) != ""
 }
 
 // BodyLimit 请求体大小限制（MB）。Gin 默认没有，我们包装 Body 读前截断。

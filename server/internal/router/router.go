@@ -147,6 +147,26 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 		// 无需认证
 		api.GET("/health", handler.Health(database))
 
+		// ---- api/screen — 大屏免登录只读观摩（SCREEN_PUBLIC_VIEW 控制）----
+		// 打开时：匿名可 GET，独立匿名限流；任何写方法 403，绝不落库。
+		// 关闭时：恢复 RequireAuth，未登录 401。
+		scr := api.Group("/screen")
+		if cfg.ScreenPublicView {
+			scr.Use(middleware.AnonRateLimit(cfg.RateLimitScreen), authSvc.OptionalAuth())
+		} else {
+			scr.Use(authSvc.RequireAuth())
+		}
+		{
+			scr.GET("/monitor", handler.ScreenMonitorHandler(database))
+			scr.GET("/notifs", handler.ScreenNotifsHandler(database))
+			scr.GET("/summary", handler.ScreenSummaryHandler(database))
+			for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+				scr.Handle(m, "/monitor", screenDenyWrite)
+				scr.Handle(m, "/notifs", screenDenyWrite)
+				scr.Handle(m, "/summary", screenDenyWrite)
+			}
+		}
+
 		// ---- api/auth 组 ----
 		authg := api.Group("/auth")
 		{
@@ -329,4 +349,9 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 	}
 
 	return r
+}
+
+// screenDenyWrite 大屏只读接口的写方法兜底：直接 403，不进入任何业务逻辑。
+func screenDenyWrite(c *gin.Context) {
+	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "大屏观摩接口为只读，禁止写操作"})
 }

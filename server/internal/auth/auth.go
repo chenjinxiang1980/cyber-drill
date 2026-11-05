@@ -384,6 +384,19 @@ func (s *Service) RequireAuth() gin.HandlerFunc {
 	}
 }
 
+// OptionalAuth 可选认证：带有效令牌则写入当前用户，未带/无效令牌不拦截。
+// 仅用于大屏免登录只读接口；其他页面/接口仍使用 RequireAuth，行为不变。
+func (s *Service) OptionalAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if token := TokenOf(c); token != "" {
+			if u, err := s.UserByToken(token); err == nil {
+				c.Set(ContextKey, u)
+			}
+		}
+		c.Next()
+	}
+}
+
 // CurrentUser 从 gin.Context 取当前用户（中间件之后调用）
 func CurrentUser(c *gin.Context) *User {
 	v, ok := c.Get(ContextKey)

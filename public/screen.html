@@ -284,7 +284,7 @@ body::before{
 .spinner{width:32px;height:32px;border:2px solid rgba(34,211,238,.2);border-top-color:var(--cy);border-radius:50%;animation:spin 1s linear infinite}
 </style>
 </head>
-<body>
+<body data-page="screen">
 <div class="bg-grid"></div>
 <div class="scan"></div>
 
@@ -362,6 +362,7 @@ body::before{
   var small = viewportW > 0 && viewportW < 1024;
   if(isTouch || small){
     var body = document.body;
+    window.__SCREEN_SMALL = true; /* 后续数据脚本看到此标记即不再渲染/取数 */
     // 隐藏大屏所有原生子节点，后续叠加提示页
     Array.prototype.forEach.call(body.children, function(c){ c.style.display='none'; });
     var tip = document.createElement('div');
@@ -380,6 +381,13 @@ body::before{
       +'</div>'
       +'<div><a href="javascript:history.back()" style="margin-top:20px;display:inline-block;padding:10px 24px;background:#2f81f7;color:#fff;border-radius:6px;text-decoration:none;font-size:14px">← 返回上一页</a></div>'
       +'</div>';
+    // 小屏提示页：解除 1920×1080 固定画布，避免横向溢出
+    body.style.width = '100%';
+    body.style.height = '100%';
+    body.style.transform = 'none';
+    body.style.left = '0';
+    body.style.top = '0';
+    body.style.overflow = 'hidden';
     body.appendChild(tip);
     return;
   }
@@ -396,10 +404,12 @@ body::before{
 })();
 </script>
 <script src="system.js"></script>
+<script src="app.js"></script>
 <script src="api.js"></script>
 <script>
 (function(){
   'use strict';
+  if(window.__SCREEN_SMALL) return; /* 小屏/触屏：停留在提示页，不取数、不播报 */
   function $(id){ return document.getElementById(id); }
   function esc(s){
     return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -429,8 +439,31 @@ body::before{
   });
 
   /* ---------- 数据 ---------- */
+  /* 大屏统一走 /api/screen 只读接口：未登录可观摩，登录态同样可用。
+     不走 DRILL.get，避免 401 时被全局逻辑强制跳转登录页。 */
+  function isLoggedIn(){
+    try{ return !!(sessionStorage.getItem('pzy_token') || sessionStorage.getItem('pzy_role')); }catch(e){ return false; }
+  }
+  function sget(path){
+    var token = '';
+    try{ token = sessionStorage.getItem('pzy_token') || ''; }catch(e){}
+    var headers = {};
+    if(token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch('/api' + path, { credentials:'same-origin', headers:headers }).then(function(r){
+      return r.text().then(function(txt){
+        var data = {};
+        try{ data = txt ? JSON.parse(txt) : {}; }catch(e){ data = {}; }
+        if(!r.ok){
+          var err = new Error((data && data.error) || ('请求失败（HTTP '+r.status+'）'));
+          err.status = r.status;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
   function fetchData(){
-    return DRILL.get('/content/monitor' + (projId ? ('?projectId='+encodeURIComponent(projId)) : ''));
+    return sget('/screen/monitor' + (projId ? ('?projectId='+encodeURIComponent(projId)) : ''));
   }
   function load(){
     fetchData().then(function(d){
@@ -441,25 +474,59 @@ body::before{
       $('mask').style.display = 'none';
       renderAll();
       if(!timer) timer = setInterval(refresh, 8000);
+      startNotifPolling();
     }).catch(function(e){
-      showMask((e && e.status===403) ? '当前角色无权查看演练监视大屏' : ((e && e.message) || '数据加载失败，请确认服务已启动'),
-        (e && e.status===403) ? '仅院应急指挥部、平台管理员、信息科负责人可查看。' : '请检查服务运行状态后重试。');
+      if(e && e.status === 401){
+        showMask('需要登录后查看演练监视大屏', '当前已关闭免登录观摩，请登录后访问。');
+        return;
+      }
+      if(e && e.status === 403){
+        showMask('暂无查看权限', '请联系平台管理员开通演练监视大屏查看权限。');
+        return;
+      }
+      showMask('数据加载失败', (e && e.message) || '请检查服务运行状态后重试。');
     });
   }
   function refresh(){
     fetchData().then(function(d){
       DATA = d;
       if(!d.project){ showStandby(); return; }
+      if(d.project){ projId = d.project.id; }
       renderAll();
     }).catch(function(){});
   }
   function showMask(title, desc){
-    $('mask').innerHTML = '<div class="ttl">'+esc(title)+'</div><div>'+esc(desc||'')+'</div><a href="dashboard.html">返回首页</a>';
+    var link = isLoggedIn()
+      ? '<a href="dashboard.html">返回首页</a>'
+      : '<a href="index.html">登录后台</a>';
+    $('mask').innerHTML = '<div class="ttl">'+esc(title)+'</div><div>'+esc(desc||'')+'</div>'+link;
     $('mask').style.display = 'flex';
+  }
+  /* ---------- 站内消息语音播报（大屏：只播本项目未读正文，每条一次） ---------- */
+  var notifTimer = null, notifFetching = false;
+  function stopNotifPolling(){
+    if(notifTimer){ clearInterval(notifTimer); notifTimer = null; }
+  }
+  function pollNotifs(){
+    if(notifFetching || !projId) return;
+    notifFetching = true;
+    sget('/screen/notifs?projectId='+encodeURIComponent(projId)).then(function(d){
+      notifFetching = false;
+      var ns = (d && d.notifs) || [];
+      if(window.App && App.notifVoice) App.notifVoice.announceScreen(ns, projId);
+    }).catch(function(){ notifFetching = false; });
+  }
+  function startNotifPolling(){
+    stopNotifPolling();
+    if(!projId) return;
+    if(window.App && App.notifVoice) App.notifVoice.start();
+    pollNotifs();
+    notifTimer = setInterval(pollNotifs, 15000);
   }
   /* ---------- 空态：待机模式 ---------- */
   function showStandby(){
     if(timer){ clearInterval(timer); timer = null; }
+    stopNotifPolling();
     $('screen').style.display = 'none';
     var html =
       '<div class="standby" id="standby">'+
@@ -479,34 +546,29 @@ body::before{
         '<div class="m-item"><b id="sbProjs">-</b><span>历史项目</span></div>'+
         '<div class="m-item"><b id="sbDate">-</b><span>系统时间</span></div>'+
       '</div>'+
-      '<div class="sb-acts">'+
-        '<a class="sb-btn primary" href="projects.html">'+
-          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>'+
-          '创建演练项目</a>'+
-        '<a class="sb-btn" href="scenarios.html">'+
-          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 6h8M8 12h8M8 18h5"/></svg>'+
-          '浏览剧本库</a>'+
-        '<a class="sb-btn" href="dashboard.html">'+
-          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 6-6"/></svg>'+
-          '演练概览</a>'+
-      '</div>'+
+      (isLoggedIn()
+        ? '<div class="sb-acts">'+
+            '<a class="sb-btn primary" href="projects.html">'+
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>'+
+              '创建演练项目</a>'+
+            '<a class="sb-btn" href="scenarios.html">'+
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 6h8M8 12h8M8 18h5"/></svg>'+
+              '浏览剧本库</a>'+
+            '<a class="sb-btn" href="dashboard.html">'+
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 6-6"/></svg>'+
+              '演练概览</a>'+
+          '</div>'
+        : '<div class="sb-acts" style="color:#8ea0b5;font-size:14px;letter-spacing:1px">只读观摩模式 · 登录后可创建演练项目</div>')+
       '</div>';
     $('mask').innerHTML = html;
     $('mask').style.display = 'flex';
-    // 填充统计
-    Promise.all([
-      DRILL.get('/content/scenarios').catch(function(){return[]}),
-      DRILL.get('/content/script-nodes').catch(function(){return[]}),
-      DRILL.get('/content/projects').catch(function(){return[]})
-    ]).then(function(r){
-      var scens = Array.isArray(r[0]) ? r[0] : [];
-      var nodes = Array.isArray(r[1]) ? r[1] : [];
-      var projs = Array.isArray(r[2]) ? r[2] : [];
+    // 填充统计（走只读聚合接口，未登录也能显示）
+    sget('/screen/summary').then(function(r){
       var el1 = $('sbScens'), el2 = $('sbNodes'), el3 = $('sbProjs');
-      if(el1) el1.textContent = scens.length;
-      if(el2) el2.textContent = nodes.length;
-      if(el3) el3.textContent = projs.length;
-    });
+      if(el1) el1.textContent = (r && r.scenarios) || 0;
+      if(el2) el2.textContent = (r && r.scriptNodes) || 0;
+      if(el3) el3.textContent = (r && r.projects) || 0;
+    }).catch(function(){});
     // 时钟
     function setDate(){
       var d = new Date();

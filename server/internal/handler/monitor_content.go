@@ -11,19 +11,31 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// MonitorContentHandler GET /api/content/monitor
+// MonitorContentHandler GET /api/content/monitor（需登录）
 // 大屏监视聚合 DTO：对齐 src/routes/content.js:1611 router.get('/monitor')
 // 所有 rows 立即 Close，禁止 defer 在同一函数内延迟关闭导致 MySQL 多结果集 race
 func MonitorContentHandler(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		qProjID := c.Query("projectId")
-		if qProjID == "" {
-			var activeID sql.NullString
-			_ = database.QueryRow(`SELECT id FROM projects WHERE status != '未开始' LIMIT 1`).Scan(&activeID)
-			if activeID.Valid {
-				qProjID = activeID.String
-			}
+		c.JSON(http.StatusOK, monitorPayload(database, c.Query("projectId")))
+	}
+}
+
+// ScreenMonitorHandler GET /api/screen/monitor（大屏免登录只读）
+// 与登录态大屏使用同一份展示 DTO，不额外暴露账号/配置/审计/令牌字段。
+func ScreenMonitorHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, monitorPayload(database, c.Query("projectId")))
+	}
+}
+
+func monitorPayload(database *db.DB, qProjID string) gin.H {
+	if qProjID == "" {
+		var activeID sql.NullString
+		_ = database.QueryRow(`SELECT id FROM projects WHERE status != '未开始' LIMIT 1`).Scan(&activeID)
+		if activeID.Valid {
+			qProjID = activeID.String
 		}
+	}
 
 		// ---- projects 列表 ----
 		var projects []gin.H
@@ -85,15 +97,14 @@ func MonitorContentHandler(database *db.DB) gin.HandlerFunc {
 				_ = database.QueryRow(`SELECT COALESCE(mode,'基础版'),COALESCE(scenario_id,''),COALESCE(started_at,'') FROM projects WHERE id=?`, qProjID).
 					Scan(&pMode, &pScenarioID, &pStartedAt)
 			} else {
-				c.JSON(http.StatusOK, gin.H{
+				return gin.H{
 					"serverTime": nowSec(),
 					"project": nil, "projects": []gin.H{},
 					"stats": gin.H{"total": 0, "done": 0, "doing": 0, "pending": 0, "overdue": 0},
 					"tasks": []gin.H{}, "timeline": []gin.H{}, "seqFlow": []gin.H{},
 					"chainNodes": []gin.H{}, "score": gin.H{}, "impact": []gin.H{},
 					"messages": []gin.H{}, "roles": []gin.H{}, "roleAgg": gin.H{},
-				})
-				return
+				}
 			}
 		}
 
@@ -416,7 +427,7 @@ func MonitorContentHandler(database *db.DB) gin.HandlerFunc {
 			mergedMsgs = mergedMsgs[:24]
 		}
 
-		c.JSON(http.StatusOK, gin.H{
+		return gin.H{
 			"serverTime": nowSec(),
 			"project":    curProj,
 			"projects":   projects,
@@ -433,8 +444,7 @@ func MonitorContentHandler(database *db.DB) gin.HandlerFunc {
 			"messages":   mergedMsgs,
 			"roles":      roles,
 			"roleAgg":    roleAgg,
-		})
-	}
+		}
 }
 
 func nullIfEmpty(s string) interface{} {
