@@ -121,66 +121,49 @@ Emergency/
 
 ## 五、快速开始
 
-### 5.1 前置
+> 推荐使用**一键安装器**：自动检测 Docker、选择 GitHub/Gitee 源码、选择 GHCR/SWR 镜像（两者均公开可匿名拉取）、生成配置并启动。
+> 完整说明（含参数、镜像对照、常见故障、从源码编译）见 [docs/install.md](docs/install.md)。
 
-- Go 1.22+（或直接使用 Docker 方式，无需本机 Go）
-- MySQL 8.x（Docker 方式由 compose 自带）
-
-### 5.2 方式一：本地 / Windows 服务器
+### 5.1 Windows 一键安装
 
 ```powershell
-git clone https://github.com/chenjinxiang1980/cyber-drill.git Emergency
-cd Emergency
-
-# 1) 准备配置（模板只含占位符）
-Copy-Item .env.example .env
-#    编辑 .env，替换所有 __REPLACE_WITH__：
-#      DB_USER / DB_PASSWORD
-#      JWT_SECRET / SESSION_SECRET   （openssl rand -hex 32）
-#      ADMIN_INIT_PASSWORD           （首次部署管理员密码）
-
-# 2) 初始化数据库（一次性）
-go run ./cmd/bootstrap -root=..
-
-# 3) 启动
-powershell -ExecutionPolicy Bypass -File scripts\start.ps1 -Detach
-
-# 4) 健康检查
-curl http://127.0.0.1:8090/api/health
-# {"ok":true,"service":"cyber-drill-system","version":"0.5.0","time":"..."}
+git clone --depth 1 https://gitee.com/habeas/cyber-drill.git cyber-drill
+cd cyber-drill
+install\install-windows.cmd
 ```
 
-### 5.3 方式二：Docker Compose（推荐）
+> 双击 `install-windows.cmd` 即可；脚本内部已用 `-ExecutionPolicy Bypass`，不会被脚本策略拦住。
+> 未安装 Docker Desktop 时会给出 `winget` 与官网两条引导路径（含 WSL2 检查），不会静默安装。
+
+### 5.2 Linux 一键安装
 
 ```bash
-cp deploy/docker-dist/.env.example deploy/docker-dist/.env
-# 编辑 .env：DB_PASSWORD / MYSQL_ROOT_PASSWORD / JWT_SECRET /
-#            SESSION_SECRET / ADMIN_INIT_PASSWORD 全部替换为真实值
-
-cd deploy/docker-dist
-docker compose up -d --build
-docker compose run --rm app /opt/drill/bin/drill-server-bootstrap -root=/opt/drill
-curl http://127.0.0.1:8090/api/health
+git clone --depth 1 https://gitee.com/habeas/cyber-drill.git cyber-drill
+cd cyber-drill
+bash install/install-linux.sh
 ```
 
-镜像默认标签为 `drill-server:0.5.0`（可用 `VERSION` 覆盖）。
-
-### 5.4 方式三：Linux 物理机 / 虚拟机（systemd）
+或直接管道执行（无交互，需显式参数）：
 
 ```bash
-# 在 Windows 上交叉编译
-powershell -ExecutionPolicy Bypass -File scripts\build-linux.ps1
-
-# 拷到目标机后安装
-scp server/deploy-linux/drill-server deploy/linux/*.sh deploy/linux/*.service user@host:/tmp/
-sudo bash /tmp/install.sh
-sudo vi /etc/drill/drill.env
-sudo systemctl enable --now drill-server
-curl http://127.0.0.1:8090/api/health
+curl -fsSL https://gitee.com/habeas/cyber-drill/raw/main/install/install-linux.sh \
+  | bash -s -- --source gitee --registry ghcr --yes
 ```
+
+> 未安装 Docker 时先按发行版展示安装命令，确认后才执行；已装但未启动会尝试 `systemctl enable --now docker`。
+
+### 5.3 离线包
+
+- Linux 离线包：`dist/drill-linux-bundle.tar.gz`，SHA256 `BB448855A4BB9F3F00ACD7803F4A0364C7D9091B936349BE8BB0D16FBA459B71`（systemd 安装，步骤见 [docs/install.md](docs/install.md)）。
+- 离线镜像：`docker save drill-server:0.5.0` 后用 `install/install-linux.sh --registry local --image-tar <tar>`。
+
+### 5.4 从源码自主编译安装
+
+Go 交叉编译、签名校验、systemd 与 `docker build` 的完整步骤见 **[docs/install.md](docs/install.md)** 第四节。
 
 更完整的部署前检查表、HTTPS、代理、国产化基础镜像说明见：
 
+- [docs/install.md](docs/install.md)
 - [docs/linux-deployment.md](docs/linux-deployment.md)
 - [docs/security-guide.md](docs/security-guide.md)
 - [docs/vmware-vm-deployment.md](docs/vmware-vm-deployment.md)
