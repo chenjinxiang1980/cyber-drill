@@ -77,6 +77,10 @@ RUN echo "[build] target=${TARGETOS}/${TARGETARCH} CGO_ENABLED=0 version=${VERSI
     go build -trimpath \
     -ldflags "-s -w" \
     -o /out/bin/drill-migrate ./cmd/migrate \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath \
+    -ldflags "-s -w" \
+    -o /out/bin/drill-seed ./cmd/seed \
  && echo "[build] DONE: $(ls -lh /out/bin/)"
 
 # ---------- Stage 2: Runtime ----------
@@ -120,6 +124,7 @@ WORKDIR /opt/drill
 # 注意：故意不使用 COPY --chown / --chmod（旧 builder 不生效），全靠后面的 RUN chown + chmod
 COPY --from=builder /out/bin/drill-server  /opt/drill/bin/drill-server
 COPY --from=builder /out/bin/drill-migrate /opt/drill/bin/drill-migrate
+COPY --from=builder /out/bin/drill-seed    /opt/drill/bin/drill-seed
 COPY --from=builder /src/public/           /opt/drill/public/
 COPY --from=builder /src/migrations/       /opt/drill/migrations/
 
@@ -130,6 +135,7 @@ COPY deploy/docker-dist/docker-entrypoint.sh /opt/drill/docker-entrypoint.sh
 RUN chown -R drill:drill /opt/drill \
  && chmod 755 /opt/drill/bin/drill-server \
  && chmod 755 /opt/drill/bin/drill-migrate \
+ && chmod 755 /opt/drill/bin/drill-seed \
  && chmod 755 /opt/drill/docker-entrypoint.sh \
  && chmod 644 /opt/drill/public/*           2>/dev/null || true \
  && chmod 644 /opt/drill/public/img/*       2>/dev/null || true \

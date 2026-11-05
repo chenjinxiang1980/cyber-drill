@@ -57,6 +57,8 @@ PROJECT="drill"
 ENV_FILE="drill.env"
 IMAGE_TAR=""
 BUNDLE=""
+UPDATE_POLICY="${DRILL_UPDATE:-check}"
+FORCE_RESET=0
 GENERATED_ADMIN_PW=""
 DOCKER_STATE="unknown"
 COMPOSE_FILE=""
@@ -91,6 +93,9 @@ Cyber-Drill 0.5.0 Linux 一键安装
   --env-file <文件名>    环境文件名（默认 drill.env）
   --image-tar <文件>     本地镜像 tar（docker load）
   --bundle <tar.gz>      离线源码包（按已发布 SHA256 校验）
+  --update               检查远端 ref，一致则跳过下载，不一致增量更新（默认）
+  --no-update            只用本地源码，不联网检查
+  --force-reset          本地非 git / 有未提交改动时仍强制更新（会先备份 drill.env）
 EOF
 }
 
@@ -108,6 +113,9 @@ while [ $# -gt 0 ]; do
         --env-file)    ENV_FILE="${2:-}"; shift ;;
         --image-tar)   IMAGE_TAR="${2:-}"; shift ;;
         --bundle)      BUNDLE="${2:-}"; shift ;;
+        --update)      UPDATE_POLICY="check" ;;
+        --no-update)   UPDATE_POLICY="never" ;;
+        --force-reset) UPDATE_POLICY="check"; FORCE_RESET=1 ;;
         -h|--help)     usage; exit 0 ;;
         *) err "未知参数：$1（--help 查看用法）"; exit 1 ;;
     esac
@@ -356,6 +364,21 @@ ensure_docker() {
 }
 
 # ---------- 2. 源码来源 ----------
+ENV_REL="deploy/docker-dist/$ENV_FILE"
+
+backup_env_file() {
+    ep="$SRC_DIR/$ENV_REL"
+    [ -f "$ep" ] || return 0
+    ts=$(date +%Y%m%d-%H%M%S)
+    cp -p "$ep" "$ep.bak-$ts" && info "已备份环境文件：$ep.bak-$ts"
+}
+
+source_is_dirty() {
+    [ -d "$SRC_DIR/.git" ] || return 1
+    # 只看已跟踪文件的改动；drill.env 等安装期生成文件是 untracked，不算“脏”
+    [ -n "$(git -C "$SRC_DIR" status --porcelain --untracked-files=no 2>/dev/null | head -n 1)" ]
+}
+
 clone_repo() {
     url="$1"
     dest="$2"
@@ -397,21 +420,9 @@ extract_archive() {
     return 0
 }
 
-fetch_source() {
+# 首次下载（目录不存在时）
+download_fresh() {
     kind="$1"
-    if is_dry; then
-        printf '  [dry-run] 校验/下载源码到 %s（来源 %s）\n' "$SRC_DIR" "$kind"
-        return 0
-    fi
-    if [ -d "$SRC_DIR/deploy/docker-dist" ]; then
-        info "检测到已有源码目录：$SRC_DIR（沿用，不覆盖）"
-        return 0
-    fi
-    if [ -e "$SRC_DIR" ] && [ ! -d "$SRC_DIR" ]; then
-        err "目标路径已存在且不是目录：$SRC_DIR"
-        return 1
-    fi
-
     case "$kind" in
         github) SOURCE_URL="$GITHUB_REPO" ;;
         gitee)  SOURCE_URL="$GITEE_REPO" ;;
@@ -444,6 +455,153 @@ fetch_source() {
     extract_archive "$archive" "$SRC_DIR" || { err "解压失败：$archive"; return 1; }
     rm -f "$archive"
     return 0
+}
+
+# 已有目录：比较本地 HEAD 与远端目标 ref，一致跳过，不一致增量更新
+update_existing() {
+    kind="$1"
+
+    if [ "$UPDATE_POLICY" = "never" ]; then
+        info "--no-update：跳过联网检查，使用本地源码 $SRC_DIR"
+        return 0
+    fi
+
+    if [ ! -d "$SRC_DIR/.git" ]; then
+        warn "目录不是 git 仓库：$SRC_DIR（默认不覆盖）"
+        if [ "$FORCE_RESET" = "1" ]; then
+            replace_non_git "$kind"
+            return $?
+        fi
+        if [ "$ASSUME_YES" = "1" ]; then
+            info "非交互模式：保留本地目录，不覆盖（如需强更请加 --force-reset）"
+            return 0
+        fi
+        if ! confirm "是否备份并强制重新下载源码目录？"; then
+            info "已保留本地目录：$SRC_DIR"
+            return 0
+        fi
+        replace_non_git "$kind"
+        return $?
+    fi
+
+    info "检查远端更新：git -C $SRC_DIR fetch origin $REF"
+    if ! git -C "$SRC_DIR" fetch --quiet origin "$REF"; then
+        warn "git fetch 失败（网络不通？），继续使用本地源码"
+        return 0
+    fi
+
+    local_head=$(git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null)
+    remote_head=$(git -C "$SRC_DIR" rev-parse FETCH_HEAD 2>/dev/null)
+    short_local=$(git -C "$SRC_DIR" rev-parse --short HEAD 2>/dev/null)
+
+    if [ -n "$local_head" ] && [ "$local_head" = "$remote_head" ]; then
+        info "源码已是最新（$short_local），跳过下载"
+        return 0
+    fi
+
+    info "检测到远端有更新：本地 ${short_local} → 远端 $(printf '%s' "$remote_head" | cut -c1-8)"
+    if source_is_dirty; then
+        warn "本地有未提交改动（默认不覆盖）"
+        if [ "$FORCE_RESET" != "1" ]; then
+            if [ "$ASSUME_YES" = "1" ]; then
+                warn "非交互模式：保留本地改动，跳过本次更新（如需强更请加 --force-reset）"
+                return 0
+            fi
+            if ! confirm "是否丢弃本地已跟踪文件的改动并更新到 $REF？"; then
+                info "已保留本地源码与改动"
+                return 0
+            fi
+        fi
+    fi
+
+    backup_env_file
+    if git -C "$SRC_DIR" reset --hard origin/"$REF" >/dev/null 2>&1; then
+        :
+    elif git -C "$SRC_DIR" reset --hard FETCH_HEAD >/dev/null 2>&1; then
+        :
+    else
+        err "增量更新失败，保留原有源码（未改动）"
+        return 1
+    fi
+    new_short=$(git -C "$SRC_DIR" rev-parse --short HEAD 2>/dev/null)
+    info "源码已增量更新：$short_local → $new_short（drill.env 与数据卷均保留）"
+    return 0
+}
+
+# 非 git 目录强更：先整体备份，下载成功后再删除备份
+replace_non_git() {
+    kind="$1"
+    ts=$(date +%Y%m%d-%H%M%S)
+    bk="${SRC_DIR}.bak-$ts"
+    info "备份原目录：$bk"
+    mv "$SRC_DIR" "$bk" || { err "备份原目录失败，已中止"; return 1; }
+    if ! download_fresh "$kind"; then
+        err "重新下载失败，恢复原目录"
+        rm -rf "$SRC_DIR"
+        mv "$bk" "$SRC_DIR"
+        return 1
+    fi
+    # 恢复旧 drill.env 与备份文件
+    old_env="$bk/$ENV_REL"
+    if [ -f "$old_env" ]; then
+        mkdir -p "$(dirname "$SRC_DIR/$ENV_REL")"
+        cp -p "$old_env" "$SRC_DIR/$ENV_REL"
+        for b in "$bk/$ENV_REL".bak-*; do
+            [ -f "$b" ] && cp -p "$b" "$(dirname "$SRC_DIR/$ENV_REL")/"
+        done
+        info "已恢复原 drill.env（并保留备份文件）"
+    fi
+    rm -rf "$bk"
+    info "源码已强制重新下载：$SRC_DIR"
+    return 0
+}
+
+fetch_source() {
+    kind="$1"
+    if is_dry; then
+        if [ -d "$SRC_DIR/deploy/docker-dist" ]; then
+            if [ "$UPDATE_POLICY" = "never" ]; then
+                printf '  [dry-run] --no-update：跳过 git fetch，直接使用 %s\n' "$SRC_DIR"
+                return 0
+            fi
+            if [ ! -d "$SRC_DIR/.git" ]; then
+                printf '  [dry-run] 检测到非 git 目录：默认不覆盖；加 --force-reset 将“备份目录 + 重新下载 + 恢复 drill.env”\n'
+                return 0
+            fi
+            printf '  [dry-run] git -C %s fetch origin %s\n' "$SRC_DIR" "$REF"
+            local_short=$(git -C "$SRC_DIR" rev-parse --short HEAD 2>/dev/null)
+            remote_peek=$(git -C "$SRC_DIR" ls-remote origin "$REF" 2>/dev/null | awk '{print $1}' | head -n1)
+            if [ -n "$local_short" ] && [ -n "$remote_peek" ]; then
+                local_full=$(git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null)
+                if [ "$local_full" = "$remote_peek" ]; then
+                    printf '  [dry-run] 判定：源码已是最新（%s），将跳过下载\n' "$local_short"
+                else
+                    printf '  [dry-run] 判定：检测到更新（%s -> %s），将备份 drill.env 后 git reset --hard origin/%s\n' "$local_short" "$(printf '%s' "$remote_peek" | cut -c1-8)" "$REF"
+                fi
+            else
+                printf '  [dry-run] 判定：git fetch 后比较 HEAD 与 origin/%s；一致跳过，不一致备份 drill.env 后增量更新\n' "$REF"
+            fi
+            if source_is_dirty; then
+                printf '  [dry-run] 检测到未提交改动：默认不覆盖，需 --force-reset 才强更\n'
+            fi
+            return 0
+        fi
+        printf '  [dry-run] 校验/下载源码到 %s（来源 %s）\n' "$SRC_DIR" "$kind"
+        printf '  [dry-run] git clone --depth 1 --branch %s <repo> %s（失败则下载归档）\n' "$REF" "$SRC_DIR"
+        return 0
+    fi
+
+    if [ -d "$SRC_DIR/deploy/docker-dist" ]; then
+        info "检测到已有源码目录：$SRC_DIR"
+        update_existing "$kind"
+        return $?
+    fi
+    if [ -e "$SRC_DIR" ] && [ ! -d "$SRC_DIR" ]; then
+        err "目标路径已存在且不是目录：$SRC_DIR"
+        return 1
+    fi
+
+    download_fresh "$kind"
 }
 
 ensure_source() {
@@ -871,7 +1029,7 @@ deploy() {
             printf '  管理员密码：沿用 drill.env 中的 ADMIN_INIT_PASSWORD（未重新生成）\n'
         fi
         printf '  环境文件：%s（权限 600，务必备份）\n' "$ENV_PATH"
-        printf '\n注意：若数据库为空库且尚未创建管理员，请先导入既有数据或使用 bootstrap 工具初始化。\n'
+        printf '\n注意：首次启动会自动创建 12 个角色、8 个场景/剧本节点与管理员账号（admin / platformadmin），无需手工 bootstrap。\n'
         printf '停止服务：docker compose -p %s -f %s down（保留数据卷）\n' "$PROJECT" "$COMPOSE_FILE"
         return 0
     fi

@@ -239,8 +239,19 @@ Invoke-WebRequest http://127.0.0.1:8090/api/health -UseBasicParsing
 | `--env-file <文件名>` | `drill.env` | 环境文件名 |
 | `--image-tar <文件>` | 空 | 本地镜像 tar（`docker load`；Windows 无短别名） |
 | `--bundle <tar.gz>` | 空 | 离线源码包，按已发布 SHA256 校验（Windows 无短别名） |
+| `--update` / `--no-update` | `--update` | 重跑时是否检查远端源码：默认 fetch 后比较 HEAD，一致跳过，不一致增量更新；`--no-update` 只用本地、不联网 |
+| `--force-reset`（Windows `-ForceReset`） | 关 | 非 git 目录或本地有未提交改动时，仍强制更新（先备份 `drill.env`） |
 
-环境变量等价：`DRILL_SOURCE`、`DRILL_REGISTRY`、`DRILL_DIR`、`DRILL_PORT`、`DRILL_REF`。
+环境变量等价：`DRILL_SOURCE`、`DRILL_REGISTRY`、`DRILL_DIR`、`DRILL_PORT`、`DRILL_REF`、`DRILL_UPDATE`。
+
+**重跑安装器的源码更新规则**
+
+- 目录不存在：按 `--source` 下载（git 浅克隆，失败回退归档）。
+- 目录存在且是 git 仓库：`git fetch origin <DRILL_REF>` → 比较本地 `HEAD` 与远端 ref。
+  - 一致：打印“源码已是最新（`<短哈希>`），跳过下载”。
+  - 不一致：备份 `drill.env.bak-<时间戳>` 后 `git reset --hard origin/<ref>`，**`drill.env` 与数据卷保持不变**。
+- 目录不是 git 仓库，或本地有已跟踪文件的未提交改动：默认不覆盖；交互模式会询问，非交互（`--yes`）保留本地并跳过；只有 `--force-reset` 才强制更新。
+- `--no-update`：不联网，直接使用本地源码；`--dry-run` 会打印 fetch/compare 命令与实际判定结论。
 
 > 并行测试请同时指定 `--project`、`--port`、`--mysql-port`，否则容器名与端口会和现网冲突。
 
@@ -255,7 +266,29 @@ Invoke-WebRequest http://127.0.0.1:8090/api/health -UseBasicParsing
 - **不删除任何数据卷**：重复执行不会执行 `down -v`。
 - 脚本内零硬编码凭据；SWR 登录口令只经 `docker login --password-stdin` 传入。
 
-### 1.6 离线安装
+### 1.6 首次启动初始化：创建什么、只删什么
+
+容器入口按顺序执行：等待 MySQL → `drill-migrate up` → `drill-seed` → 启动服务。初始化完全幂等，可重复执行。
+
+| 类别 | 行为 |
+|------|------|
+| 角色 | upsert **12 个系统角色**（含 `platformadmin`，具备完整权限）；任何情况下都不删除角色 |
+| 剧本 | `INSERT IGNORE` 补齐 **8 个标准场景、268 个剧本节点**（S01 共 52 条：18 主流 + 34 混淆）；不覆盖用户已编辑内容 |
+| 流程字典 | 补齐 **16 个键**（`chat_channels`、`drill_action_meta`、`role_feed_mapping` 等） |
+| 表单模板 | 补齐 8 类模板 |
+| 管理员账号 | `admin`、`platformadmin` 不存在时创建，初始密码为 `ADMIN_INIT_PASSWORD`；已存在则保留原密码 |
+| 删除范围 | **仅测试账号**；初始化本身不执行任何 `DELETE` / `TRUNCATE` |
+
+**账号清理的正确用法**
+
+- 接口：`POST /api/admin/users/cleanup-test-accounts`，默认 `dryRun=true`，先看清单再执行。
+- 只有用户名匹配 `test*/demo*/guest*/tmp*/try*/ceshi*` 的账号可被删除；业务账号（如 `zhangsan`）即使不在白名单也会被保护。
+- `ADMIN_BASELINE_USERS`：逗号分隔的额外保护名单；**`admin` 与 `platformadmin` 已内置保护**，无需重复填写。留空即使用默认策略。
+- 清理前后都会写日志：删除谁、原因、保留/保护了多少账号。
+
+**已有数据升级**：再次启动只做“补齐缺失”，不会删除或重置自定义角色、场景、节点、字典与账号；升级前建议备份 `drill.env` 与数据库卷。
+
+### 1.7 离线安装
 
 **离线源码（本地目录）**
 

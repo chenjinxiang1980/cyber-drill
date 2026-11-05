@@ -1,8 +1,9 @@
 // migrate —— 读取 migrations/*.up.sql 执行建表 SQL。
 //
 // 用法：
-//   go run ./cmd/migrate -root=/path/to/project up
-//   go run ./cmd/migrate status
+//
+//	go run ./cmd/migrate -root=/path/to/project up
+//	go run ./cmd/migrate status
 package main
 
 import (
@@ -168,6 +169,18 @@ func applyFile(db *sql.DB, path string) error {
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(string(data))
-	return err
+	// 单事务执行：失败立即回滚，保留旧数据（种子文件全是 INSERT/UPDATE，无 DELETE）
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(string(data)); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return nil
 }

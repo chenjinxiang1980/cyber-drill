@@ -56,6 +56,8 @@ $Opts = @{
     EnvFile   = 'drill.env'
     ImageTar  = ''
     Bundle    = ''
+    Update    = 'check'
+    ForceReset = $false
 }
 
 function Write-Info([string]$msg) { Write-Host "[信息] $msg" }
@@ -82,6 +84,9 @@ Cyber-Drill 0.5.0 Windows 一键安装
   --env-file <文件名>   环境文件名（默认 drill.env）
   --image-tar <文件>    本地镜像 tar（仅长参数）
   --bundle <tar.gz>     离线源码包（仅长参数，按内置 SHA256 校验）
+  --update / -Update    检查远端 ref，一致跳过，不一致增量更新（默认）
+  --no-update / -NoUpdate  只用本地源码，不联网检查
+  --force-reset / -ForceReset  非 git / 有未提交改动时仍强制更新（先备份 drill.env）
 '@
 }
 
@@ -109,6 +114,12 @@ for ($i = 0; $i -lt $args.Count; $i++) {
         '--env-file' { $i++; $Opts.EnvFile = [string]$args[$i] }
         '--image-tar' { $i++; $Opts.ImageTar = [string]$args[$i] }
         '--bundle'   { $i++; $Opts.Bundle = [string]$args[$i] }
+        '--update'   { $Opts.Update = 'check' }
+        '-Update'    { $Opts.Update = 'check' }
+        '--no-update' { $Opts.Update = 'never' }
+        '-NoUpdate'  { $Opts.Update = 'never' }
+        '--force-reset' { $Opts.Update = 'check'; $Opts.ForceReset = $true }
+        '-ForceReset'   { $Opts.Update = 'check'; $Opts.ForceReset = $true }
         '-h'         { Show-Usage; exit 0 }
         '--help'     { Show-Usage; exit 0 }
         default      { Write-Err "未知参数：$key"; Show-Usage; exit 1 }
@@ -270,20 +281,75 @@ function Get-Source {
     }
 
     if (Test-Path $composeFile) {
-        Write-Info "检测到已有源码目录，沿用：$($Opts.Dir)"
+        if ($Opts.DryRun) {
+            if ($Opts.Update -eq 'never') {
+                Write-Host "  [dry-run] --no-update：跳过 git fetch，直接使用 $($Opts.Dir)"
+                return
+            }
+            if (-not (Test-Path (Join-Path $Opts.Dir '.git'))) {
+                Write-Host "  [dry-run] 检测到非 git 目录：默认不覆盖；加 --force-reset 将“备份目录 + 重新下载 + 恢复 drill.env”"
+                return
+            }
+            Write-Host "  [dry-run] git -C $($Opts.Dir) fetch origin $Ref"
+            $localShort = (& git -C $Opts.Dir rev-parse --short HEAD 2>$null | Out-String).Trim()
+            $localFull = (& git -C $Opts.Dir rev-parse HEAD 2>$null | Out-String).Trim()
+            $remotePeek = (& git -C $Opts.Dir ls-remote origin $Ref 2>$null | Out-String).Trim()
+            if ($remotePeek) { $remotePeek = ($remotePeek -split '\s+')[0] }
+            if ($localShort -and $remotePeek) {
+                if ($localFull -eq $remotePeek) {
+                    Write-Host "  [dry-run] 判定：源码已是最新（$localShort），将跳过下载"
+                } else {
+                    $rs = $remotePeek.Substring(0, [Math]::Min(8, $remotePeek.Length))
+                    Write-Host "  [dry-run] 判定：检测到更新（$localShort -> $rs），将备份 drill.env 后 git reset --hard origin/$Ref"
+                }
+            } else {
+                Write-Host "  [dry-run] 判定：git fetch 后比较 HEAD 与 origin/$Ref；一致跳过，不一致备份 drill.env 后增量更新"
+            }
+            if (Test-SourceDirty) { Write-Host "  [dry-run] 检测到未提交改动：默认不覆盖，需 --force-reset 才强更" }
+            return
+        }
+        Write-Info "检测到已有源码目录：$($Opts.Dir)"
+        Update-ExistingSource
         return
     }
     if ($Opts.DryRun) {
-        Write-Host "  [dry-run] git clone --depth 1 --branch $Ref <$($Opts.Source)> $($Opts.Dir)"
+        Write-Host "  [dry-run] git clone --depth 1 --branch $Ref <$($Opts.Source)> $($Opts.Dir)（失败则下载归档）"
         return
     }
 
+    if (-not (Invoke-FreshSource)) {
+        Write-Err "源码下载/解压失败"
+        exit 1
+    }
+}
+
+# ---------- 2.1 源码更新辅助 ----------
+function Get-EnvRelPath { return (Join-Path 'deploy\docker-dist' $Opts.EnvFile) }
+
+function Backup-EnvFile {
+    $envPath = Join-Path $Opts.Dir (Get-EnvRelPath)
+    if (-not (Test-Path $envPath)) { return }
+    $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $bak = "$envPath.bak-$ts"
+    Copy-Item -LiteralPath $envPath -Destination $bak -Force
+    Write-Info "已备份环境文件：$bak"
+}
+
+function Test-SourceDirty {
+    if (-not (Test-Path (Join-Path $Opts.Dir '.git'))) { return $false }
+    # 只看已跟踪文件；drill.env 等安装期生成文件是 untracked，不算脏
+    $out = & git -C $Opts.Dir status --porcelain --untracked-files=no 2>$null
+    return ((($out | Out-String).Trim()).Length -gt 0)
+}
+
+function Invoke-FreshSource {
+    $composeFile = Join-Path $Opts.Dir 'deploy\docker-dist\docker-compose.yml'
     $url = if ($Opts.Source -eq 'gitee') { $GiteeRepo } else { $GithubRepo }
     $git = Get-Command git -ErrorAction SilentlyContinue
     if ($git) {
         Write-Info "浅克隆分支 $Ref（版本 $Version）：$url"
         & git clone --depth 1 --branch $Ref $url $Opts.Dir
-        if ($LASTEXITCODE -eq 0 -and (Test-Path $composeFile)) { return }
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $composeFile)) { return $true }
         Write-Warn "git clone 失败，回退为归档下载。"
     } else {
         Write-Warn "未找到 git，回退为归档下载。"
@@ -292,18 +358,110 @@ function Get-Source {
     $archiveUrl = if ($Opts.Source -eq 'gitee') { $GiteeArchive } else { $GithubArchive }
     $tmp = Join-Path $env:TEMP ("cyber-drill-" + $Version + ".tar.gz")
     Write-Info "下载归档：$archiveUrl"
-    Invoke-WebRequest -Uri $archiveUrl -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+    try {
+        Invoke-WebRequest -Uri $archiveUrl -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+    } catch {
+        Write-Warn "归档下载失败：$($_.Exception.Message)"
+        return $false
+    }
     $tar = Get-Command tar -ErrorAction SilentlyContinue
-    if (-not $tar) { Write-Err "系统缺少 tar，无法解压归档；请安装 Git for Windows 或手动解压。"; exit 1 }
+    if (-not $tar) { Write-Err "系统缺少 tar，无法解压归档。"; return $false }
     $tmpDir = Join-Path $env:TEMP ("cyber-drill-extract-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmpDir | Out-Null
     & tar -xzf $tmp -C $tmpDir
-    if ($LASTEXITCODE -ne 0) { Write-Err "解压失败：$tmp"; exit 1 }
+    if ($LASTEXITCODE -ne 0) { Write-Err "解压失败：$tmp"; return $false }
     $first = Get-ChildItem $tmpDir | Select-Object -First 1
     Move-Item $first.FullName $Opts.Dir
     Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    if (-not (Test-Path $composeFile)) { Write-Err "源码目录不完整：$($Opts.Dir)"; exit 1 }
+    return (Test-Path $composeFile)
+}
+
+function Replace-NonGitSource {
+    $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $bk = "$($Opts.Dir).bak-$ts"
+    Write-Info "备份原目录：$bk"
+    Move-Item -LiteralPath $Opts.Dir -Destination $bk -Force
+    if (-not (Invoke-FreshSource)) {
+        Write-Err "重新下载失败，恢复原目录"
+        Remove-Item -LiteralPath $Opts.Dir -Recurse -Force -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $bk -Destination $Opts.Dir -Force
+        return $false
+    }
+    $rel = Get-EnvRelPath
+    $oldEnv = Join-Path $bk $rel
+    if (Test-Path $oldEnv) {
+        $dest = Join-Path $Opts.Dir $rel
+        New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null
+        Copy-Item -LiteralPath $oldEnv -Destination $dest -Force
+        Get-ChildItem "$oldEnv.bak-*" -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Split-Path $dest -Parent) -Force
+        }
+        Write-Info "已恢复原 drill.env（并保留备份文件）"
+    }
+    Remove-Item -LiteralPath $bk -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Info "源码已强制重新下载：$($Opts.Dir)"
+    return $true
+}
+
+function Update-ExistingSource {
+    if ($Opts.Update -eq 'never') {
+        Write-Info "--no-update：跳过联网检查，使用本地源码 $($Opts.Dir)"
+        return
+    }
+    if (-not (Test-Path (Join-Path $Opts.Dir '.git'))) {
+        Write-Warn "目录不是 git 仓库：$($Opts.Dir)（默认不覆盖）"
+        if ($Opts.ForceReset) { Replace-NonGitSource | Out-Null; return }
+        if ($Opts.Yes) {
+            Write-Info "非交互模式：保留本地目录，不覆盖（如需强更请加 --force-reset）"
+            return
+        }
+        if (-not (Confirm-Action "是否备份并强制重新下载源码目录？")) {
+            Write-Info "已保留本地目录：$($Opts.Dir)"
+            return
+        }
+        Replace-NonGitSource | Out-Null
+        return
+    }
+
+    Write-Info "检查远端更新：git -C $($Opts.Dir) fetch origin $Ref"
+    & git -C $Opts.Dir fetch --quiet origin $Ref 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "git fetch 失败（网络不通？），继续使用本地源码"
+        return
+    }
+    $local = (& git -C $Opts.Dir rev-parse HEAD 2>$null | Out-String).Trim()
+    $remote = (& git -C $Opts.Dir rev-parse FETCH_HEAD 2>$null | Out-String).Trim()
+    $shortLocal = (& git -C $Opts.Dir rev-parse --short HEAD 2>$null | Out-String).Trim()
+    if ($local -and ($local -eq $remote)) {
+        Write-Info "源码已是最新（$shortLocal），跳过下载"
+        return
+    }
+    $remoteShort = $remote
+    if ($remote.Length -gt 8) { $remoteShort = $remote.Substring(0, 8) }
+    Write-Info "检测到远端有更新：本地 $shortLocal -> 远端 $remoteShort"
+    if (Test-SourceDirty) {
+        Write-Warn "本地有未提交改动（默认不覆盖）"
+        if (-not $Opts.ForceReset) {
+            if ($Opts.Yes) {
+                Write-Warn "非交互模式：保留本地改动，跳过本次更新（如需强更请加 --force-reset）"
+                return
+            }
+            if (-not (Confirm-Action "是否丢弃本地已跟踪文件的改动并更新到 $Ref？")) {
+                Write-Info "已保留本地源码与改动"
+                return
+            }
+        }
+    }
+    Backup-EnvFile
+    & git -C $Opts.Dir reset --hard "origin/$Ref" 2>$null
+    if ($LASTEXITCODE -ne 0) { & git -C $Opts.Dir reset --hard FETCH_HEAD 2>$null }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "增量更新失败，保留原有源码（未改动）"
+        return
+    }
+    $newShort = (& git -C $Opts.Dir rev-parse --short HEAD 2>$null | Out-String).Trim()
+    Write-Info "源码已增量更新：$shortLocal -> $newShort（drill.env 与数据卷均保留）"
 }
 
 # ---------- 3. 镜像来源 ----------
@@ -663,7 +821,7 @@ function Invoke-Deploy {
         }
         Write-Host "  环境文件：$($script:EnvPath)（务必备份）"
         Write-Host ""
-        Write-Host "注意：若数据库为空库且尚未创建管理员，请先导入既有数据或使用 bootstrap 工具初始化。"
+        Write-Host "注意：首次启动会自动创建 12 个角色、8 个场景/剧本节点与管理员账号（admin / platformadmin），无需手工 bootstrap。"
         Write-Host "停止服务：docker compose -p $($Opts.Project) -f $($script:ComposeFile) down（保留数据卷）"
         return
     }

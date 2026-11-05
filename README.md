@@ -205,8 +205,10 @@ curl -fsSL https://gitee.com/habeas/cyber-drill/raw/main/install/install-linux.s
 | `--env-file <文件名>` | `drill.env` | 环境文件名，生成在 `<dir>/deploy/docker-dist/` |
 | `--image-tar <文件>` | 空 | 本地镜像 tar（`docker load`） |
 | `--bundle <tar.gz>` | 空 | 离线源码包（按内置 SHA256 校验） |
+| `--update` / `--no-update` | `--update` | 重跑时检查远端源码并增量更新；`--no-update` 只用本地、不联网 |
+| `--force-reset` | 关 | 非 git/有未提交改动时仍强制更新（先备份 drill.env） |
 
-环境变量等价参数：`DRILL_SOURCE`、`DRILL_REGISTRY`、`DRILL_DIR`、`DRILL_PORT`、`DRILL_REF`。
+环境变量等价参数：`DRILL_SOURCE`、`DRILL_REGISTRY`、`DRILL_DIR`、`DRILL_PORT`、`DRILL_REF`、`DRILL_UPDATE`。
 
 > 未安装 Docker 时先按发行版展示安装命令，确认后才执行；已装但未启动会尝试 `systemctl enable --now docker`。
 > 并行测试务必同时指定 `--project`、`--port`、`--mysql-port`，避免与现网冲突。
@@ -259,7 +261,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install\install-windows.ps
 | `-EnvFile` / `--env-file` | `drill.env` | 环境文件名 |
 | `--image-tar`（无短别名） | 空 | 本地镜像 tar |
 | `--bundle`（无短别名） | 空 | 离线源码包 |
+| `-Update` / `--update` | 开 | 重跑时检查远端源码并增量更新 |
+| `-NoUpdate` / `--no-update` | 关 | 只用本地源码，不联网检查 |
+| `-ForceReset` / `--force-reset` | 关 | 非 git/有未提交改动时仍强制更新（先备份 drill.env） |
 | `-h` / `--help` | — | 显示帮助 |
+
+> **重跑安装器的源码更新规则**（Linux/Windows 行为一致）：目录已存在时先 `git fetch` 并比较本地 `HEAD` 与 `DRILL_REF`（默认 `main`）。一致：打印“源码已是最新（`<短哈希>`），跳过下载”；不一致：先备份 `drill.env.bak-<时间戳>`，再 `git reset --hard origin/<ref>` 增量更新，**`drill.env` 与数据卷保留**。非 git 目录或本地有未提交改动时默认不覆盖，需 `--force-reset`；`--no-update` 纯本地运行；`--dry-run` 打印 fetch/compare 命令与判定结论。
 
 > 未安装 Docker Desktop 时给出 `winget` 与官网两条引导路径（含 WSL2 检查），不会静默安装。
 > **Windows 上只使用容器方式**：请勿在宿主机直接运行 `server\deploy-linux\` 下的二进制或自行编译的 exe，这类文件容易被终端安全软件误判拦截。
@@ -283,6 +290,19 @@ Invoke-WebRequest http://127.0.0.1:8090/api/health -UseBasicParsing
 - **管理员账号**：`admin`；**初始密码**在首次安装成功时由终端打印（只显示一次），同时写入环境文件。
 - **环境文件位置**：`<源码目录>/deploy/docker-dist/drill.env`，默认即 `~/cyber-drill/deploy/docker-dist/drill.env`（Windows 为 `$HOME\cyber-drill\deploy\docker-dist\drill.env`）。
 - **为什么必须备份**：该文件含数据库密码、MySQL root 密码、`JWT_SECRET`、`SESSION_SECRET` 与管理员初始密码；丢失后难以恢复数据库访问与登录态签名，重建会导致既有会话/密码失效。该文件权限为 `600`，请离线备份，**不要提交到任何仓库**。
+
+**首次启动初始化会创建什么、只删什么**
+
+| 类别 | 行为 |
+|------|------|
+| 角色 | 幂等 upsert **12 个系统角色**（含 `platformadmin`，权限完整）；永久保留，初始化不删角色 |
+| 剧本 | `INSERT IGNORE` 补齐 **8 个标准场景 / 268 个剧本节点**（S01 共 52 条）；只补缺失，不覆盖已编辑内容 |
+| 流程字典 | 补齐 **16 个字典键**（如 `chat_channels`、`drill_action_meta`、`role_feed_mapping`） |
+| 表单模板 | 补齐 8 类表单模板 |
+| 管理员账号 | `admin` 与 `platformadmin` 不存在时创建（密码 = `ADMIN_INIT_PASSWORD`）；已存在则跳过，**绝不覆盖密码** |
+| 删除 | 初始化**不删除任何角色、剧本、字典或账号**（不含 `DELETE` / `TRUNCATE`） |
+
+> 账号清理只允许删除**测试账号**：调用 `POST /api/admin/users/cleanup-test-accounts`，仅匹配 `test*/demo*/guest*/tmp*/try*/ceshi*` 的用户名可被删除；`ADMIN_BASELINE_USERS`（逗号分隔）用于追加保护账号，**默认内置保护 `admin` 与 `platformadmin`**，无需重复填写。
 
 **停止 / 卸载（保留数据）**
 

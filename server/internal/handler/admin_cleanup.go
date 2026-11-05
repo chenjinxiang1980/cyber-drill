@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,12 +15,12 @@ import (
 )
 
 // adminWhitelist 服务端硬校验的基线账号名单。
-// 开源仓库不内置任何真实账号：仅默认保留 admin，其余由部署方通过
-// ADMIN_BASELINE_USERS（逗号分隔）在 .env 中补充，避免把账号清单写进源码。
+// 开源仓库不内置任何真实账号：默认保留 admin / platformadmin（平台管理员账号），
+// 其余由部署方通过 ADMIN_BASELINE_USERS（逗号分隔）在 .env 中补充，避免把账号清单写进源码。
 var adminWhitelist = loadAdminWhitelist()
 
 func loadAdminWhitelist() map[string]bool {
-	m := map[string]bool{"admin": true}
+	m := map[string]bool{"admin": true, "platformadmin": true}
 	for _, u := range strings.Split(os.Getenv("ADMIN_BASELINE_USERS"), ",") {
 		u = strings.TrimSpace(u)
 		if u != "" {
@@ -27,6 +28,14 @@ func loadAdminWhitelist() map[string]bool {
 		}
 	}
 	return m
+}
+
+// testAccountPattern 只有明确像测试账号的用户名才允许被清理。
+// 业务账号（如 zhangsan、doctor01）即使不在白名单也不会被删除，避免误删真实账号。
+var testAccountPattern = regexp.MustCompile(`^(test|demo|guest|tmp|try|ceshi)[0-9_-]*$`)
+
+func isTestAccount(username string) bool {
+	return testAccountPattern.MatchString(strings.ToLower(strings.TrimSpace(username)))
 }
 
 // AdminCleanupTestAccounts POST /api/admin/users/cleanup-test-accounts
@@ -63,30 +72,36 @@ func AdminCleanupTestAccounts(database *db.DB) gin.HandlerFunc {
 
 		removable := make([]removableUser, 0)
 		kept := 0
+		protected := make([]map[string]any, 0)
 		for rows.Next() {
 			var r removableUser
 			if err := rows.Scan(&r.ID, &r.Username, &r.RoleID); err != nil {
 				continue
 			}
-			if adminWhitelist[r.Username] {
+			// 基线白名单 + 平台管理员账号永久保留（双重保险）
+			if adminWhitelist[r.Username] || r.Username == "admin" || r.Username == "platformadmin" {
 				kept++
-			} else {
-				// admin 永不删除（双重保险）
-				if r.Username == "admin" {
-					kept++
-					continue
-				}
-				removable = append(removable, r)
+				continue
 			}
+			// 只删"测试账号"：用户名不在测试前缀里的业务账号一律保护
+			if !isTestAccount(r.Username) {
+				protected = append(protected, map[string]any{
+					"id": r.ID, "username": r.Username, "reason": "非测试账号，已保护",
+				})
+				continue
+			}
+			removable = append(removable, r)
 		}
 
 		response := gin.H{
-			"dryRun":       body.DryRun,
-			"removable":    removable,
-			"keptCount":    kept,
-			"usersCount":   usersCount,
+			"dryRun":         body.DryRun,
+			"removable":      removable,
+			"protected":      protected,
+			"keptCount":      kept,
+			"usersCount":     usersCount,
 			"userRolesCount": userRolesCount,
-			"removedCount": 0,
+			"removedCount":   0,
+			"policy":         "只删除测试账号（test*/demo*/guest*/tmp*/try*/ceshi*）；基线账号与业务账号永不删除",
 		}
 
 		// dry-run：不做任何删除
@@ -112,6 +127,15 @@ func AdminCleanupTestAccounts(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusOK, response)
 			return
 		}
+
+		// 清理前日志：删谁、为什么删、保护了谁
+		names := make([]string, 0, len(removable))
+		for _, u := range removable {
+			names = append(names, u.Username)
+		}
+		slog.Info("Cleanup: 即将删除测试账号",
+			"removable", names, "reason", "命中测试账号前缀且不在基线白名单",
+			"keptBaseline", kept, "protectedNonTest", len(protected))
 
 		// 开事务：先删 user_roles，再删 users
 		tx, err := database.Begin()
@@ -157,10 +181,10 @@ func AdminCleanupTestAccounts(database *db.DB) gin.HandlerFunc {
 		database.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&newUsers)
 		database.QueryRow(`SELECT COUNT(*) FROM user_roles`).Scan(&newRoles)
 
-		response["removedCount"]   = len(deletedIDs)
-		response["usersCount"]     = newUsers
+		response["removedCount"] = len(deletedIDs)
+		response["usersCount"] = newUsers
 		response["userRolesCount"] = newRoles
-		response["message"]        = "已删除 " + itoa(len(deletedIDs)) + " 个测试账号（事务内完成）"
+		response["message"] = "已删除 " + itoa(len(deletedIDs)) + " 个测试账号（事务内完成）"
 
 		// 审计
 		u := auth.CurrentUser(c)
