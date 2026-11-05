@@ -151,29 +151,9 @@ func monitorPayload(database *db.DB, qProjID string) gin.H {
 		sc := Score(database, qProjID)
 
 		// ---- impact ----
-		var impact []gin.H
-		impactRows, _ := database.Query(`SELECT sys,state,pct FROM impact WHERE project_id=? ORDER BY seq`, qProjID)
-		if impactRows != nil {
-			for impactRows.Next() {
-				var sys, state string
-				var pct int
-				impactRows.Scan(&sys, &state, &pct)
-				impact = append(impact, gin.H{"sys": sys, "state": state, "pct": pct})
-			}
-			impactRows.Close()
-		}
-		if len(impact) == 0 {
-			impactRows2, _ := database.Query(`SELECT sys,state,pct FROM impact WHERE project_id='' ORDER BY seq`)
-			if impactRows2 != nil {
-				for impactRows2.Next() {
-					var sys, state string
-					var pct int
-					impactRows2.Scan(&sys, &state, &pct)
-					impact = append(impact, gin.H{"sys": sys, "state": state, "pct": pct})
-				}
-				impactRows2.Close()
-			}
-		}
+		// 与 /api/content/impact 共用 impactSnapshot：项目实例行 → 全局模板补齐 → 基线兜底，
+		// 保证大屏与看板不会各算一套。
+		impact := impactSnapshot(database, qProjID)
 
 		// ---- roles ----
 		var roles []gin.H

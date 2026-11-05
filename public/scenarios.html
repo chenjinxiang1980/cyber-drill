@@ -402,7 +402,7 @@ document.addEventListener('app:ready', function(e){
 
     var root = ov.querySelector('.m-body');
 
-    function formName(fid){ var t = MOCK.FORM_TEMPLATES.filter(function(x){ return x.id===fid; })[0]; return t?t.name:''; }
+    function formName(fid){ var t = MOCK.FORM_TEMPLATES.filter(function(x){ return x.id===fid; })[0]; return t?App.formDisplayName(t):''; }
     function roleNames(){
       var list = (MOCK.ROLES || []).map(function(r){ return r.name; });
       ['院应急指挥部', '信息科负责人', '信息科值班员', '网络安全管理员', '系统管理员', '医务科主任', '临床科室'].forEach(function(x){
@@ -1164,7 +1164,7 @@ document.addEventListener('app:ready', function(e){
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">节点类型</label><select class="select" id="ndType">'+Object.keys(TYPES).map(function(k){ return '<option value="'+k+'"'+(n.type===k?' selected':'')+'>'+TYPES[k].label+'节点</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">接收角色</label><select class="select" id="ndTarget">'+targetOpts+'</select></div>'
-        + '<div class="form-row"><label class="f-label">关联表单</label><select class="select" id="ndForm"><option value="">— 无 —</option>'+MOCK.FORM_TEMPLATES.map(function(ft){ return '<option value="'+ft.id+'"'+(n.form===ft.id?' selected':'')+'>'+ft.name+'</option>'; }).join('')+'</select></div>'
+        + '<div class="form-row"><label class="f-label">关联表单</label><select class="select" id="ndForm"><option value="">— 无 —</option>'+MOCK.FORM_TEMPLATES.map(function(ft){ return '<option value="'+ft.id+'"'+(n.form===ft.id?' selected':'')+'>'+App.formDisplayName(ft)+'</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">处置时长（分钟）</label><input class="input" id="ndTimeout" type="number" min="1" value="'+((n.type==='end')?(n.timeout||''):(n.timeout||15))+'" placeholder="终节点可留空"><div class="tiny dim" style="margin-top:4px">超时判定自上一节点完成时按真实时间起算；无前置节点时自演练开始计时。</div></div>'
         + '</div>'
         + '<div class="form-row"><label class="f-label">消息内容 / 处置说明</label><textarea class="textarea" id="ndDesc">'+App.esc(n.desc||'')+'</textarea></div>'

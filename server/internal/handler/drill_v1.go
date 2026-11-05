@@ -20,6 +20,7 @@ import (
 
 	"drill-system/internal/auth"
 	"drill-system/internal/db"
+	"drill-system/internal/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -545,7 +546,19 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		}
 		id, _ := res.LastInsertId()
 
-		// 自动归档证据材料（模拟取证材料）
+		// 业务影响联动：与基础版共用同一套规则（F1/F3 → 故障，F7 → 恢复档位）。
+		// 处置记录已落库，联动失败不阻断本次提交，但会写入 timeline 便于追溯。
+		if formMap, ok := body["forms"].(map[string]any); ok && node.Form != "" {
+			formName, _ := drillV1FormFields(database, node.Form)
+			changed := applyFormImpact(database, ImpactSource{
+				ProjectID: p.ID, NodeID: node.ID, FormID: node.Form, FormName: formName,
+				SubmissionID: id, Operator: u.Name, RoleID: u.Role.ID, At: util.Now(),
+			}, node.Form, formMap)
+			if len(changed) > 0 {
+				logImpactTimeline(database, p.ID, "处置表单联动业务影响",
+					node.Form+" 更新："+strings.Join(changed, "、"))
+			}
+		}
 		if evidence != "" {
 			evID := "E" + fmt.Sprintf("%d", time.Now().UnixNano())
 			evName := "实战处置记录-" + node.ID + "-" + u.Name + "（" + evidence + "）"
@@ -918,8 +931,111 @@ func GetDrillPredecessor(database *db.DB) gin.HandlerFunc {
 			"blocked":   len(blockedBy) > 0,
 			"blockedBy": blockedBy,
 			"flowType":  ft,
+			// 前置节点已提交内容（只读）：审议类节点据此展示「申请单 + 同意/不同意 + 意见」
+			"predecessors": loadPredecessorDetails(database, projectID, deps),
 		})
 	}
+}
+
+// loadPredecessorDetails 读取直接前置节点的已提交内容。
+// 基础版取 tasks + form_submissions，实战版取 drill_steps.forms；两者都按节点 id 精确定位。
+func loadPredecessorDetails(database *db.DB, projectID string, deps []string) []gin.H {
+	out := make([]gin.H, 0, len(deps))
+	for _, dep := range deps {
+		if strings.TrimSpace(dep) == "" {
+			continue
+		}
+		out = append(out, loadPredecessorDetail(database, projectID, dep))
+	}
+	return out
+}
+
+func loadPredecessorDetail(database *db.DB, projectID, nodeID string) gin.H {
+	var title, target, formID, nodeType string
+	_ = database.QueryRow(
+		`SELECT COALESCE(title,''),COALESCE(target,''),COALESCE(form,''),COALESCE(type,'') FROM script_nodes WHERE id=?`, nodeID,
+	).Scan(&title, &target, &formID, &nodeType)
+	out := gin.H{
+		"nodeId": nodeID, "title": title, "target": target, "type": nodeType,
+		"completed": false, "forms": []gin.H{},
+	}
+
+	// 基础版：任务 + 表单提交记录
+	var taskID, taskStatus, roleID, completedAt string
+	if err := database.QueryRow(
+		`SELECT id,COALESCE(status,''),COALESCE(role_id,''),COALESCE(completed_at,'')
+		 FROM tasks WHERE project_id=? AND node_id=? ORDER BY seq LIMIT 1`, projectID, nodeID,
+	).Scan(&taskID, &taskStatus, &roleID, &completedAt); err == nil {
+		out["taskId"] = taskID
+		out["status"] = taskStatus
+		out["role"] = roleID
+		out["completedAt"] = completedAt
+		out["completed"] = taskStatus == "已完成"
+		forms := []gin.H{}
+		if rs, err := database.Query(
+			`SELECT form_id,COALESCE(form_name,''),COALESCE(data,'{}'),COALESCE(submitter,''),COALESCE(time,'')
+			 FROM form_submissions WHERE task_id=? ORDER BY id`, taskID,
+		); err == nil {
+			for rs.Next() {
+				var fid, fname, dataStr, submitter, at string
+				if rs.Scan(&fid, &fname, &dataStr, &submitter, &at) != nil {
+					continue
+				}
+				forms = append(forms, gin.H{
+					"formId": fid, "formName": fname, "label": fname,
+					"mode":      formModeOf(database, fid),
+					"fields":    formFieldPairs(database, fid, util.ParseJSONObj(dataStr)),
+					"submitter": submitter, "time": at,
+				})
+			}
+			rs.Close()
+		}
+		out["forms"] = forms
+	}
+
+	// 实战版：处置步骤（同一节点只取最早一条）
+	var stepUser, stepTime, measure, result, formsStr string
+	if err := database.QueryRow(
+		`SELECT COALESCE(user,''),COALESCE(step_time,''),COALESCE(measure,''),COALESCE(result,''),COALESCE(forms,'{}')
+		 FROM drill_steps WHERE project_id=? AND matched_node=? ORDER BY id LIMIT 1`, projectID, nodeID,
+	).Scan(&stepUser, &stepTime, &measure, &result, &formsStr); err == nil {
+		fname, _ := drillV1FormFields(database, formID)
+		out["completed"] = true
+		out["user"] = stepUser
+		out["stepTime"] = stepTime
+		out["measure"] = measure
+		out["result"] = result
+		out["forms"] = []gin.H{{
+			"formId": formID, "formName": fname, "label": fname,
+			"mode":      formModeOf(database, formID),
+			"fields":    formFieldPairs(database, formID, util.ParseJSONObj(formsStr)),
+			"submitter": stepUser, "time": stepTime,
+		}}
+	}
+	return out
+}
+
+// formFieldPairs 把表单提交的 data 按模板字段顺序摊平为 [{label,value}]，
+// 前端前置区直接按顺序只读渲染，避免 JSON 对象乱序或漏字段。
+func formFieldPairs(database *db.DB, formID string, data map[string]any) []gin.H {
+	_, fields := drillV1FormFields(database, formID)
+	out := make([]gin.H, 0, len(fields))
+	for _, raw := range fields {
+		f, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		label, _ := f["label"].(string)
+		if strings.TrimSpace(label) == "" {
+			continue
+		}
+		v := ""
+		if raw, ok := data[label]; ok && raw != nil {
+			v = toPlainString(raw)
+		}
+		out = append(out, gin.H{"label": label, "value": v})
+	}
+	return out
 }
 
 // ========================================================================

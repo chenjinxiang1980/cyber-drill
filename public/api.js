@@ -458,7 +458,7 @@ window.API = (function () {
   function adminForms() { return DRILL.get('/admin/forms'); }
   function addFormTemplate(t) {
     return DRILL.post('/admin/forms', t).then(function (r) {
-      (MOCK.FORM_TEMPLATES = MOCK.FORM_TEMPLATES || []).push({ id: r.id, name: r.name, fields: r.fields });
+      (MOCK.FORM_TEMPLATES = MOCK.FORM_TEMPLATES || []).push({ id: r.id, name: r.name, fields: r.fields, mode: r.mode });
       return r;
     });
   }

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
-	"sort"
 	"strings"
 
 	"drill-system/internal/auth"
@@ -729,6 +728,17 @@ func queryFormTemplates(database *db.DB) []gin.H {
 		return []gin.H{}
 	}
 	defer rows.Close()
+	// mode：fill（填写）/ review（审议）。列不存在时（旧库未迁移）静默降级为 fill。
+	modes := map[string]string{}
+	if mrows, merr := database.Query(`SELECT id,COALESCE(mode,'') FROM form_templates`); merr == nil {
+		for mrows.Next() {
+			var mid, mmode sql.NullString
+			if mrows.Scan(&mid, &mmode) == nil {
+				modes[util.ScanNullableString(mid)] = util.ScanNullableString(mmode)
+			}
+		}
+		mrows.Close()
+	}
 	out := make([]gin.H, 0)
 	for rows.Next() {
 		var id, name sql.NullString
@@ -736,11 +746,17 @@ func queryFormTemplates(database *db.DB) []gin.H {
 		if err := rows.Scan(&id, &name, &fieldsStr); err != nil {
 			continue
 		}
+		fid := util.ScanNullableString(id)
 		fields := normalizeFields(util.ParseJSONArrAny(util.ScanNullableString(fieldsStr)))
+		mode := modes[fid]
+		if mode == "" {
+			mode = "fill"
+		}
 		out = append(out, gin.H{
-			"id":     util.ScanNullableString(id),
+			"id":     fid,
 			"name":   util.ScanNullableString(name),
 			"fields": fields,
+			"mode":   mode,
 		})
 	}
 	return out
@@ -1466,53 +1482,10 @@ func queryAuditLogs(database *db.DB, u *auth.User) []gin.H {
 // --- impact ---
 
 // queryImpact 业务系统影响态势（对齐 Node /api/content/impact 口径）：
-// 项目实例行优先，项目缺失的系统再回退全局模板行；同一 sys 只保留一条。
-// impact 表主键为 (sys, project_id)，模板行 project_id=''。
+// 项目实例行优先，项目缺失的系统再回退全局模板行，最后用基线补齐。
+// 实现统一收敛到 impactSnapshot，避免与大屏 monitor 的算法分叉。
 func queryImpact(database *db.DB, projectID string) []gin.H {
-	type impactRow struct {
-		sys   string
-		state string
-		pct   int
-		seq   int
-	}
-	seen := make(map[string]bool)
-	merged := make([]impactRow, 0, 16)
-	collect := func(q string, args ...any) {
-		rows, err := database.Query(q, args...)
-		if err != nil {
-			slog.Warn("queryImpact 失败", "err", err)
-			return
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var sys, state sql.NullString
-			var pct, seq sql.NullInt64
-			if err := rows.Scan(&sys, &state, &pct, &seq); err != nil {
-				continue
-			}
-			name := util.ScanNullableString(sys)
-			if name == "" || seen[name] {
-				continue
-			}
-			seen[name] = true
-			merged = append(merged, impactRow{
-				sys:   name,
-				state: util.ScanNullableString(state),
-				pct:   nullInt(pct),
-				seq:   nullInt(seq),
-			})
-		}
-	}
-	if projectID != "" {
-		collect(`SELECT sys,state,pct,seq FROM impact WHERE project_id=? ORDER BY seq`, projectID)
-	}
-	collect(`SELECT sys,state,pct,seq FROM impact WHERE project_id='' ORDER BY seq`)
-	sort.SliceStable(merged, func(i, j int) bool { return merged[i].seq < merged[j].seq })
-	out := make([]gin.H, 0, len(merged))
-	for _, r := range merged {
-		out = append(out, gin.H{"sys": r.sys, "state": r.state, "pct": r.pct})
-	}
-	return out
+	return impactSnapshot(database, projectID)
 }
 
 // --- dict map ---

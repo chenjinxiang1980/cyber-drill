@@ -93,7 +93,18 @@ document.addEventListener('app:ready', function(e){
     if(added.length) App.voice.speak('有新的'+label+'到达，共 '+added.length+' 项，请及时处理');
   }
   var SIM = MOCK.SIM_DATA || {};
-  var FACTS = SIM['通用'] || {
+  /* 按场景类型取模拟数据：优先 simType/type 精确命中，其次用场景名做包含匹配，
+     最后回落「通用」。此前恒取「通用」导致勒索病毒场景的专业预填数据从未生效。 */
+  var simKey = '';
+  if(SCEN){
+    [SCEN.simType, SCEN.type, SCEN.name].forEach(function(k){ if(k && SIM[k]) simKey = k; });
+    if(!simKey){
+      Object.keys(SIM).forEach(function(k){
+        if(k !== '通用' && String(SCEN.name||'').indexOf(k) >= 0) simKey = k;
+      });
+    }
+  }
+  var FACTS = (simKey && SIM[simKey]) || SIM['通用'] || {
     sys:'院内业务系统（模拟地址 10.20.x.x）', fault:'模拟故障现象（通用兜底，请按实际修改）',
     alert:'态势感知平台（模拟）：推送安全告警', ip:'10.20.x.x（模拟可疑IP）',
     sample:'模拟样本摘要（占位）', scope:'模拟范围（无真实业务影响）',
@@ -208,7 +219,7 @@ document.addEventListener('app:ready', function(e){
     if(/起止/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+tm+' 至 '+(parseInt(tm,10)+1)+':30（模拟）';
     if(/时间|日期/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+'T'+tm;
     if(/发现方式/.test(fd)) return String(FACTS.alert||'').split('：')[0] || '安全告警系统';
-    if(/受攻击系统|受影响系统|涉及系统/.test(fd)) return FACTS.sys;
+    if(/受攻击系统|受影响系统|受影响业务系统|涉及系统/.test(fd)) return FACTS.sys;
     if(/IP|域名/i.test(fd)) return FACTS.ip;
     if(/基本情况|事件经过/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'；发现方式：'+FACTS.alert+'（模拟数据，请核对修改）';
     if(/现场处置过程|处置过程/.test(fd)) return '1. 接报后初步核实并留存告警截图；2. 隔离受影响主机（'+FACTS.ip+'）；3. 封堵攻击源并保留取证记录（模拟处置）';
@@ -255,6 +266,13 @@ document.addEventListener('app:ready', function(e){
         var v = prefill ? String(simValue(f.label, t, node)||'') : '';
         if(prefill && wizType(f) === 'select' && f.options.length){
           v = fitOption(f.options, v) || f.options[0];
+        }
+        if(prefill && wizType(f) === 'multiselect' && f.options.length){
+          /* 多选预填必须收敛到 options，避免写入模板外的系统名污染业务影响状态 */
+          var picked = String(v||'').split(/[、,，;；\/\s]+/).filter(function(x){
+            return x && f.options.indexOf(x) >= 0;
+          });
+          v = picked.join('、');
         }
         s.values[f.label] = v;
       });
@@ -394,7 +412,7 @@ document.addEventListener('app:ready', function(e){
     return '<div class="section-title mt3">'+App.icon('edit')+'需提交表单 <span class="tiny dim" style="font-weight:400">已按场景【'+App.esc(SCEN?SCEN.name:'通用')+'】生成模拟数据，请按字段说明逐项核对</span></div>'
       + forms.map(function(f, fi){
           var key = 'b-'+t.id+'-'+f.id;
-          return '<div class="card mb3" style="padding:12px 14px"><div class="small bold mb2">'+App.esc(f.name)+' <span class="tag gray">'+f.id+'</span></div>'
+          return '<div class="card mb3" style="padding:12px 14px"><div class="small bold mb2">'+App.esc(App.formDisplayName(f))+' <span class="tag gray">'+f.id+'</span></div>'
             + '<div class="wz-host" data-wz="'+App.esc(key)+'" data-wzfid="'+App.esc(f.id)+'"></div>'
             + '<div class="flex gap3 mt3" style="align-items:center;flex-wrap:wrap"><button class="btn primary sm" data-form="'+t.id+'|'+fi+'">'+App.icon('upload')+'提交表单（模拟）</button>'
             + '<span class="tiny dim">点击「下一步」逐字段填写并核对，完成全部字段后可提交</span></div></div>';
@@ -478,7 +496,7 @@ document.addEventListener('app:ready', function(e){
       formsHtml = '';
     } else {
       formsHtml = p.forms.map(function(f){
-        var label = f.label || f.formName || '';
+        var label = App.formDisplayName({name: f.label || f.formName || '', mode: f.mode});
         var value;
         if(f.fields){
           value = f.fields.map(function(x){
@@ -718,13 +736,24 @@ document.addEventListener('app:ready', function(e){
       return (MOCK.FORM_TEMPLATES||[]).filter(function(f){ return f.id===fid; })[0];
     }).filter(Boolean);
 
-    /* 表单改为分步向导：初始按剧本预填模拟数据 */
+    /* 表单改为分步向导：填写类按剧本预填模拟数据；审议类（mode=review）不预填，
+       避免「同意/不同意」被自动填成同意，必须由审议人明确选择。 */
     var node = nodeForTask(t);
     host.querySelectorAll('[data-wz]').forEach(function(h){
       var fid = h.dataset.wzfid;
       var f = forms.filter(function(x){ return x.id===fid; })[0];
       if(!f) return;
-      mountWizard(h, h.dataset.wz, { name:f.name, fields:f.fields, t:t, node:node, prefill:true });
+      mountWizard(h, h.dataset.wz, {
+        name:App.formDisplayName(f), fields:f.fields, t:t, node:node,
+        prefill: f.mode !== 'review'
+      });
+      if(f.mode === 'review'){
+        var tip = document.createElement('div');
+        tip.className = 'sim-banner mt2';
+        tip.innerHTML = App.icon('eye')+'<span>本节点为<b>审议节点</b>：请先阅读上方「前置节点提交内容」，再作出审批结论并填写意见。审议结论不参与扣分。</span>';
+        var hostEl = h.parentNode || h;
+        hostEl.insertBefore(tip, h);
+      }
     });
 
     host.querySelectorAll('[data-form]').forEach(function(b){
@@ -736,7 +765,7 @@ document.addEventListener('app:ready', function(e){
         var key = 'b-'+t.id+'-'+f.id;
         var st = WIZ[key];
         if(!st){ App.toast('表单尚未加载完成，请关闭后重新打开','err'); return; }
-        if(!st.done){ App.toast('请先按「下一步」逐字段完成《'+f.name+'》填写','err'); return; }
+        if(!st.done){ App.toast('请先按「下一步」逐字段完成《'+App.formDisplayName(f)+'》填写','err'); return; }
         var data = {}, missing = [];
         st.fields.forEach(function(fd){
           var v = String(st.values[fd.label]||'').trim();
@@ -744,11 +773,11 @@ document.addEventListener('app:ready', function(e){
           if(fd.required && !v) missing.push(fd.label);
           else if(v) data[fd.label] = v;
         });
-        if(missing.length){ App.toast('《'+f.name+'》仍有必填项：'+missing.slice(0,3).join('、'),'err'); return; }
+        if(missing.length){ App.toast('《'+App.formDisplayName(f)+'》仍有必填项：'+missing.slice(0,3).join('、'),'err'); return; }
         b.disabled = true; b.textContent = '提交中…';
         API.submitForm(t.id, f.id, data).then(function(){
           b.disabled = false; b.innerHTML = App.icon('upload')+'重新提交表单';
-          App.toast('《'+f.name+'》已提交并归档至取证模块','ok');
+          App.toast('《'+App.formDisplayName(f)+'》已提交并归档至取证模块','ok');
         }).catch(function(err){
           b.disabled = false; b.innerHTML = App.icon('upload')+'提交表单（模拟）';
           App.toast((err&&err.message)||'表单提交失败','err');
@@ -1067,7 +1096,7 @@ document.addEventListener('app:ready', function(e){
         : (locked ? '<span class="tag gray">前置未完成</span>' : '<span class="tag red">待处置</span>'));
     var meta = '<span>处置时长 '+(d.timeout?d.timeout+' 分钟':'—')+'</span>'
       + (d.action?'<span>'+App.esc(d.action)+'</span>':'')
-      + (d.formName?'<span>表单：'+App.esc(d.formName)+'</span>':'')
+      + (d.formName?'<span>表单：'+App.esc(App.formDisplayName({name:d.formName, mode:d.formMode}))+'</span>':'')
       + (locked && (d.blockedBy||[]).length ? '<span style="color:var(--warn)">待完成：'+App.esc(d.blockedBy.map(function(x){ return x.title||x.id; }).join('、'))+'</span>' : '');
     return '<div class="tn-row '+(sub?'done':'cur')+'" '+(locked?'style="opacity:.55;cursor:not-allowed" ':'')
       + 'data-flow="'+App.esc(d.nodeId)+'" data-locked="'+(locked?1:0)+'" role="button" tabindex="0">'
@@ -1088,7 +1117,7 @@ document.addEventListener('app:ready', function(e){
           }).join('')+'</div>'
         : '<div class="tiny dim">该流程未关联表单模板。</div>';
       return '<div class="fm-strip">'+App.icon('lock')+'<span>外部单位只读视图：可查看本节点内容与表单字段，不可提交；处置记录仍由院应急指挥部代执行。</span></div>'
-        + '<div class="section-title">'+App.icon('edit')+'处置表单 · '+App.esc(d.formName||'实战处置表单')+'</div>'+roList;
+        + '<div class="section-title">'+App.icon('edit')+'处置表单 · '+App.esc(App.formDisplayName({name:d.formName||'实战处置表单', mode:d.formMode}))+'</div>'+roList;
     }
     var wkey = 'p-'+proj.id+'-'+d.nodeId;
     var recv = '<div class="form-row span2" style="margin-bottom:10px"><label class="f-label">下一节点接收人 <span class="req">*</span> <span class="tiny dim">（可多选）</span></label>'
@@ -1206,7 +1235,7 @@ document.addEventListener('app:ready', function(e){
         var wizHost = box.querySelector('#pfWiz');
         var wkey = 'p-'+proj.id+'-'+d.nodeId;
         if(wizHost) mountWizard(wizHost, wkey, {
-          name: d.formName || '实战处置表单', fields: d.fields,
+          name: App.formDisplayName({name:d.formName||'实战处置表单', mode:d.formMode}), fields: d.fields,
           t: { id: d.nodeId, deadline: '', level: '' }, node: { time: '' }, prefill: false
         });
         box.insertAdjacentHTML('beforeend','<div class="divider"></div>'

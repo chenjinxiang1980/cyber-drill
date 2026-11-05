@@ -540,7 +540,7 @@ document.addEventListener('app:ready', function(e){
     document.getElementById('fBody').innerHTML = templates.map(function(f,i){
       var nf = (f.fields||[]).map(fldOf);
       var withHint = nf.filter(function(x){ return !!x.hint; }).length;
-      return '<tr><td class="mono">'+App.esc(f.id)+'</td><td>'+App.esc(f.name)+'</td><td class="mono">'+nf.length+'</td>'
+      return '<tr><td class="mono">'+App.esc(f.id)+'</td><td>'+App.esc(App.formDisplayName(f))+'</td><td class="mono">'+nf.length+'</td>'
         + '<td class="mono">'+(withHint?'<span class="tag green">'+withHint+'</span>':'<span class="dim">0</span>')+'</td>'
         + '<td><button class="btn sm" data-vw="'+i+'" title="查看结构">'+App.icon('eye')+'</button> <button class="btn sm primary" data-ed="'+i+'">'+App.icon('edit')+'编辑</button></td></tr>';
     }).join('');
@@ -548,8 +548,8 @@ document.addEventListener('app:ready', function(e){
     document.querySelectorAll('#fBody [data-vw]').forEach(function(b){
       b.onclick = function(){
         var f = templates[+b.dataset.vw], nf = (f.fields||[]).map(fldOf);
-        App.drawer({ title:'模板结构 · '+f.name, body:
-          '<div class="kv"><span class="k">模板编号</span><span class="mono">'+App.esc(f.id)+'</span><span class="k">模板名称</span><span>'+App.esc(f.name)+'</span><span class="k">字段数</span><span class="mono">'+nf.length+'</span></div>'
+        App.drawer({ title:'模板结构 · '+App.formDisplayName(f), body:
+          '<div class="kv"><span class="k">模板编号</span><span class="mono">'+App.esc(f.id)+'</span><span class="k">模板名称</span><span>'+App.esc(App.formDisplayName(f))+'</span><span class="k">字段数</span><span class="mono">'+nf.length+'</span></div>'
           + '<div class="section-title mt4">字段结构</div>'
           + '<table class="table"><thead><tr><th style="width:52px">序号</th><th style="width:140px">字段名</th><th>字段说明</th><th style="width:76px">必填</th><th style="width:88px">控件</th><th style="width:160px">下拉选项</th></tr></thead><tbody>'
           + nf.map(function(x,i){ return '<tr><td class="mono">'+(i+1)+'</td><td>'+App.esc(x.label)+'</td><td class="dim">'+(x.hint?App.esc(x.hint):'—')+'</td><td>'+(x.required?'<span class="tag green">必填</span>':'<span class="tag">选填</span>')+'</td><td class="dim">'+typeName(x.type)+'</td><td class="tiny dim">'+((x.type==='select'||x.type==='multiselect')?(x.options||[]).join('、'):'—')+'</td></tr>'; }).join('')
@@ -641,7 +641,7 @@ document.addEventListener('app:ready', function(e){
           }).filter(Boolean);
           if(!nm || !fs.length){ App.toast('名称与字段必填','err'); return; }
           API.addFormTemplate({ name:nm, fields:fs }).then(function(r){
-            templates.push({ id:r.id, name:r.name, fields:r.fields });
+            templates.push({ id:r.id, name:r.name, fields:r.fields, mode:r.mode });
             ov.close(); renderForms();
             App.toast('模板「'+nm+'」已创建','ok');
           }).catch(function(e){ App.toast((e&&e.message)||'创建失败','err'); });

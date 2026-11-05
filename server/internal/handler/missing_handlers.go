@@ -1123,17 +1123,48 @@ func PostTaskForms(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		pid := id
-		_ = database.QueryRow(`SELECT project_id FROM tasks WHERE id=?`, id).Scan(&pid)
+		nodeID := ""
+		_ = database.QueryRow(`SELECT COALESCE(project_id,''),COALESCE(node_id,'') FROM tasks WHERE id=?`, id).Scan(&pid, &nodeID)
+
+		// 表单落库与业务影响联动放在同一事务：任一失败整体回滚，
+		// 避免出现「表单已提交但大屏/看板状态没变」的假成功。
+		tx, err := database.Begin()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "开启事务失败"})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+
 		dataJSON := util.ToJSON(body.Data)
-		res, _ := database.Exec(
+		now := util.Now()
+		res, err := tx.Exec(
 			`INSERT INTO form_submissions (task_id,form_id,form_name,data,submitter,user_id,role_id,time) VALUES (?,?,?,?,?,?,?,?)`,
-			id, body.FormID, formName, dataJSON, u.Name, u.ID, u.Role.ID, util.Now(),
+			id, body.FormID, formName, dataJSON, u.Name, u.ID, u.Role.ID, now,
 		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "表单保存失败"})
+			return
+		}
 		var sid int64
 		if res != nil {
 			sid, _ = res.LastInsertId()
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "submissionId": sid})
+		changed := []string{}
+		if err := applyFormImpactTx(tx, ImpactSource{
+			ProjectID: pid, TaskID: id, NodeID: nodeID,
+			FormID: body.FormID, FormName: formName,
+			SubmissionID: sid, Operator: u.Name, RoleID: u.Role.ID, At: now,
+		}, body.FormID, body.Data); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "业务影响状态更新失败"})
+			return
+		} else {
+			changed = collectImpactSystems(body.FormID, body.Data)
+		}
+		if err := tx.Commit(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "表单提交失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "submissionId": sid, "impactUpdated": len(changed) > 0, "systems": changed})
 	}
 }
 
@@ -1429,6 +1460,20 @@ func drillV1FormFields(database *db.DB, formID string) (string, []any) {
 	return nm, normalizeFields(util.ParseJSONArrAny(util.ScanNullableString(fieldsStr)))
 }
 
+// formModeOf 返回表单的交互模式：fill（填写）/ review（审议）。
+// 旧库无 mode 列时返回空串，前端按 fill 处理。
+func formModeOf(database *db.DB, formID string) string {
+	formID = strings.TrimSpace(formID)
+	if formID == "" {
+		return ""
+	}
+	var mode sql.NullString
+	if err := database.QueryRow(`SELECT COALESCE(mode,'') FROM form_templates WHERE id=?`, formID).Scan(&mode); err != nil {
+		return ""
+	}
+	return util.ScanNullableString(mode)
+}
+
 // GetDrillFlows GET /api/drill/flows/:projectId
 // 结构对齐 Node drill.js:530-545：projectId/mode/projectStatus/flowCount/flows/receivers/evidence/score。
 // flows 的键与 Node flowList 一致（nodeId/timeout/type/action/target/title/desc/formId/formName/
@@ -1547,7 +1592,7 @@ func GetDrillFlows(database *db.DB) gin.HandlerFunc {
 			flows = append(flows, gin.H{
 				"nodeId": n.ID, "timeout": n.Timeout, "type": n.Type, "action": n.Action,
 				"target": n.Target, "title": n.Title, "desc": n.Desc, "formId": n.Form,
-				"formName": formName, "fields": fields,
+				"formName": formName, "fields": fields, "formMode": formModeOf(database, n.Form),
 				"locked": lock.Locked, "blockedBy": lock.BlockedBy, "submitted": submitted,
 			})
 		}

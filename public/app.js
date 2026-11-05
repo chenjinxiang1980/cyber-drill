@@ -906,10 +906,19 @@ function openScript(p, opts){
   showScriptModal(p, opts, null, '');
 }
 
+/* 表单模板展示名：审议类（mode=review）统一追加「（审议）」后缀。
+   数据库 name 保持原样，仅供展示层区分同名的 F4/F14，选中仍以 id 为准。 */
+function formDisplayName(t){
+  if(!t) return '';
+  var n = String(t.name == null ? '' : t.name);
+  if(t.mode === 'review' && n.indexOf('（审议）') < 0) return n + '（审议）';
+  return n;
+}
+
 window.App = { boot:boot, icon:icon, ICONS:ICONS, toast:toast, modal:modal, drawer:drawer, confirmSim:confirmSim,
   logout:logout, switchProject:switchProject, showNotifs:showNotifs, openScreen:openScreen, statusTag:statusTag, levelTag:levelTag,
   refreshShell:refreshShell, renderLiveChip:renderLiveChip, toggleVoice:toggleVoice,
   voice:{ speak:voiceSpeak, stop:voiceStop, on:voiceOn, supported:voiceSupported, sync:syncVoiceBtn },
   notifVoice:{ announceScreen:announceScreenNotifs, start:initNotifChannel, stop:notifStopVoice },
-  barChart:barChart, hbar:hbar, donut:donut, curRole:curRole, curUser:curUser, openScript:openScript, esc:function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');} };
+  barChart:barChart, hbar:hbar, donut:donut, curRole:curRole, curUser:curUser, openScript:openScript, formDisplayName:formDisplayName, esc:function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');} };
 })();
