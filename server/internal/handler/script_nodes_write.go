@@ -52,38 +52,147 @@ type scriptNodeIn struct {
 }
 
 // UnmarshalJSON 归一并行两套前端字段名（camelCase / snake_case）到单一权威字段。
+// 所有字段逐项容错解析：字符串字段遇到数组（如 keywords）、数字、布尔、null 时
+// 降级转换而不是让整批节点解析失败（前端会因此收到「节点数据格式错误」）。
 func (n *scriptNodeIn) UnmarshalJSON(data []byte) error {
-	type nodeAlias scriptNodeIn
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	if v, ok := raw["flowType"]; ok {
-		_ = json.Unmarshal(v, &n.FlowType)
-	} else if v, ok := raw["flow_type"]; ok {
-		_ = json.Unmarshal(v, &n.FlowType)
+	n.ID = textOf(raw, "id")
+	n.ScenarioID = textOf(raw, "scenarioId", "scenario_id")
+	n.Type = textOf(raw, "type")
+	n.Title = textOf(raw, "title")
+	n.ShortTitle = textOf(raw, "shortTitle", "short_title")
+	n.Target = textOf(raw, "target")
+	n.Time = textOf(raw, "time")
+	n.Form = textOf(raw, "form")
+	n.Att = textOf(raw, "att")
+	n.Desc = textOf(raw, "desc", "descr")
+	n.Guide = textOf(raw, "guide")
+	n.Keywords = textOf(raw, "keywords") // 前端提交数组 → 以逗号拼接
+	n.Action = textOf(raw, "action")
+	n.Receiver = textOf(raw, "receiver")
+	n.ParallelDesc = textOf(raw, "parallel_desc", "parallelDesc")
+	n.FlowType = textOf(raw, "flowType", "flow_type")
+	n.AnchorID = textOf(raw, "anchorId", "anchor_id")
+	n.ReleaseTiming = textOf(raw, "releaseTiming", "release_timing")
+	n.Timeout = intPtrOf(raw, "timeout")
+	n.Branches = anyOf(raw, "branches")
+	n.Wrong = anyOf(raw, "wrong")
+	n.EvidenceReq = anyOf(raw, "evidenceReq", "evidence_req")
+	n.Required = requiredOf(raw, "required")
+	n.Score = anyOf(raw, "score")
+	n.Deps = anyOf(raw, "deps")
+	n.PosX = anyOf(raw, "posX", "pos_x")
+	n.PosY = anyOf(raw, "posY", "pos_y")
+	return nil
+}
+
+// firstRaw 按候选键顺序取第一个非 null 的原始值。
+func firstRaw(m map[string]json.RawMessage, keys ...string) (json.RawMessage, bool) {
+	for _, k := range keys {
+		if v, ok := m[k]; ok && strings.TrimSpace(string(v)) != "null" {
+			return v, true
+		}
 	}
-	// 归并 AnchorID
-	if v, ok := raw["anchorId"]; ok {
-		_ = json.Unmarshal(v, &n.AnchorID)
-	} else if v, ok := raw["anchor_id"]; ok {
-		_ = json.Unmarshal(v, &n.AnchorID)
+	return nil, false
+}
+
+// textOf 把任意 JSON 标量/数组降级为字符串：数组按英文逗号拼接，对象忽略。
+func textOf(m map[string]json.RawMessage, keys ...string) string {
+	v, ok := firstRaw(m, keys...)
+	if !ok {
+		return ""
 	}
-	// 归并 ReleaseTiming
-	if v, ok := raw["releaseTiming"]; ok {
-		_ = json.Unmarshal(v, &n.ReleaseTiming)
-	} else if v, ok := raw["release_timing"]; ok {
-		_ = json.Unmarshal(v, &n.ReleaseTiming)
+	var s string
+	if err := json.Unmarshal(v, &s); err == nil {
+		return s
 	}
-	// 删掉这些字段，避免 alias 尝试再次解析
-	delete(raw, "flowType")
-	delete(raw, "flow_type")
-	delete(raw, "anchorId")
-	delete(raw, "anchor_id")
-	delete(raw, "releaseTiming")
-	delete(raw, "release_timing")
-	rest, _ := json.Marshal(raw)
-	return json.Unmarshal(rest, (*nodeAlias)(n))
+	var arr []json.RawMessage
+	if err := json.Unmarshal(v, &arr); err == nil {
+		parts := make([]string, 0, len(arr))
+		for _, item := range arr {
+			sub := map[string]json.RawMessage{"_": item}
+			if t := textOf(sub, "_"); t != "" {
+				parts = append(parts, t)
+			}
+		}
+		return strings.Join(parts, ",")
+	}
+	var f float64
+	if err := json.Unmarshal(v, &f); err == nil {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	var b bool
+	if err := json.Unmarshal(v, &b); err == nil {
+		return strconv.FormatBool(b)
+	}
+	return ""
+}
+
+// intPtrOf 数值字段容错：数字/数字字符串均可，非法值降级为 nil（不阻断整批）。
+func intPtrOf(m map[string]json.RawMessage, keys ...string) *int64 {
+	v, ok := firstRaw(m, keys...)
+	if !ok {
+		return nil
+	}
+	var i int64
+	if err := json.Unmarshal(v, &i); err == nil {
+		return &i
+	}
+	var f float64
+	if err := json.Unmarshal(v, &f); err == nil {
+		iv := int64(f)
+		return &iv
+	}
+	var s string
+	if err := json.Unmarshal(v, &s); err == nil {
+		if f, err := strconv.ParseFloat(strings.TrimSpace(s), 64); err == nil {
+			iv := int64(f)
+			return &iv
+		}
+	}
+	return nil
+}
+
+// anyOf 取任意 JSON 值；null/缺失均返回 nil。
+func anyOf(m map[string]json.RawMessage, keys ...string) any {
+	v, ok := firstRaw(m, keys...)
+	if !ok {
+		return nil
+	}
+	var out any
+	if err := json.Unmarshal(v, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// requiredOf 布尔字段容错：bool / 0-1 / "true|false" 均可识别；缺失返回 nil（默认必经）。
+func requiredOf(m map[string]json.RawMessage, keys ...string) any {
+	v, ok := firstRaw(m, keys...)
+	if !ok {
+		return nil
+	}
+	var b bool
+	if err := json.Unmarshal(v, &b); err == nil {
+		return b
+	}
+	var f float64
+	if err := json.Unmarshal(v, &f); err == nil {
+		return f != 0
+	}
+	var s string
+	if err := json.Unmarshal(v, &s); err == nil {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "false", "0", "no", "":
+			return false
+		default:
+			return true
+		}
+	}
+	return nil
 }
 
 func (n *scriptNodeIn) GetFlowType() string      { return n.FlowType }
@@ -531,12 +640,37 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 		}
 		defer func() { _ = tx.Rollback() }()
 
+		// 保存前记录既有节点的 seq：结构未变化的节点沿用原 seq，
+		// 避免「打开即保存」时因拓扑重排导致序号漂移（多次保存结果不一致）。
+		existingSeq := make(map[string]int64)
+		var maxSeq int64
+		seqRows, err := tx.Query(`SELECT id,seq FROM script_nodes WHERE scenario_id=?`, scenarioID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取旧节点序号失败：" + err.Error()})
+			return
+		}
+		for seqRows.Next() {
+			var nid string
+			var sq sql.NullInt64
+			if err := seqRows.Scan(&nid, &sq); err == nil {
+				v := int64(0)
+				if sq.Valid {
+					v = sq.Int64
+				}
+				existingSeq[nid] = v
+				if v > maxSeq {
+					maxSeq = v
+				}
+			}
+		}
+		seqRows.Close()
+
 		if _, err := tx.Exec(`DELETE FROM script_nodes WHERE scenario_id=?`, scenarioID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "清理旧节点失败：" + err.Error()})
 			return
 		}
 
-		for i, n := range ordered {
+		for _, n := range ordered {
 			flowType := "correct"
 			if n.GetFlowType() == "distractor" {
 				flowType = "distractor"
@@ -637,6 +771,13 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 				requiredVal = 0
 			}
 
+			seqVal := maxSeq + 1
+			if v, ok := existingSeq[strings.TrimSpace(n.ID)]; ok {
+				seqVal = v
+			} else {
+				maxSeq++
+			}
+
 			if _, err := tx.Exec(`INSERT INTO script_nodes
 				(id,scenario_id,type,title,short_title,target,time,timeout,form,att,
 				` + "`descr`" + `,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,
@@ -647,7 +788,7 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 				strings.TrimSpace(n.Target), "",
 				timeoutVal,
 				strings.TrimSpace(n.Form), strings.TrimSpace(n.Att), strings.TrimSpace(n.Desc),
-				string(branchesJSON), i,
+				string(branchesJSON), seqVal,
 				strings.TrimSpace(n.Guide), strings.TrimSpace(n.Keywords), strings.TrimSpace(n.Action),
 				string(wrongJSON), string(evReqJSON), requiredVal,
 				flowType, scoreVal, receiver,

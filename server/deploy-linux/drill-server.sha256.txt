@@ -1,9 +1,9 @@
 # drill-server Linux/amd64 构建签名
-# 构建时间: 2026-11-05 02:19:22 (+08:00)
+# 构建时间: 2026-11-05 15:51:28 (+08:00)
 # 构建方式: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o deploy-linux/drill-server .
 # 源码状态: 0.5.0 开源发布版（Go 规则下沉 + 计时基准/任务门控/语音播报/态势去重修复）
-# 校验: 本文件末行哈希 = 二进制实测（Get-FileHash 大写）一致（16,474,298 / ef2d0d9c…）
+# 校验: 本文件末行哈希 = 二进制实测（Get-FileHash 大写）一致（16,550,451 / 94bb6d9b…）
 # 上一线上版本: 16,447,167 / sha256 6c95a68d507b213640c1395f548bcc1be15f0bb305447f5d193fca6f47f8876a
-# 字节数: 16474298
+# 字节数: 16550451
 # 部署记录: 2026-11-04 23:56 上线，镜像 sha256:1f48197fd15d…；2026-11-05 0.5.0 发布构建（本地 ELF）
-ef2d0d9cae11ef6ba7890d7723171dd5dc8699d1af93bedf8032e2fb12a34347  drill-server
+94bb6d9b43f2ee6b8babeaf11dac4f17e79aa7146ec0957e68d817edb9d705c7  drill-server
