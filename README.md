@@ -121,21 +121,41 @@ Emergency/
 
 ## 五、快速开始
 
-> 推荐使用**一键安装器**：自动检测 Docker、选择 GitHub/Gitee 源码、选择 GHCR/SWR 镜像（两者均公开可匿名拉取）、生成配置并启动。
+> **推荐用 Linux 部署（含容器化）**：Linux 上是原生目标形态，交付物为 ELF 二进制或容器镜像，运行环境稳定、无终端安全软件干扰。
+> 相比之下，Windows 原生编译产物（`.exe`）**容易被杀毒软件或安全管控终端（如 360 等）判定为可疑文件并拦截、隔离甚至删除**，导致服务无法稳定运行，且每次升级都可能被重新拦截。这不是“Windows 不能用”，而是原生二进制路径在企业终端上的误报与运维成本较高。
+> 因此：**Windows 下推荐只运行 Docker Desktop 容器**（容器内是 Linux 镜像，不在本机落地 exe）；不建议在本机直接运行编译产物。
+>
+> 推荐顺序：① **Linux 一键安装（推荐）** → ② **Docker Compose（跨平台，含 Windows）** → ③ **离线包** → ④ **从源码编译（Linux 交叉编译优先）**。
 > 完整说明（含参数、镜像对照、常见故障、从源码编译）见 [docs/install.md](docs/install.md)。
 
-### 5.1 Windows 一键安装
+### 5.1 前置需求：Docker Engine 20.10+ / Compose v2
 
-```powershell
-git clone --depth 1 https://gitee.com/habeas/cyber-drill.git cyber-drill
-cd cyber-drill
-install\install-windows.cmd
+最低要求：**Docker Engine ≥ 20.10**，且必须使用 **Compose v2 插件**（`docker compose` 子命令）；旧版 `docker-compose`（v1）不受支持。可用 `docker version` 与 `docker compose version` 自检。
+
+| 平台 | 安装方式（摘要） | 权威指南（逐一实测可达） |
+|------|------------------|--------------------------|
+| Linux（总览） | 按发行版选择官方仓库或脚本 | <https://docs.docker.com/engine/install/> |
+| Ubuntu | 官方 apt 仓库安装 `docker-ce` + `docker-compose-plugin` | <https://docs.docker.com/engine/install/ubuntu/> |
+| Debian | 官方 apt 仓库安装 | <https://docs.docker.com/engine/install/debian/> |
+| RHEL | 官方 yum/dnf 仓库安装 | <https://docs.docker.com/engine/install/rhel/> |
+| CentOS | 官方 yum/dnf 仓库安装 | <https://docs.docker.com/engine/install/centos/> |
+| 通用脚本 | `curl -fsSL https://get.docker.com \| sh`（仅建议测试环境） | <https://get.docker.com> |
+| Compose v2 | 安装 `docker-compose-plugin`，验证 `docker compose version` | <https://docs.docker.com/compose/install/linux/> |
+| Windows | 安装 Docker Desktop（启用 WSL2 后端） | <https://docs.docker.com/desktop/setup/install/windows-install/> |
+| Windows WSL2 | Docker Desktop 的 WSL2 后端前置说明 | <https://docs.docker.com/desktop/features/wsl/> |
+
+安装完成后建议执行：
+
+```bash
+sudo systemctl enable --now docker    # Linux：开机自启并立即启动
+sudo usermod -aG docker "$USER"       # Linux：加入 docker 组（需重新登录生效）
+docker compose version                # 两个平台都应输出版本号
 ```
 
-> 双击 `install-windows.cmd` 即可；脚本内部已用 `-ExecutionPolicy Bypass`，不会被脚本策略拦住。
-> 未安装 Docker Desktop 时会给出 `winget` 与官网两条引导路径（含 WSL2 检查），不会静默安装。
+> 国内网络拉取慢时，可在 `/etc/docker/daemon.json` 配置 `registry-mirrors`，使用**本单位提供的可信镜像源**；不建议长期依赖来源不明的第三方加速地址。
+> 本项目镜像同时发布在 GHCR 与华为云 SWR（均公开、可匿名拉取），可优先选择网络更通畅的一方。
 
-### 5.2 Linux 一键安装
+### 5.2 Linux 一键安装（推荐）
 
 ```bash
 git clone --depth 1 https://gitee.com/habeas/cyber-drill.git cyber-drill
@@ -152,14 +172,30 @@ curl -fsSL https://gitee.com/habeas/cyber-drill/raw/main/install/install-linux.s
 
 > 未安装 Docker 时先按发行版展示安装命令，确认后才执行；已装但未启动会尝试 `systemctl enable --now docker`。
 
-### 5.3 离线包
+### 5.3 Docker Compose（跨平台，含 Windows）
+
+**Linux**：直接使用上面的安装器，或手工执行 `docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file deploy/docker-dist/drill.env up -d`。
+
+**Windows（Docker Desktop 容器方式）**：
+
+```powershell
+git clone --depth 1 https://gitee.com/habeas/cyber-drill.git cyber-drill
+cd cyber-drill
+install\install-windows.cmd
+```
+
+> 双击 `install-windows.cmd` 即可；脚本内部已用 `-ExecutionPolicy Bypass`，不会被脚本策略拦住。
+> 未安装 Docker Desktop 时会给出 `winget` 与官网两条引导路径（含 WSL2 检查），不会静默安装。
+> **Windows 上只使用容器方式**：请勿在宿主机直接运行 `server\deploy-linux\` 下的二进制或自行编译的 exe，这类文件容易被终端安全软件误判拦截。
+
+### 5.4 离线包
 
 - Linux 离线包：`dist/drill-linux-bundle.tar.gz`，SHA256 `BB448855A4BB9F3F00ACD7803F4A0364C7D9091B936349BE8BB0D16FBA459B71`（systemd 安装，步骤见 [docs/install.md](docs/install.md)）。
 - 离线镜像：`docker save drill-server:0.5.0` 后用 `install/install-linux.sh --registry local --image-tar <tar>`。
 
-### 5.4 从源码自主编译安装
+### 5.5 从源码自主编译安装（Linux 交叉编译优先）
 
-Go 交叉编译、签名校验、systemd 与 `docker build` 的完整步骤见 **[docs/install.md](docs/install.md)** 第四节。
+优先产出 **Linux/amd64** 二进制（在 Linux 本机编译，或在 Windows 上交叉编译）；不建议把 Windows exe 作为交付物分发。完整步骤（编译、签名校验、systemd、`docker build`）见 **[docs/install.md](docs/install.md)** 第四节。
 
 更完整的部署前检查表、HTTPS、代理、国产化基础镜像说明见：
 

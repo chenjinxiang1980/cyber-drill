@@ -1,29 +1,120 @@
 # 安装指南（0.5.0）
 
-本文面向 **首次部署** 的运维人员，覆盖三条路径：
+本文面向 **首次部署** 的运维人员，按推荐顺序覆盖以下路径：
 
-1. **一键安装（推荐）**：Windows / Linux 自动检测 Docker、选择源码与镜像来源、生成配置并启动；
-2. **镜像仓库对照**：GHCR 与华为 SWR 的公开状态、登录方式与实测结果；
-3. **从源码自主编译安装**：Go 交叉编译、签名校验、systemd 安装与 Docker 最小构建命令。
+1. **Linux 一键安装（推荐，含容器化）**：自动检测 Docker、选择源码与镜像来源、生成配置并启动；
+2. **Docker Compose（跨平台，含 Windows Docker Desktop）**；
+3. **离线安装**：离线源码包与离线镜像；
+4. **镜像仓库对照**：GHCR 与华为 SWR 的公开状态、登录方式与实测结果；
+5. **从源码自主编译安装**：Linux 交叉编译优先，含签名校验、systemd 安装与 Docker 最小构建命令。
 
 > 版本固定为 **0.5.0**，镜像 tag 与 git 标签 `v0.5.0` 均不随安装器变化。
+
+> **为什么推荐 Linux 部署**：Linux 是本项目的原生目标形态（ELF 二进制或 Linux 容器镜像），运行稳定、无终端安全软件干扰。
+> Windows 原生编译产物（`.exe`）容易被杀毒软件与安全管控终端（如 360 等）判定为可疑文件并拦截、隔离甚至删除，导致服务无法稳定运行，升级后也可能再次被拦截。这不是“Windows 不能用”，而是原生二进制在企业终端上的误报与运维成本较高。
+> 因此 Windows 下推荐**只运行 Docker Desktop 容器**（容器内为 Linux 镜像，不在本机落地 exe），不建议在本机直接运行编译产物。
 
 ---
 
 ## 一、一键安装
 
-### 1.1 前置条件
+### 1.1 部署平台选择与前置条件
 
-| 项目 | Windows | Linux |
-|------|---------|-------|
-| 系统 | Windows 10/11 64 位，已启用 WSL2 | Debian 10+ / Ubuntu 20.04+ / RHEL 8+ / CentOS 8+ / UOS / Kylin |
-| Docker | Docker Desktop（含 Compose v2） | docker-ce 或发行版自带 docker + compose v2 插件 |
+| 项目 | Linux（推荐） | Windows（降级推荐，仅容器） |
+|------|---------------|------------------------------|
+| 系统 | Debian 10+ / Ubuntu 20.04+ / RHEL 8+ / CentOS 8+ / UOS / Kylin | Windows 10/11 64 位，已启用 WSL2 |
+| 部署形态 | ELF 二进制或 Docker 容器 | **仅** Docker Desktop 容器 |
+| 原生 exe | 不涉及 | 不推荐：易被杀软 / 安全管控终端拦截 |
+| Docker | docker-ce 或发行版自带 docker + Compose v2 插件 | Docker Desktop（含 Compose v2） |
 | 资源 | 4 GB 内存、20 GB 磁盘（含镜像与数据卷） | 同上 |
 | 网络 | 能访问 GHCR 或 SWR | 同左 |
 
+**最低版本要求**：Docker Engine **20.10+**；必须使用 **Compose v2 插件**（`docker compose` 子命令），旧版 `docker-compose`（v1）不受支持。自检：
+
+```bash
+docker version           # Server 版本应 >= 20.10
+docker compose version   # 应输出版本号；失败说明缺 v2 插件
+```
+
+**如何安装 Docker（摘要；以官方指南为准，勿照搬第三方教程）**
+
+| 平台 | 安装方式（摘要） | 权威指南（逐一实测可达） |
+|------|------------------|--------------------------|
+| Linux（总览） | 按发行版选择官方仓库或脚本 | <https://docs.docker.com/engine/install/> |
+| Ubuntu | 官方 apt 仓库安装 `docker-ce` + `docker-compose-plugin` | <https://docs.docker.com/engine/install/ubuntu/> |
+| Debian | 官方 apt 仓库安装 | <https://docs.docker.com/engine/install/debian/> |
+| RHEL | 官方 yum/dnf 仓库安装 | <https://docs.docker.com/engine/install/rhel/> |
+| CentOS | 官方 yum/dnf 仓库安装 | <https://docs.docker.com/engine/install/centos/> |
+| 通用脚本 | `curl -fsSL https://get.docker.com \| sh`（仅建议测试环境） | <https://get.docker.com> |
+| Compose v2 | 安装 `docker-compose-plugin`，验证 `docker compose version` | <https://docs.docker.com/compose/install/linux/> |
+| Windows | 安装 Docker Desktop（启用 WSL2 后端） | <https://docs.docker.com/desktop/setup/install/windows-install/> |
+| Windows WSL2 | Docker Desktop 的 WSL2 后端前置说明 | <https://docs.docker.com/desktop/features/wsl/> |
+
+Linux 安装后建议：
+
+```bash
+sudo systemctl enable --now docker    # 开机自启并立即启动
+sudo usermod -aG docker "$USER"       # 加入 docker 组，需重新登录生效
+```
+
+> 国内网络拉取慢时，可在 `/etc/docker/daemon.json` 配置 `registry-mirrors`，使用**本单位提供的可信镜像源**；不建议长期依赖来源不明的第三方加速地址。
+
 安装器只做**引导**：检测到未装 Docker 时先展示命令并请求确认，不会静默安装；Windows 侧不会自动下载安装包。
 
-### 1.2 Windows：分步操作
+### 1.2 Linux：分步操作（推荐）
+
+**方式 A：本地执行（推荐）**
+
+```bash
+git clone --depth 1 https://gitee.com/habeas/cyber-drill.git cyber-drill
+cd cyber-drill
+bash install/install-linux.sh
+```
+
+**方式 B：`curl | bash`（管道模式没有交互输入，需带参数）**
+
+```bash
+curl -fsSL https://gitee.com/habeas/cyber-drill/raw/main/install/install-linux.sh \
+  | bash -s -- --source gitee --registry ghcr --yes
+```
+
+> GitHub 对应地址：
+> `https://raw.githubusercontent.com/chenjinxiang1980/cyber-drill/main/install/install-linux.sh`
+
+**方式 C：只预览、不改系统**
+
+```bash
+bash install/install-linux.sh --dry-run --source gitee --registry ghcr
+```
+
+`--dry-run` 只打印将执行的命令（Docker 安装、git clone、docker pull、compose up、健康轮询），不会安装、拉取或启动任何东西。
+
+**安装器会做什么**
+
+| 阶段 | 行为 |
+|------|------|
+| Docker 检测 | `docker` 命令 + `docker info`；区分“未安装 / 已安装未启动 / 无权限” |
+| Docker 安装 | 按 `/etc/os-release` 识别：Debian/Ubuntu 走官方脚本，RHEL/CentOS/UOS/Kylin 走 `dnf/yum install docker`；**先展示命令，确认后执行** |
+| Compose 检测 | `docker compose version`；缺失时提示安装 `docker-compose-plugin` |
+| 源码 | `git clone --depth 1 --branch main`（版本仍为 0.5.0；可用 `DRILL_REF` 覆盖分支/标签）；无 git 时回退归档下载 |
+| 镜像 | GHCR 与 SWR 均公开匿名可拉；SWR 先做匿名 token 协商，失败再提示 AK |
+| 配置 | 从 `.env.example` 生成 `drill.env`，缺失密钥随机生成（见 1.5） |
+| 启动 | `docker compose -p <project> -f deploy/docker-dist/docker-compose.yml --env-file drill.env up -d` |
+| 校验 | 轮询 `http://127.0.0.1:<port>/api/health`，最长 180 秒 |
+
+**安装成功后**
+
+```bash
+curl http://127.0.0.1:8090/api/health
+# {"ok":true,"service":"cyber-drill-system","version":"0.5.0",...}
+
+# 停止（保留数据卷）
+docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file deploy/docker-dist/drill.env down
+```
+
+### 1.3 Windows：Docker Desktop 容器方式（降级推荐）
+
+> **Windows 上只使用容器方式**。不要在宿主机直接运行 `server\deploy-linux\` 下的二进制，也不要自行编译 exe 作为交付物：这类原生程序容易被杀毒软件或终端安全管控（如 360）误判并拦截、隔离甚至删除。
 
 **第 1 步：获取源码**
 
@@ -81,57 +172,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\install-windows.ps1
 Invoke-WebRequest http://127.0.0.1:8090/api/health -UseBasicParsing
 ```
 
-### 1.3 Linux：分步操作
-
-**方式 A：本地执行（推荐）**
-
-```bash
-git clone --depth 1 https://gitee.com/habeas/cyber-drill.git cyber-drill
-cd cyber-drill
-bash install/install-linux.sh
-```
-
-**方式 B：`curl | bash`（管道模式没有交互输入，需带参数）**
-
-```bash
-curl -fsSL https://gitee.com/habeas/cyber-drill/raw/main/install/install-linux.sh \
-  | bash -s -- --source gitee --registry ghcr --yes
-```
-
-> GitHub 对应地址：
-> `https://raw.githubusercontent.com/chenjinxiang1980/cyber-drill/v0.5.0/install/install-linux.sh`
-
-**方式 C：只预览、不改系统**
-
-```bash
-bash install/install-linux.sh --dry-run --source gitee --registry ghcr
-```
-
-`--dry-run` 只打印将执行的命令（Docker 安装、git clone、docker pull、compose up、健康轮询），不会安装、拉取或启动任何东西。
-
-**安装器会做什么**
-
-| 阶段 | 行为 |
-|------|------|
-| Docker 检测 | `docker` 命令 + `docker info`；区分“未安装 / 已安装未启动 / 无权限” |
-| Docker 安装 | 按 `/etc/os-release` 识别：Debian/Ubuntu 走官方脚本，RHEL/CentOS/UOS/Kylin 走 `dnf/yum install docker`；**先展示命令，确认后执行** |
-| Compose 检测 | `docker compose version`；缺失时提示安装 `docker-compose-plugin` |
-| 源码 | `git clone --depth 1 --branch main`（版本仍为 0.5.0；可用 `DRILL_REF` 覆盖分支/标签）；无 git 时回退归档下载 |
-| 镜像 | GHCR 与 SWR 均公开匿名可拉；SWR 先做匿名 token 协商，失败再提示 AK |
-| 配置 | 从 `.env.example` 生成 `drill.env`，缺失密钥随机生成（见 1.5） |
-| 启动 | `docker compose -p <project> -f deploy/docker-dist/docker-compose.yml --env-file drill.env up -d` |
-| 校验 | 轮询 `http://127.0.0.1:<port>/api/health`，最长 180 秒 |
-
-**安装成功后**
-
-```bash
-curl http://127.0.0.1:8090/api/health
-# {"ok":true,"service":"cyber-drill-system","version":"0.5.0",...}
-
-# 停止（保留数据卷）
-docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file deploy/docker-dist/drill.env down
-```
-
 ### 1.4 安装器参数速查
 
 两个平台参数语义一致（Windows 用 `--xxx` 或 `-Xxx`）：
@@ -183,7 +223,7 @@ sha256sum drill-linux-bundle.tar.gz
 bash install/install-linux.sh --source local --bundle ./drill-linux-bundle.tar.gz --yes
 ```
 
-> 该离线包面向 **systemd 安装**（含二进制与 `deploy/linux/install.sh`），不含 `deploy/docker-dist`。使用该包请参考 3.3 的 systemd 步骤；安装器会校验哈希并给出提示。
+> 该离线包面向 **systemd 安装**（含二进制与 `deploy/linux/install.sh`），不含 `deploy/docker-dist`。使用该包请参考 4.4 的 systemd 步骤；安装器会校验哈希并给出提示。
 
 **离线镜像（docker save）**
 
@@ -277,9 +317,10 @@ docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file depl
 
 ---
 
-## 四、从源码自主编译安装
+## 四、从源码自主编译安装（Linux 交叉编译优先）
 
 > 一键安装失败、需要定制、或要做离线交付时使用本节。
+> 交付物优先选择 **Linux/amd64** 二进制或容器镜像；不建议把 Windows exe 作为交付物（易被终端安全软件误判拦截）。
 
 ### 4.1 前置
 
@@ -287,9 +328,18 @@ docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file depl
 - Node 不需要（前端为静态文件，直接托管 `public/`）
 - MySQL 8.x（Docker 方式由 compose 自带）
 
-### 4.2 交叉编译 Linux/amd64 二进制
+### 4.2 编译 Linux/amd64 二进制（优先）
 
-在 Windows 上：
+优先在 Linux 上直接编译：
+
+```bash
+cd server
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+  -ldflags "-s -w -X drill-system/internal/version.Version=0.5.0" \
+  -o deploy-linux/drill-server .
+```
+
+没有 Linux 构建环境时，可在 Windows 上交叉编译出**同一个 Linux 产物**：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-linux.ps1
@@ -307,14 +357,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-linux.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-linux.ps1 -SignOnly
 ```
 
-在 Linux 上直接编译：
-
-```bash
-cd server
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-  -ldflags "-s -w -X drill-system/internal/version.Version=0.5.0" \
-  -o deploy-linux/drill-server .
-```
+> 不建议编译或分发 Windows exe：这类原生程序容易被杀毒软件 / 终端管控软件（如 360）误判拦截。Windows 环境请使用 1.3 的 Docker Desktop 容器方式。
 
 ### 4.3 签名校验
 
