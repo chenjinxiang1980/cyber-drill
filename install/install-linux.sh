@@ -81,7 +81,7 @@ Cyber-Drill 0.5.0 Linux 一键安装
 
 参数：
   --dry-run              只打印将执行的命令，不安装/不拉取/不启动
-  --yes                  跳过交互确认（自动化）
+  --yes（或 -y）         跳过交互确认（自动化）
   --source  github|gitee|local
   --registry ghcr|swr|local
   --dir <路径>           源码目录（默认 ~/cyber-drill）

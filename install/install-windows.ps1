@@ -80,11 +80,12 @@ Cyber-Drill 0.5.0 Windows 一键安装
   --mysql-port <端口>   MySQL 端口（默认 3306）
   --project <名称>      compose 项目名（默认 drill）
   --env-file <文件名>   环境文件名（默认 drill.env）
-  --image-tar <文件>    本地镜像 tar
+  --image-tar <文件>    本地镜像 tar（仅长参数）
+  --bundle <tar.gz>     离线源码包（仅长参数，按内置 SHA256 校验）
 '@
 }
 
-# ---------- 参数解析（同时支持 --xxx 与 -Xxx） ----------
+# ---------- 参数解析（多数参数同时支持 --xxx 与 -Xxx；--image-tar/--bundle 仅长参数） ----------
 for ($i = 0; $i -lt $args.Count; $i++) {
     $key = [string]$args[$i]
     $val = ''

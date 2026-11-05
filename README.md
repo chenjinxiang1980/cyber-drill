@@ -157,43 +157,157 @@ docker compose version                # 两个平台都应输出版本号
 
 ### 5.2 Linux 一键安装（推荐）
 
+**方式 A：下载脚本后本地执行（可加执行权限）**
+
 ```bash
-git clone --depth 1 https://gitee.com/habeas/cyber-drill.git cyber-drill
-cd cyber-drill
-bash install/install-linux.sh
+curl -fsSL https://gitee.com/habeas/cyber-drill/raw/main/install/install-linux.sh -o install-linux.sh
+chmod +x ./install-linux.sh
+bash ./install-linux.sh
 ```
 
-或直接管道执行（无交互，需显式参数）：
+**方式 B：`curl | bash`（管道模式没有交互输入，必须显式传参）**
 
 ```bash
 curl -fsSL https://gitee.com/habeas/cyber-drill/raw/main/install/install-linux.sh \
   | bash -s -- --source gitee --registry ghcr --yes
 ```
 
+**最省事的默认安装**（`--yes` 时默认：源码 GitHub、镜像 GHCR、目录 `~/cyber-drill`、应用端口 8090、MySQL 3306、项目名 `drill`、环境文件 `drill.env`）：
+
+```bash
+bash ./install-linux.sh --yes
+```
+
+**自定义端口 + 国内源（完整示例）**：
+
+```bash
+curl -fsSL https://gitee.com/habeas/cyber-drill/raw/main/install/install-linux.sh \
+  | bash -s -- \
+      --source gitee --registry swr \
+      --dir /opt/cyber-drill \
+      --port 18090 --mysql-port 13306 \
+      --project drill-prod --env-file drill.env \
+      --yes
+```
+
+**Linux 常用参数（与 `install/install-linux.sh --help` 一致）**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--dry-run` | 关 | 只打印将执行的命令，不安装/不拉取/不启动 |
+| `--yes`（别名 `-y`） | 关 | 跳过交互确认，使用默认值 |
+| `--source github\|gitee\|local` | 交互选择；`--yes` 时 github | 源码来源 |
+| `--registry ghcr\|swr\|local` | 交互选择；`--yes` 时 ghcr | 镜像来源 |
+| `--dir <路径>` | `~/cyber-drill` | 源码目录 |
+| `--port <端口>` | `8090` | 应用宿主端口 |
+| `--mysql-port <端口>` | `3306` | MySQL 宿主端口 |
+| `--project <名称>` | `drill` | compose 项目名（同时决定容器名与数据卷前缀） |
+| `--env-file <文件名>` | `drill.env` | 环境文件名，生成在 `<dir>/deploy/docker-dist/` |
+| `--image-tar <文件>` | 空 | 本地镜像 tar（`docker load`） |
+| `--bundle <tar.gz>` | 空 | 离线源码包（按内置 SHA256 校验） |
+
+环境变量等价参数：`DRILL_SOURCE`、`DRILL_REGISTRY`、`DRILL_DIR`、`DRILL_PORT`、`DRILL_REF`。
+
 > 未安装 Docker 时先按发行版展示安装命令，确认后才执行；已装但未启动会尝试 `systemctl enable --now docker`。
+> 并行测试务必同时指定 `--project`、`--port`、`--mysql-port`，避免与现网冲突。
 
-### 5.3 Docker Compose（跨平台，含 Windows）
+### 5.3 Windows 一键安装（Docker Desktop 容器方式）
 
-**Linux**：直接使用上面的安装器，或手工执行 `docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file deploy/docker-dist/drill.env up -d`。
+**方式 A：双击运行（推荐）**
 
-**Windows（Docker Desktop 容器方式）**：
+```
+install\install-windows.cmd
+```
+
+`install-windows.cmd` 内部使用 `powershell -NoProfile -ExecutionPolicy Bypass -File`，无需修改系统 `ExecutionPolicy`。
+
+**方式 B：PowerShell 直接调用**
 
 ```powershell
 git clone --depth 1 https://gitee.com/habeas/cyber-drill.git cyber-drill
 cd cyber-drill
-install\install-windows.cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install\install-windows.ps1
 ```
 
-> 双击 `install-windows.cmd` 即可；脚本内部已用 `-ExecutionPolicy Bypass`，不会被脚本策略拦住。
-> 未安装 Docker Desktop 时会给出 `winget` 与官网两条引导路径（含 WSL2 检查），不会静默安装。
+**默认安装**（`-Yes` 时默认：源码 GitHub、镜像 GHCR、目录 `$HOME\cyber-drill`、应用端口 8090、MySQL 3306、项目名 `drill`、环境文件 `drill.env`）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install\install-windows.ps1 -Yes
+```
+
+**自定义端口 + 国内源（完整示例）**：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install\install-windows.ps1 `
+  -Source gitee -Registry swr `
+  -Dir D:\cyber-drill -Port 18090 -MysqlPort 13306 `
+  -Project drill-prod -EnvFile drill.env -Yes
+```
+
+**Windows 常用参数（与脚本参数解析一致）**
+
+| 参数（短/长写法） | 默认值 | 说明 |
+|-------------------|--------|------|
+| `-DryRun` / `--dry-run` | 关 | 只打印将执行的命令 |
+| `-Yes` / `--yes` | 关 | 跳过交互确认（**无 `-y` 别名**） |
+| `-Source` / `--source` `github\|gitee\|local` | 交互；`-Yes` 时 github | 源码来源 |
+| `-Registry` / `--registry` `ghcr\|swr\|local` | 交互；`-Yes` 时 ghcr | 镜像来源 |
+| `-Dir` / `--dir` | `$HOME\cyber-drill` | 源码目录 |
+| `-Port` / `--port` | `8090` | 应用端口 |
+| `-MysqlPort` / `--mysql-port` | `3306` | MySQL 端口 |
+| `-Project` / `--project` | `drill` | compose 项目名 |
+| `-EnvFile` / `--env-file` | `drill.env` | 环境文件名 |
+| `--image-tar`（无短别名） | 空 | 本地镜像 tar |
+| `--bundle`（无短别名） | 空 | 离线源码包 |
+| `-h` / `--help` | — | 显示帮助 |
+
+> 未安装 Docker Desktop 时给出 `winget` 与官网两条引导路径（含 WSL2 检查），不会静默安装。
 > **Windows 上只使用容器方式**：请勿在宿主机直接运行 `server\deploy-linux\` 下的二进制或自行编译的 exe，这类文件容易被终端安全软件误判拦截。
 
-### 5.4 离线包
+### 5.4 安装后验证、配置与停止/卸载
+
+**验证（默认端口 8090）**
+
+```bash
+curl http://localhost:8090/api/health
+# 期望：{"ok":true,"service":"cyber-drill-system","version":"0.5.0",...}
+```
+
+Windows PowerShell 可用：
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:8090/api/health -UseBasicParsing
+```
+
+- **默认访问地址**：`http://localhost:8090`
+- **管理员账号**：`admin`；**初始密码**在首次安装成功时由终端打印（只显示一次），同时写入环境文件。
+- **环境文件位置**：`<源码目录>/deploy/docker-dist/drill.env`，默认即 `~/cyber-drill/deploy/docker-dist/drill.env`（Windows 为 `$HOME\cyber-drill\deploy\docker-dist\drill.env`）。
+- **为什么必须备份**：该文件含数据库密码、MySQL root 密码、`JWT_SECRET`、`SESSION_SECRET` 与管理员初始密码；丢失后难以恢复数据库访问与登录态签名，重建会导致既有会话/密码失效。该文件权限为 `600`，请离线备份，**不要提交到任何仓库**。
+
+**停止 / 卸载（保留数据）**
+
+```bash
+cd ~/cyber-drill
+docker compose -p drill -f deploy/docker-dist/docker-compose.yml \
+  --env-file deploy/docker-dist/drill.env down
+```
+
+**彻底清理（连数据卷一起删，数据库将清空，慎用）**
+
+```bash
+cd ~/cyber-drill
+docker compose -p drill -f deploy/docker-dist/docker-compose.yml \
+  --env-file deploy/docker-dist/drill.env down -v
+```
+
+> 若安装时改了 `--project` 或 `--dir`，请把上面命令中的 `-p drill`、路径与 `--env-file` 换成实际值。
+
+### 5.5 离线包
 
 - Linux 离线包：`dist/drill-linux-bundle.tar.gz`，SHA256 `BB448855A4BB9F3F00ACD7803F4A0364C7D9091B936349BE8BB0D16FBA459B71`（systemd 安装，步骤见 [docs/install.md](docs/install.md)）。
 - 离线镜像：`docker save drill-server:0.5.0` 后用 `install/install-linux.sh --registry local --image-tar <tar>`。
 
-### 5.5 从源码自主编译安装（Linux 交叉编译优先）
+### 5.6 从源码自主编译安装（Linux 交叉编译优先）
 
 优先产出 **Linux/amd64** 二进制（在 Linux 本机编译，或在 Windows 上交叉编译）；不建议把 Windows exe 作为交付物分发。完整步骤（编译、签名校验、systemd、`docker build`）见 **[docs/install.md](docs/install.md)** 第四节。
 
