@@ -726,11 +726,21 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 			if s, err := strconv.Atoi(anyToString(n.Score)); err == nil {
 				scoreVal = s
 			}
-			if scoreVal < 0 {
-				scoreVal = 0
-			}
-			if scoreVal > 100 {
-				scoreVal = 100
+			if flowType == "distractor" {
+				// 混淆节点分值即「严重程度」，只允许高 8 / 中 5 / 低 3 三档。
+				if n.Score == nil {
+					scoreVal = 5
+				} else if scoreVal != 3 && scoreVal != 5 && scoreVal != 8 {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "混淆流程节点「" + strings.TrimSpace(n.Title) + "」的严重程度分值不合法：仅允许 8（高）/ 5（中）/ 3（低）三档"})
+					return
+				}
+			} else {
+				if scoreVal < 0 {
+					scoreVal = 0
+				}
+				if scoreVal > 100 {
+					scoreVal = 100
+				}
 			}
 
 			var posX, posY sql.NullInt64

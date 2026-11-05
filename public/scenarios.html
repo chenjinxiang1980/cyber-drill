@@ -352,7 +352,7 @@ document.addEventListener('app:ready', function(e){
         +   '<div class="dag-tools">'
         +   '<button class="btn sm" id="btnAdd" title="添加节点">'+App.icon('plus')+'添加节点</button>'
         +   '<span class="dag-tool-sep"></span>'
-        +   '<button class="btn sm" id="btnScore" title="均分分值（首节点 0 分）">'+App.icon('score')+'均分分值</button>'
+        +   '<button class="btn sm" id="btnScore" title="均分分值（首节点 0 分；混淆流程只补齐未分档项为 5 分）">'+App.icon('score')+'均分分值</button>'
         +   '<button class="btn sm" id="btnPlay">'+App.icon('play')+'预览推演</button>'
         +   '<button class="btn sm primary" id="btnSave">'+App.icon('check')+'保存剧本</button>'
         +   '</div>'
@@ -417,16 +417,25 @@ document.addEventListener('app:ready', function(e){
       return nodes.filter(function(x){ return x.type!=='end' && x.flowType!=='distractor'; })
         .reduce(function(a,x){ return a + (Number(x.score)||0); },0);
     }
+    /* 混淆节点严重程度：高 8 / 中 5 / 低 3（存量或异常值按中档处理） */
+    function sevOf(n){
+      var v = Number(n && n.score);
+      return (v===8 || v===3) ? v : 5;
+    }
+    function sevLabel(score){
+      return score===8 ? '高' : (score===3 ? '低' : '中');
+    }
     function renderSum(){
       var el = root.querySelector('#seSum');
       if(!el) return;
       var total = scoreTotal();
       var disNodes = nodes.filter(function(x){ return x.type!=='end' && x.flowType==='distractor'; });
-      var dis = disNodes.length;
-      /* 混淆节点分值：取第一个有效节点的 score 作为展示基准，未配置时默认 10 */
-      var disScore = 10;
-      if(disNodes.length){ disScore = Number(disNodes[0].score) || 10; }
-      el.innerHTML = '正确流程合计 <b>'+total+'</b> / 100 分 · 混淆流程 <b>'+dis+'</b> 条（每条 <b>'+disScore+'</b> 分 · 仅选错扣分，不计入总分）'
+      var hi = 0, mid = 0, lo = 0;
+      disNodes.forEach(function(x){ var s = sevOf(x); if(s===8) hi++; else if(s===3) lo++; else mid++; });
+      var disText = disNodes.length
+        ? '混淆流程 <b>'+disNodes.length+'</b> 条（高 <b>'+hi+'</b> / 中 <b>'+mid+'</b> / 低 <b>'+lo+'</b> · 仅选错扣分，不计入总分）'
+        : '混淆流程 <b>0</b> 条';
+      el.innerHTML = '正确流程合计 <b>'+total+'</b> / 100 分 · '+disText
         + (total>100?'<br><span style="color:var(--err)">已超出 '+(total-100)+' 分，请下调各节点分值</span>'
                     :(total<100?'<br><span style="color:var(--warn)">未满 100 分，请分配剩余分值</span>'
                                :'<br><span style="color:var(--ok)">分值已满 100 分</span>'));
@@ -704,26 +713,31 @@ document.addEventListener('app:ready', function(e){
 
     /* 均分分值：首节点不设分值（0），其余正确流程节点平均分 100 分
        不够分配时（节点数>100），从第 2 个节点起依次多 1 分，直到分完
-       混淆流程节点统一 10 分（仅用于选错时扣分，不计入 100 分总分） */
+       混淆流程节点按严重程度分档（高 8 / 中 5 / 低 3），均分只补齐
+       尚未设置过分档的节点为默认中档 5 分，不覆盖已分档的值 */
     function autoSplitScore(){
       var correct = correctNodes().filter(function(n){ return n.flowType!=='distractor' && n.type!=='end'; });
-      /* 混淆节点统一 10 分（与主流节点赋分相互独立） */
       var distractors = nodes.filter(function(n){ return n.flowType==='distractor'; });
-      distractors.forEach(function(n){ n.score = 10; });
-      if(!correct.length){ App.toast('没有可分配分值的正确流程节点','err'); return 0; }
+      var unfilled = distractors.filter(function(n){ var v = Number(n.score); return !(v===8 || v===5 || v===3); });
+      unfilled.forEach(function(n){ n.score = 5; });
+      var kept = distractors.length - unfilled.length;
+      var disNote = distractors.length
+        ? ('混淆流程 '+distractors.length+' 条：'+unfilled.length+' 条未分档已填中档 5 分，'+kept+' 条已分档保持不变')
+        : '';
+      if(!correct.length){ App.toast('没有可分配分值的正确流程节点'+(disNote?'；'+disNote:''),'err'); return 0; }
       var total = 100;
       /* 首节点固定 0 分（演练由其触发，不计入得分项） */
       correct[0].score = 0;
       var rest = correct.slice(1);
       if(!rest.length){
-        App.toast('首个正确流程节点已设为 0 分（演练起始不计分），无其他节点可分配；混淆流程已统一 10 分/条','warn');
+        App.toast('首个正确流程节点已设为 0 分（演练起始不计分），无其他节点可分配'+(disNote?'；'+disNote:''),'warn');
         return correct.length;
       }
       if(rest.length >= total){
         /* 节点数超过 100 时，从前往后依次给 1 分 */
         rest.forEach(function(n, idx){ n.score = (idx < total) ? 1 : 0; });
         var realTotal = rest.reduce(function(m,n){ return m + (Number(n.score)||0); }, 0);
-        App.toast('正确流程共 '+correct.length+' 个（首节点 0 分），剩余 '+rest.length+' 个节点超过 100 分总量，前 '+total+' 个各分配 1 分，后 '+(rest.length-total)+' 个 0 分（合计 '+realTotal+' 分）；混淆流程 '+distractors.length+' 条统一 10 分/条','warn');
+        App.toast('正确流程共 '+correct.length+' 个（首节点 0 分），剩余 '+rest.length+' 个节点超过 100 分总量，前 '+total+' 个各分配 1 分，后 '+(rest.length-total)+' 个 0 分（合计 '+realTotal+' 分）'+(disNote?'；'+disNote:''),'warn');
       } else {
         /* 平均分配 + 余数顺序分配 */
         var per = Math.floor(total / rest.length);
@@ -731,7 +745,7 @@ document.addEventListener('app:ready', function(e){
         rest.forEach(function(n){ n.score = per; });
         for(var i=0; i<remainder; i++){ rest[i].score = (rest[i].score||0) + 1; }
         var realTotal = correct.reduce(function(m,n){ return m + (Number(n.score)||0); }, 0);
-        App.toast('已均分 100 分：首节点 0 分，其余 '+rest.length+' 个节点每节点 '+per+((remainder>0)?' 分（前 '+remainder+' 个 +1 分，合计 '+realTotal+'）':' 分（合计 '+realTotal+'）；混淆流程 '+distractors.length+' 条统一 10 分/条'),'ok');
+        App.toast('已均分 100 分：首节点 0 分，其余 '+rest.length+' 个节点每节点 '+per+((remainder>0)?' 分（前 '+remainder+' 个 +1 分，合计 '+realTotal+'）':' 分（合计 '+realTotal+'）')+(disNote?'；'+disNote:''),'ok');
       }
       return correct.length;
     }
@@ -742,7 +756,7 @@ document.addEventListener('app:ready', function(e){
       var tags = [];
       if(n.type!=='end'){
         tags.push(n.flowType==='distractor'
-          ? '<span class="tag red">混淆流程 '+(Number(n.score)||0)+' 分</span>'
+          ? '<span class="tag red">混淆流程 '+sevLabel(sevOf(n))+' −'+sevOf(n)+' 分</span>'
           : '<span class="tag blue">正确流程 '+(Number(n.score)||0)+' 分</span>');
         tags.push(n.required===false ? '<span class="tag gray">可选步骤</span>' : '<span class="tag green">必经</span>');
       }
@@ -833,7 +847,7 @@ document.addEventListener('app:ready', function(e){
         + '</div></div>';
       if(dis.length){
         pool.style.display = '';
-        pool.innerHTML = '<div class="dag-pool-head">'+App.icon('alert')+'<span>混淆流程池（仅实战版显示，不参与依赖流转；参选后按分值扣分）</span></div>'
+        pool.innerHTML = '<div class="dag-pool-head">'+App.icon('alert')+'<span>混淆流程池（仅实战版显示，不参与依赖流转；被选中后按严重程度扣分：高 −8 / 中 −5 / 低 −3）</span></div>'
           + '<div class="dag-pool-grid">'+dis.map(function(n){ return cardHtml(n, nodes.indexOf(n), true); }).join('')+'</div>';
       } else {
         pool.style.display = 'none';
@@ -1157,7 +1171,14 @@ document.addEventListener('app:ready', function(e){
         + '<div class="divider"></div><div class="section-title">流程属性与分值（基础版按正确流程顺序执行 / 实战版额外加入混淆流程）</div>'
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">流程属性</label><select class="select" id="ndFlow"><option value="correct"'+(n.flowType==='distractor'?'':' selected')+'>正确流程（基础版显示）</option><option value="distractor"'+(n.flowType==='distractor'?' selected':'')+'>混淆流程（仅实战版显示）</option></select></div>'
-        + '<div class="form-row"><label class="f-label">本步骤分值（0-100）</label><input class="input" id="ndScore" type="number" min="0" max="100" step="1" value="'+(Number(n.score)||0)+'"></div>'
+        + '<div class="form-row" id="ndScoreRow" style="'+(n.flowType==='distractor'?'display:none':'')+'"><label class="f-label">本步骤分值（0-100）</label><input class="input" id="ndScore" type="number" min="0" max="100" step="1" value="'+(Number(n.score)||0)+'"></div>'
+        + '<div class="form-row" id="ndSeverityRow" style="'+(n.flowType==='distractor'?'':'display:none')+'"><label class="f-label">严重程度<span class="req">*</span></label>'
+        +   '<select class="select" id="ndSeverity">'
+        +     '<option value="8"'+(sevOf(n)===8?' selected':'')+'>高（−8 分）</option>'
+        +     '<option value="5"'+(sevOf(n)===5?' selected':'')+'>中（−5 分）</option>'
+        +     '<option value="3"'+(sevOf(n)===3?' selected':'')+'>低（−3 分）</option>'
+        +   '</select>'
+        +   '<div class="tiny dim" style="margin-top:4px">高＝看起来合理、容易被误选且危害大（延误处置/破坏证据/错误上报/影响患者安全）；中＝常规干扰；低＝明显不合理，多数参演者不会误选。</div></div>'
         /* ---------- 正确流程专属：接收人 + deps ---------- */
         + '<div id="ndCorrectBlocks" style="'+(n.flowType==='distractor'?'display:none':'')+'">'
         + '<div class="form-row span2"><label class="f-label">下一节点接收人 <span class="tiny dim">（下拉多选）</span></label>'
@@ -1184,7 +1205,7 @@ document.addEventListener('app:ready', function(e){
         + '<div class="form-row"><label class="f-label">后继节点 <span class="tiny dim">（由依赖关系自动推导，无需手工填写）</span></label>'
         +   '<div class="tiny dim">'+(succOf(n.id).map(function(x){ return App.esc(x.title); }).join('、') || '无（本流程为末端流程）')+'</div></div>'
         + '</div>'
-        + '<div id="ndScoreTip" class="tiny dim mb2">扣分制总分 100 起。正确流程按时完成无扣分，超时完成扣本节点分值的 10%；混淆流程被选中扣本节点全部分值（10 分），不计入 100 分总分。</div>'
+        + '<div id="ndScoreTip" class="tiny dim mb2">扣分制总分 100 起。正确流程按时完成无扣分，超时完成扣本节点分值的 10%；混淆流程被选中按严重程度扣分（高 −8 / 中 −5 / 低 −3），不计入 100 分总分。</div>'
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">动作类型</label><select class="select" id="ndAction"><option value="">— 未分类 —</option>'+ACTION_TYPES.map(function(a){ return '<option value="'+a+'"'+(n.action===a?' selected':'')+'>'+a+'</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">必经步骤</label><div class="flex gap2" style="align-items:center;min-height:34px"><label class="check"><input type="checkbox" id="ndRequired"'+(n.required===false?'':' checked')+'>实战版遗漏判定必查</label></div></div>'
@@ -1227,36 +1248,40 @@ document.addEventListener('app:ready', function(e){
         /* ---- end MultiSelect ---- */
 
         dv.querySelector('#ndType').onchange = function(){ dv.querySelector('#ndBranchRow').style.display = this.value==='parallel'?'':'none'; };
-        /* flowType 切换 → 同步显隐 correct/distractor 专属配置块 */
-        dv.querySelector('#ndFlow').onchange = function(){
-          var isDis = this.value === 'distractor';
+        /* flowType 切换 → 同步显隐 correct/distractor 专属配置块与分值控件 */
+        function syncFlowBlocks(){
+          var isDis = dv.querySelector('#ndFlow').value === 'distractor';
           dv.querySelector('#ndCorrectBlocks').style.display = isDis ? 'none' : '';
           dv.querySelector('#ndCorrectDepsRow').style.display = isDis ? 'none' : '';
           dv.querySelector('#ndDistractorBlocks').style.display = isDis ? '' : 'none';
-          refreshScoreTip();
-        };
-        /* 实时统计正确流程总分，超过 100 分给出超分提醒 */
+          dv.querySelector('#ndScoreRow').style.display = isDis ? 'none' : '';
+          dv.querySelector('#ndSeverityRow').style.display = isDis ? '' : 'none';
+        }
+        /* 实时统计：正确流程统计总分，混淆流程按严重程度提示扣分值 */
         function refreshScoreTip(){
           var isDis = dv.querySelector('#ndFlow').value==='distractor';
-          var v = parseInt(dv.querySelector('#ndScore').value,10);
-          if(isNaN(v) || v<0) v = 0;
-          if(v>100) v = 100;
+          var tip = dv.querySelector('#ndScoreTip');
           var others = nodes.reduce(function(a,x,xi){
             if(xi===i || x.type==='end' || x.flowType==='distractor') return a;
             return a + (Number(x.score)||0);
           },0);
-          var all = others + (isDis ? 0 : v);
-          var tip = dv.querySelector('#ndScoreTip');
           if(isDis){
-            tip.innerHTML = '混淆流程不计入满分：被参演人员选中时按 <b>'+v+'</b> 分直接扣分；当前正确流程合计 <b>'+others+'</b> / 100 分。';
-          } else {
-            tip.innerHTML = '本步骤完成可得 <b>'+v+'</b> 分（超时按 '+(Math.round(v*0.9*10)/10)+' 分计），设置后正确流程合计 <b>'+all+'</b> / 100 分'
-              + (all>100?'，<span style="color:var(--err)">已超出 '+(all-100)+' 分，请下调分值</span>'
-                        :(all<100?'，<span style="color:var(--warn)">未满 100 分</span>':'，<span style="color:var(--ok)">分值已满</span>'));
+            var sv = parseInt(dv.querySelector('#ndSeverity').value,10);
+            if(!(sv===8 || sv===5 || sv===3)) sv = 5;
+            tip.innerHTML = '混淆流程不计入满分：被参演人员选中时按严重程度 <b>'+sevLabel(sv)+'（−'+sv+' 分）</b>直接扣分；当前正确流程合计 <b>'+others+'</b> / 100 分。';
+            return;
           }
+          var v = parseInt(dv.querySelector('#ndScore').value,10);
+          if(isNaN(v) || v<0) v = 0;
+          if(v>100) v = 100;
+          var all = others + v;
+          tip.innerHTML = '本步骤完成可得 <b>'+v+'</b> 分（超时按 '+(Math.round(v*0.9*10)/10)+' 分计），设置后正确流程合计 <b>'+all+'</b> / 100 分'
+            + (all>100?'，<span style="color:var(--err)">已超出 '+(all-100)+' 分，请下调分值</span>'
+                      :(all<100?'，<span style="color:var(--warn)">未满 100 分</span>':'，<span style="color:var(--ok)">分值已满</span>'));
         }
-        dv.querySelector('#ndFlow').onchange = refreshScoreTip;
+        dv.querySelector('#ndFlow').onchange = function(){ syncFlowBlocks(); refreshScoreTip(); };
         dv.querySelector('#ndScore').oninput = refreshScoreTip;
+        dv.querySelector('#ndSeverity').onchange = refreshScoreTip;
         refreshScoreTip();
         dv.querySelector('#ndEvAuto').onclick = function(){
           var draft = {
@@ -1301,8 +1326,14 @@ document.addEventListener('app:ready', function(e){
           n.required = dv.querySelector('#ndRequired').checked;
           n.guide = dv.querySelector('#ndGuide').value.trim();
           n.flowType = dv.querySelector('#ndFlow').value === 'distractor' ? 'distractor' : 'correct';
-          var scv = parseInt(dv.querySelector('#ndScore').value,10);
-          n.score = isNaN(scv) ? 0 : Math.max(0, Math.min(100, scv));
+          if(n.flowType==='distractor'){
+            /* 混淆节点只允许三档严重程度：高 8 / 中 5 / 低 3 */
+            var sev = parseInt(dv.querySelector('#ndSeverity').value,10);
+            n.score = (sev===8 || sev===3) ? sev : 5;
+          } else {
+            var scv = parseInt(dv.querySelector('#ndScore').value,10);
+            n.score = isNaN(scv) ? 0 : Math.max(0, Math.min(100, scv));
+          }
           n.receiver = recvMs.getValue().join('、');
           n.deps = n.flowType==='distractor' ? [] : depsMs.getValue();
           /* 混淆节点 anchor + timing 写回 */
@@ -1342,7 +1373,7 @@ document.addEventListener('app:ready', function(e){
       var t = isDis ? { label:'混淆流程', icon:'alert' } : (TYPES[type]||TYPES.task);
       var id = 'N' + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
       var n = { id:id, type:isDis?'task':type, title:'新'+t.label+'节点', target:'信息科值班员', desc:'',
-        flowType:isDis?'distractor':'correct', score:isDis?10:0, receiver:'', deps:[] };
+        flowType:isDis?'distractor':'correct', score:isDis?5:0, receiver:'', deps:[] };
       if(type!=='end') n.timeout = isDis ? 10 : 15;
       if(type==='parallel'){ n.parallelDesc = ''; n.parallel_desc = ''; }
       /* 新建混淆节点默认空 anchor + before 时机，让用户在 drawer 里选 */
