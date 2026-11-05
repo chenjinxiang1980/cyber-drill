@@ -25,7 +25,8 @@ services:
     #   image: mysql:8.0.42@sha256:a1b2c3d4...
     # （digest 在 docker pull 后用 docker image inspect mysql:8.0.42 取得）
     image: mysql:8.0.42
-    container_name: drill-mysql
+    # 容器名可用 MYSQL_CONTAINER_NAME 覆盖（同一宿主并行测试时避免冲突）
+    container_name: ${MYSQL_CONTAINER_NAME:-drill-mysql}
     restart: unless-stopped
     environment:
       # ⚠️ 全部 __REPLACE_WITH__ 占位符必须替换成真实值
@@ -68,10 +69,12 @@ services:
       args:
         VERSION: ${VERSION:-0.5.0}
     image: drill-server:${VERSION:-0.5.0}
-    container_name: drill-app
+    # 容器名可用 APP_CONTAINER_NAME 覆盖（同一宿主并行测试时避免冲突）
+    container_name: ${APP_CONTAINER_NAME:-drill-app}
     restart: unless-stopped
+    # 环境文件名可用 DRILL_ENV_FILE 覆盖（一键安装器默认生成 drill.env）
     env_file:
-      - .env
+      - ${DRILL_ENV_FILE:-.env}
     environment:
       # compose 内部 DNS —— 强制覆盖 .env 里的 DB_HOST 为 mysql
       DB_HOST: mysql
