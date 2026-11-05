@@ -47,6 +47,8 @@ server/.gotmp/
 server/deploy-linux/drill-server
 server/deploy-linux/drill-server.exe
 server/deploy-linux/drill-server-linux
+server/deploy-linux/drill-migrate
+server/deploy-linux/drill-seed
 server/deploy-linux/*.tar.gz
 
 # ---- 归档 / 离线包（不入库，作为 Release 附件）----
