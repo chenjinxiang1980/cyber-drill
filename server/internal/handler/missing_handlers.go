@@ -1440,10 +1440,8 @@ func GetDrillFlows(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
 			return
 		}
-		if u.Role.External {
-			c.JSON(http.StatusForbidden, gin.H{"error": "外部单位仅可查看医院上报材料（分级权限隔离）"})
-			return
-		}
+		// 外部单位改为只读详情入口：可查看被指派节点的内容与表单，但不可提交
+		// （提交/跳过/结束等写入入口仍对 u.Role.External 返回 403，由院应急指挥部代执行）。
 		p := drillV1ProjectOf(database, c.Param("projectId"))
 		if p == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})

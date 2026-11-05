@@ -220,21 +220,22 @@ func MonitorContentHandler(database *db.DB) gin.HandlerFunc {
 
 		// ---- script_nodes ----
 		type nodeLite struct {
-			id, target, depsStr, parallelDesc, flowType, ntype string
+			id, target, depsStr, parallelDesc, flowType, ntype, title, shortTitle string
 			seq, timeout int
 		}
 		var scriptNodes []nodeLite
 		nodesRows, _ := database.Query(`SELECT id,COALESCE(target,''),COALESCE(deps,''),
 			COALESCE(parallel_desc,''),COALESCE(seq,0),COALESCE(timeout,0),
-			COALESCE(flow_type,'correct'),COALESCE(type,'task')
+			COALESCE(flow_type,'correct'),COALESCE(type,'task'),
+			COALESCE(title,''),COALESCE(short_title,'')
 			FROM script_nodes WHERE scenario_id=? AND type!='end'
 			AND COALESCE(flow_type,'correct')!='distractor' ORDER BY seq`, pScenarioID)
 		if nodesRows != nil {
 			for nodesRows.Next() {
-				var nid, target, depsStr, parallelDesc, flowType, ntype string
+				var nid, target, depsStr, parallelDesc, flowType, ntype, title, shortTitle string
 				var seq, timeout int
-				nodesRows.Scan(&nid, &target, &depsStr, &parallelDesc, &seq, &timeout, &flowType, &ntype)
-				scriptNodes = append(scriptNodes, nodeLite{nid, target, depsStr, parallelDesc, flowType, ntype, seq, timeout})
+				nodesRows.Scan(&nid, &target, &depsStr, &parallelDesc, &seq, &timeout, &flowType, &ntype, &title, &shortTitle)
+				scriptNodes = append(scriptNodes, nodeLite{nid, target, depsStr, parallelDesc, flowType, ntype, title, shortTitle, seq, timeout})
 			}
 			nodesRows.Close()
 		}
@@ -318,8 +319,16 @@ func MonitorContentHandler(database *db.DB) gin.HandlerFunc {
 				timeStr = timeStr[5:16]
 			}
 
+			displayName := n.title
+			if strings.TrimSpace(displayName) == "" {
+				displayName = n.target
+			}
+			displayShort := strings.TrimSpace(n.shortTitle)
+			if displayShort == "" {
+				displayShort = displayName
+			}
 			item := gin.H{
-				"id": n.id, "seq": n.seq, "name": n.target, "shortTitle": n.target,
+				"id": n.id, "seq": n.seq, "name": displayName, "shortTitle": displayShort,
 				"role": n.target, "time": timeStr, "state": state, "isOverdue": isOverdue,
 				"timeout": n.timeout, "deps": parseDepsGo(n.depsStr), "type": n.ntype,
 				"parallelDesc": n.parallelDesc,

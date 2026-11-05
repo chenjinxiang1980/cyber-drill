@@ -19,8 +19,12 @@ const (
 	ReceiverErrPenaltyRatio = 0.30
 	// TimeoutPenaltyRatio 超时完成：扣本节点分值的 20%
 	TimeoutPenaltyRatio = 0.20
-	// QualityRatio 绑定表单模板的节点：从节点分中划出 20% 作为处置质量分
-	QualityRatio = 0.20
+	// KeywordHitPenaltyRatio 处置关键词命中少于 KeywordMinHits 个：扣本节点分值的 30%
+	KeywordHitPenaltyRatio = 0.30
+	// KeywordMinHits 关键词命中下限（评审口径：execute ≥2 keywords）
+	KeywordMinHits = 2
+	// EvidencePenaltyRatio 节点 evidence_req 未提交或未命中：扣本节点分值的 20%
+	EvidencePenaltyRatio = 0.20
 	// NodeMaxPenaltyRatio 单节点合计扣减上限（占节点分值），避免一次错误把节点分扣成负数
 	NodeMaxPenaltyRatio = 0.80
 )
@@ -171,49 +175,149 @@ func joinFieldDisplays(fields []formRequiredField) string {
 	return strings.Join(names, "、")
 }
 
-// qualityParts 计算处置质量扣分（节点分内部 20% 按必填齐全度比例扣减）
-func qualityParts(nodeScore int, formsJSON string, req []formRequiredField) ([]scoreDeductPart, int, int) {
-	total := 0
-	for _, f := range req {
-		if f.Required {
-			total++
-		}
-	}
-	if total == 0 || nodeScore <= 0 {
-		return nil, 0, 0
-	}
-	missing := missingRequiredFields(formsJSON, req)
-	if len(missing) == 0 {
-		return nil, 0, total
-	}
-	ratio := QualityRatio * float64(len(missing)) / float64(total)
-	d := math.Round(float64(nodeScore)*ratio*10) / 10
-	if d <= 0 {
-		return nil, len(missing), total
-	}
-	return []scoreDeductPart{{
-		Type: "处置质量不足（必填 " + strconv.Itoa(total-len(missing)) + "/" + strconv.Itoa(total) +
-			" 齐全，缺 " + strconv.Itoa(len(missing)) + " 项）（扣本节点 20% 内按比例）",
-		Point: d,
-	}}, len(missing), total
+// ========== 处置质量：关键词命中 + 证据要求（评审原文口径） ==========
+
+// submissionQuality 一次处置提交的文本证据（实战版结算用；基础版无提交文本，HasSubmission=false）
+type submissionQuality struct {
+	Late         bool
+	RecvBad      bool
+	HasSubmission bool
+	// Text 全部可检索文本：处置措施、处置结果、发现情况、证据说明、表单值
+	Text         string
+	// EvidenceText 单独的「证据材料说明」字段（判断是否提交证据）
+	EvidenceText string
+	Keywords     []string
+	EvidenceReq  string
 }
 
-// correctNodeDeduction 正确节点（已提交）的统一扣分口径，Score() 与提交写库共用
-func correctNodeDeduction(nodeScore int, late bool, recvBad bool, formsJSON string, req []formRequiredField) (float64, []scoreDeductPart) {
+func splitReqTokens(s string) []string {
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return strings.ContainsRune("、,，;；|｜/", r)
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// keywordHitCount 统计处置文本命中的关键词个数
+func keywordHitCount(keywords []string, text string) int {
+	hits := 0
+	for _, kw := range splitReqTokens(strings.Join(keywords, "、")) {
+		if len([]rune(kw)) < 2 {
+			continue
+		}
+		if strings.Contains(text, kw) {
+			hits++
+		}
+	}
+	return hits
+}
+
+// formValuesText 仅拼接表单「值」（排除字段名，避免字段标签本身命中关键词/证据要求）
+func formValuesText(formsJSON string) string {
+	var m map[string]any
+	if strings.TrimSpace(formsJSON) == "" || json.Unmarshal([]byte(formsJSON), &m) != nil {
+		return ""
+	}
+	vals := make([]string, 0, len(m))
+	for _, v := range m {
+		if s := formValueString(v); s != "" {
+			vals = append(vals, s)
+		}
+	}
+	return strings.Join(vals, "\n")
+}
+
+// evidenceReqTokens 解析 evidence_req：
+// 现网为 JSON 数组（元素含 name/note），也兼容逗号分隔纯文本；取每个材料的名称作为检索项。
+func evidenceReqTokens(req string) []string {
+	req = strings.TrimSpace(req)
+	if req == "" {
+		return nil
+	}
+	var arr []any
+	if json.Unmarshal([]byte(req), &arr) == nil {
+		tokens := make([]string, 0, len(arr))
+		for _, x := range arr {
+			switch v := x.(type) {
+			case string:
+				tokens = append(tokens, splitReqTokens(v)...)
+			case map[string]any:
+				if name, _ := v["name"].(string); strings.TrimSpace(name) != "" {
+					tokens = append(tokens, strings.TrimSpace(name))
+				}
+			}
+		}
+		return tokens
+	}
+	return splitReqTokens(req)
+}
+
+// evidenceRequirementHit evidence_req 的任一材料名称在处置文本中出现即视为命中
+func evidenceRequirementHit(req string, text string) bool {
+	for _, token := range evidenceReqTokens(req) {
+		if len([]rune(token)) < 2 {
+			continue
+		}
+		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	return false
+}
+
+// correctNodeDeduction 正确节点（已提交）的统一扣分口径，Score() 与提交写库共用。
+// 超时 20% / 接收人 30% / 关键词命中不足 30% / 证据未提交或未命中 20%，单节点合计上限 80%。
+func correctNodeDeduction(nodeScore int, q submissionQuality) (float64, []scoreDeductPart) {
 	var parts []scoreDeductPart
-	if late {
-		parts = append(parts, scoreDeductPart{Type: "超时完成（扣20%）", Point: ratioDeduct(nodeScore, TimeoutPenaltyRatio)})
+	if q.Late {
+		parts = append(parts, scoreDeductPart{Type: "超时完成（扣本节点20%）", Point: ratioDeduct(nodeScore, TimeoutPenaltyRatio)})
 	}
-	if recvBad {
-		parts = append(parts, scoreDeductPart{Type: "接收人选择错误（扣30%）", Point: ratioDeduct(nodeScore, ReceiverErrPenaltyRatio)})
+	if q.RecvBad {
+		parts = append(parts, scoreDeductPart{Type: "接收人选择错误（扣本节点30%）", Point: ratioDeduct(nodeScore, ReceiverErrPenaltyRatio)})
 	}
-	if qp, _, _ := qualityParts(nodeScore, formsJSON, req); len(qp) > 0 {
-		parts = append(parts, qp...)
+	if q.HasSubmission {
+		kwTotal := len(splitReqTokens(strings.Join(q.Keywords, "、")))
+		if kwTotal > 0 && len(q.Text) > 0 {
+			threshold := KeywordMinHits
+			if kwTotal < threshold {
+				threshold = kwTotal
+			}
+			hits := keywordHitCount(q.Keywords, q.Text)
+			if hits < threshold {
+				parts = append(parts, scoreDeductPart{
+					Type: "处置关键词命中不足（命中 " + strconv.Itoa(hits) + "/" + strconv.Itoa(threshold) + " 个，扣本节点30%）",
+					Point: ratioDeduct(nodeScore, KeywordHitPenaltyRatio),
+				})
+			}
+		}
+		if req := strings.TrimSpace(q.EvidenceReq); req != "" {
+			missingEvidence := strings.TrimSpace(q.EvidenceText) == ""
+			if !missingEvidence && !evidenceRequirementHit(req, q.Text) {
+				missingEvidence = true
+			}
+			if missingEvidence {
+				parts = append(parts, scoreDeductPart{
+					Type:  "证据材料未提交或未命中要求（扣本节点20%）",
+					Point: ratioDeduct(nodeScore, EvidencePenaltyRatio),
+				})
+			}
+		}
 	}
 	parts = capNodeParts(parts, nodeScore)
+	kept := parts[:0]
 	total := 0.0
 	for _, p := range parts {
+		if p.Point <= 0 {
+			continue
+		}
+		kept = append(kept, p)
 		total += p.Point
 	}
-	return total, parts
+	return total, kept
 }

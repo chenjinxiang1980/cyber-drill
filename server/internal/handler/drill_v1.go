@@ -43,6 +43,8 @@ type drillV1Node struct {
 	ReleaseTiming string
 	Action        string
 	Desc          string
+	Keywords      []string
+	EvidenceReq   string
 	Required      bool
 }
 
@@ -73,7 +75,8 @@ func drillV1NodesOf(database *db.DB, scenarioID string) []drillV1Node {
 	rows, err := database.Query(
 		`SELECT id,type,title,COALESCE(target,''),COALESCE(timeout,0),COALESCE(form,''),
 			COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(receiver,''),COALESCE(deps,'[]'),
-			COALESCE(anchor_id,''),COALESCE(release_timing,'before'),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),COALESCE(required,1)
+			COALESCE(anchor_id,''),COALESCE(release_timing,'before'),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),
+			COALESCE(keywords,''),COALESCE(evidence_req,''),COALESCE(required,1)
 		 FROM script_nodes WHERE scenario_id=? ORDER BY seq`, scenarioID)
 	if err != nil {
 		return nil
@@ -83,12 +86,17 @@ func drillV1NodesOf(database *db.DB, scenarioID string) []drillV1Node {
 	var out []drillV1Node
 	for rows.Next() {
 		var n drillV1Node
-		var depsStr string
+		var depsStr, keywords string
 		var required int
 		if err := rows.Scan(&n.ID, &n.Type, &n.Title, &n.Target, &n.Timeout, &n.Form,
 			&n.FlowType, &n.Score, &n.Receiver, &depsStr, &n.AnchorID, &n.ReleaseTiming,
-			&n.Action, &n.Desc, &required); err != nil {
+			&n.Action, &n.Desc, &keywords, &n.EvidenceReq, &required); err != nil {
 			continue
+		}
+		for _, kw := range strings.Split(keywords, ",") {
+			if kw = strings.TrimSpace(kw); kw != "" {
+				n.Keywords = append(n.Keywords, kw)
+			}
 		}
 		if strings.EqualFold(n.FlowType, "distractor") {
 			n.FlowType = "distractor"
@@ -494,20 +502,20 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		nowS := timeNowSec()
 		ontime := !isLateV1(p, node)
 
-		// delta（与 Score() 同一口径：超时 20% / 接收人 30% / 处置质量 20% 内按必填齐全度）
+		// delta（与 Score() 同一口径：超时 20% / 接收人 30% / 关键词命中不足 30% / 证据未提交或未命中 20%）
 		var delta float64
-		var qualityDeduct float64
+		var parts []scoreDeductPart
 		if !isCorrect {
 			delta = -float64(node.Score)
 		} else {
-			deduct, _ := correctNodeDeduction(node.Score, !ontime, receiverOk == 0, formsJSON, reqFields)
+			q := submissionQuality{
+				Late: !ontime, RecvBad: receiverOk == 0, HasSubmission: true,
+				Text: strings.Join([]string{measure, result, found, evidence, formValuesText(formsJSON)}, "\n"),
+				EvidenceText: evidence, Keywords: node.Keywords, EvidenceReq: node.EvidenceReq,
+			}
+			deduct, ps := correctNodeDeduction(node.Score, q)
+			parts = ps
 			delta = -deduct
-			if delta == 0 {
-				delta = 0
-			}
-			if qp, _, _ := qualityParts(node.Score, formsJSON, reqFields); len(qp) > 0 {
-				qualityDeduct = qp[0].Point
-			}
 		}
 
 		// 截断 descr
@@ -560,15 +568,11 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		if !isCorrect {
 			detail += "；执行混淆流程，扣分 " + fmt.Sprintf("%.1f", math.Abs(delta)) + " 分"
 		} else {
-			detail += "；无扣分"
-			if !ontime {
-				detail += "（超时扣 20%）"
+			if len(parts) == 0 {
+				detail += "；无扣分"
 			}
-			if receiverOk == 0 {
-				detail += "；下一节点接收人选择错误（扣 30%）"
-			}
-			if qualityDeduct > 0 {
-				detail += "；处置质量不足（扣 " + fmt.Sprintf("%.1f", qualityDeduct) + " 分）"
+			for _, p := range parts {
+				detail += "；" + p.Type + "，扣 " + fmt.Sprintf("%.1f", p.Point) + " 分"
 			}
 		}
 		_, _ = database.Exec(
@@ -598,11 +602,10 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		if isCorrect {
 			correctText = "正确流程，" + deductText
 		}
-		if isCorrect && receiverOk == 0 {
-			correctText += "（接收人选择错误，扣30%）"
-		}
-		if isCorrect && qualityDeduct > 0 {
-			correctText += "；处置质量扣 " + fmt.Sprintf("%.1f", qualityDeduct) + " 分"
+		if isCorrect {
+			for _, p := range parts {
+				correctText += "；" + p.Type
+			}
 		}
 		correctText += "；当前累计得分 " + fmt.Sprint(scScore) + " 分"
 		lvl := "P1"

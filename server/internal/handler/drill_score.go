@@ -85,6 +85,7 @@ type ScriptNodeForScore struct {
 	AnchorID     string
 	ReleaseTiming string
 	Keywords     []string
+	EvidenceReq  string
 	Action       string
 	Desc         string
 	Guide        string
@@ -109,6 +110,10 @@ type DrillStepForScore struct {
 	RoleID       string
 	User         string
 	Forms        string
+	Measure      string
+	Result       string
+	Found        string
+	Evidence     string
 }
 
 // ProjectForScore score() 内部使用的项目轻量结构
@@ -149,7 +154,7 @@ func loadNodesForScore(database *db.DB, scenarioID string) []ScriptNodeForScore 
 	rows, err := database.Query(`SELECT id,type,title,COALESCE(target,''),COALESCE(timeout,0),COALESCE(form,''),
 		COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(receiver,''),COALESCE(deps,'[]'),
 		COALESCE(anchor_id,''),COALESCE(release_timing,'before'),
-		COALESCE(keywords,''),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),COALESCE(guide,''),
+		COALESCE(keywords,''),COALESCE(evidence_req,''),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),COALESCE(guide,''),
 		COALESCE(wrong,'[]'),COALESCE(required,1)
 		FROM script_nodes WHERE scenario_id=? ORDER BY seq`, scenarioID)
 	if err != nil {
@@ -164,7 +169,7 @@ func loadNodesForScore(database *db.DB, scenarioID string) []ScriptNodeForScore 
 		var required int
 		if err := rows.Scan(&n.ID, &n.Type, &n.Title, &n.Target, &n.Timeout, &n.Form,
 			&n.FlowType, &n.Score, &n.Receiver, &depsStr, &n.AnchorID, &n.ReleaseTiming,
-			&keywords, &n.Action, &n.Desc, &n.Guide, &wrongStr, &required); err != nil {
+			&keywords, &n.EvidenceReq, &n.Action, &n.Desc, &n.Guide, &wrongStr, &required); err != nil {
 			continue
 		}
 		if strings.EqualFold(n.FlowType, "distractor") {
@@ -179,7 +184,11 @@ func loadNodesForScore(database *db.DB, scenarioID string) []ScriptNodeForScore 
 			_ = json.Unmarshal([]byte(wrongStr), &n.Wrong)
 		}
 		if strings.TrimSpace(keywords) != "" {
-			n.Keywords = strings.Split(keywords, ",")
+			for _, kw := range strings.Split(keywords, ",") {
+				if kw = strings.TrimSpace(kw); kw != "" {
+					n.Keywords = append(n.Keywords, kw)
+				}
+			}
 		}
 		n.Required = required == 1
 		out = append(out, n)
@@ -190,7 +199,8 @@ func loadNodesForScore(database *db.DB, scenarioID string) []ScriptNodeForScore 
 func loadStepsForScore(database *db.DB, projectID string) []DrillStepForScore {
 	rows, err := database.Query(`SELECT id,matched_node,correct,ontime,skipped,
 		COALESCE(receiver,''),COALESCE(receiver_ok,1),COALESCE(step_time,''),COALESCE(created_at,''),
-		COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(role_id,''),COALESCE(user,''),COALESCE(forms,'')
+		COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(role_id,''),COALESCE(user,''),COALESCE(forms,''),
+		COALESCE(measure,''),COALESCE(result,''),COALESCE(found,''),COALESCE(evidence,'')
 		FROM drill_steps WHERE project_id=? ORDER BY step_time,id`, projectID)
 	if err != nil {
 		return nil
@@ -202,7 +212,8 @@ func loadStepsForScore(database *db.DB, projectID string) []DrillStepForScore {
 		var s DrillStepForScore
 		if err := rows.Scan(&s.ID, &s.MatchedNode, &s.Correct, &s.Ontime, &s.Skipped,
 			&s.Receiver, &s.ReceiverOK, &s.StepTime, &s.CreatedAt,
-			&s.FlowType, &s.Score, &s.RoleID, &s.User, &s.Forms); err != nil {
+			&s.FlowType, &s.Score, &s.RoleID, &s.User, &s.Forms,
+			&s.Measure, &s.Result, &s.Found, &s.Evidence); err != nil {
 			continue
 		}
 		out = append(out, s)
@@ -449,21 +460,6 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 
 	tasks := loadTasksForScore(database, projectID)
 
-	// 表单必填字段按模板懒加载（处置质量分与服务端强校验共用）
-	formReqCache := make(map[string][]formRequiredField)
-	getFormReq := func(formID string) []formRequiredField {
-		formID = strings.TrimSpace(formID)
-		if formID == "" {
-			return nil
-		}
-		if v, ok := formReqCache[formID]; ok {
-			return v
-		}
-		v := loadFormRequiredFields(database, formID)
-		formReqCache[formID] = v
-		return v
-	}
-
 	// correct ID 集合（用于 matchNode）
 	correctIDs := make(map[string]bool)
 	for _, n := range correct {
@@ -575,7 +571,8 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	deductions := []Deduction{}
 	skippedCorrect := 0
 	skippedDistract := 0
-	qualityMissCnt := 0
+	keywordMissCnt := 0
+	evidenceMissCnt := 0
 
 	// 正确流程节点
 	for _, n := range correct {
@@ -615,23 +612,28 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 
 		if hasHit {
 			var recvBad bool
-			var formsJSON string
+			lateHit, _ := hit["late"].(bool)
+			q := submissionQuality{Late: lateHit, Keywords: n.Keywords, EvidenceReq: n.EvidenceReq}
 			if step, ok := hit["step"].(DrillStepForScore); ok {
 				recvBad = step.ReceiverOK == 0
-				formsJSON = step.Forms
+				q.HasSubmission = true
+				q.RecvBad = recvBad
+				q.EvidenceText = step.Evidence
+				q.Text = strings.Join([]string{step.Measure, step.Result, step.Found, step.Evidence, formValuesText(step.Forms)}, "\n")
 			}
-			lateHit, _ := hit["late"].(bool)
-			req := getFormReq(n.Form)
-			// 超时 20% / 接收人错误 30% / 处置质量（节点分内部 20% 按必填齐全度），单节点合计上限 80%
-			deduct, parts := correctNodeDeduction(sc, lateHit, recvBad, formsJSON, req)
+			// 超时 20% / 接收人错误 30% / 关键词命中不足 30% / 证据未提交或未命中 20%，单节点合计上限 80%
+			deduct, parts := correctNodeDeduction(sc, q)
 			for _, p := range parts {
 				deductions = append(deductions, Deduction{
 					NodeID: n.ID, Title: n.Title,
 					Type: p.Type, Point: -p.Point,
 				})
-			}
-			if _, miss, _ := qualityParts(sc, formsJSON, req); miss > 0 {
-				qualityMissCnt += miss
+				if strings.HasPrefix(p.Type, "处置关键词命中不足") {
+					keywordMissCnt++
+				}
+				if strings.HasPrefix(p.Type, "证据材料未提交") {
+					evidenceMissCnt++
+				}
 			}
 			earned -= deduct
 			stepTime, _ := hit["stepTime"].(string)
@@ -827,8 +829,11 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	if wrongCnt > 0 {
 		formula += fmt.Sprintf("，执行混淆流程 %d 项", wrongCnt)
 	}
-	if qualityMissCnt > 0 {
-		formula += fmt.Sprintf("，处置质量必填项缺失 %d 项（本节点 20%% 内按缺失比例扣减）", qualityMissCnt)
+	if keywordMissCnt > 0 {
+		formula += fmt.Sprintf("，处置关键词命中不足 %d 项（每项扣本节点 30%%）", keywordMissCnt)
+	}
+	if evidenceMissCnt > 0 {
+		formula += fmt.Sprintf("，证据材料未提交或未命中 %d 项（每项扣本节点 20%%）", evidenceMissCnt)
 	}
 	if forceView {
 		formula += "，演练中强制查看脚本 1 次（扣 10 分）"
