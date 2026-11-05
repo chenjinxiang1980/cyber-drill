@@ -50,9 +50,14 @@ RUN mkdir -p /opt/drill/bin \
 
 WORKDIR /opt/drill
 
-# ELF（已交叉编译好）
-COPY dist_local/drill-server  /opt/drill/bin/drill-server
-COPY dist_local/drill-migrate /opt/drill/bin/drill-migrate
+# ELF（已交叉编译好）—— dist_local 目录必须存在，其中 drill-server 必需；
+# drill-migrate / drill-seed 存在则打包，缺失则跳过（entrypoint 会 warn 后继续启动）。
+# 本地可直接用 scripts/build-linux.ps1 一次性产出三个二进制到 server/deploy-linux/。
+COPY dist_local/ /tmp/dist/
+RUN cp /tmp/dist/drill-server /opt/drill/bin/drill-server \
+ && (test -f /tmp/dist/drill-migrate && cp /tmp/dist/drill-migrate /opt/drill/bin/drill-migrate || true) \
+ && (test -f /tmp/dist/drill-seed    && cp /tmp/dist/drill-seed    /opt/drill/bin/drill-seed    || true) \
+ && rm -rf /tmp/dist
 
 # 静态资源 + 迁移脚本
 COPY public/          /opt/drill/public/
@@ -61,10 +66,11 @@ COPY migrations/      /opt/drill/migrations/
 # entrypoint
 COPY deploy/docker-dist/docker-entrypoint.sh /opt/drill/docker-entrypoint.sh
 
-# 权限
+# 权限 + 可选二进制存在性保护（缺 migrate/seed 不影响 server 运行，entrypoint 会跳过）
 RUN chown -R drill:drill /opt/drill \
  && chmod 755 /opt/drill/bin/drill-server \
- && chmod 755 /opt/drill/bin/drill-migrate \
+ && (test -f /opt/drill/bin/drill-migrate && chmod 755 /opt/drill/bin/drill-migrate || true) \
+ && (test -f /opt/drill/bin/drill-seed    && chmod 755 /opt/drill/bin/drill-seed    || true) \
  && chmod 755 /opt/drill/docker-entrypoint.sh \
  && chmod 644 /opt/drill/public/*           2>/dev/null || true \
  && chmod 644 /opt/drill/public/img/*       2>/dev/null || true \
@@ -82,5 +88,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 USER drill:drill
 
+# tini 作为 init：正确转发 SIGTERM 给子进程
+# entrypoint.sh 等 MySQL → 跑 migrations（若 migrate 存在）→ exec drill-server
 ENTRYPOINT ["/sbin/tini", "--", "/opt/drill/docker-entrypoint.sh"]
 CMD ["/opt/drill/bin/drill-server", "-root=/opt/drill"]

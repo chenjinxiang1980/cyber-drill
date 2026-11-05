@@ -5,6 +5,8 @@
 .DESCRIPTION
     - 交叉编译 server -> server\deploy-linux\drill-server
       GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath
+    - 同时交叉编译 drill-migrate / drill-seed 到 server\deploy-linux\（供
+      Dockerfile.runtime 的 dist_local 一次取齐，避免缺文件导致构建失败）
     - 构建成功后重写 server\deploy-linux\drill-server.sha256.txt（沿用现有 9 行格式）：
         L1 标题 / L2 构建时间（取二进制 mtime）/ L3 构建方式
         L4 源码状态        （保留原文）
@@ -50,6 +52,15 @@ if (-not $SignOnly) {
         $env:CGO_ENABLED = "0"
         go build -trimpath -o $elfPath .
         $rc = $LASTEXITCODE
+        if ($rc -eq 0) {
+            Write-Host "[build-linux] go build drill-migrate / drill-seed ..." -ForegroundColor Yellow
+            go build -trimpath -ldflags "-s -w" -o (Join-Path $outDir "drill-migrate") ./cmd/migrate
+            if ($LASTEXITCODE -ne 0) { $rc = $LASTEXITCODE }
+        }
+        if ($rc -eq 0) {
+            go build -trimpath -ldflags "-s -w" -o (Join-Path $outDir "drill-seed") ./cmd/seed
+            if ($LASTEXITCODE -ne 0) { $rc = $LASTEXITCODE }
+        }
     } finally {
         Pop-Location
         Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED -ErrorAction SilentlyContinue
