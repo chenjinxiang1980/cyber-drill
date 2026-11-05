@@ -16,6 +16,8 @@ Dockerfile.* text eol=lf
 *.yaml text eol=lf
 *.mod text eol=lf
 *.sum text eol=lf
+# 发布签名文件必须保持 LF（9 行校验格式）
+*.sha256.txt text eol=lf
 
 # Windows 侧脚本保持 CRLF
 *.ps1 text eol=crlf
