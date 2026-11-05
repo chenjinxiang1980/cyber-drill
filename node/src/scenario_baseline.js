@@ -24,7 +24,7 @@ SCEN['S01'] = {
     short_title: "终端告警",
     target: "信息科值班员",
     timeout: 10,
-    keywords: "勒索,加密,告警",
+    keywords: "勒索,加密扩展名,共享盘,勒索信",
     action: "告警核实",
     required: true,
     score: 0,
@@ -32,16 +32,19 @@ SCEN['S01'] = {
     receiver: "信息科值班员、网络安全管理员、数据安全管理员",
     posX: 239,
     posY: 670,
+    descr: "监控平台 09:05 告警：门诊 3 台工作站与共享盘文件被改为 .locked，桌面出现勒索信，仍有终端在加密。",
+    guide: "先看告警时间、终端分布与共享目录写入；不要重启或重装主机。",
+    evidence_req: [{"type":"附件截图","name":"告警/监控界面截图","note":"含告警时间、终端名与加密扩展名"},{"type":"处置记录","name":"受影响终端初步清单","note":"含主机名、科室、当前状态"}]
   },
   {
     id: "S01-2",
     type: "parallel",
-    title: "核实感染范围与受影响主机",
+    title: "10 分钟内拉出受影响终端清单",
     short_title: "核实影响范围",
     target: "信息科值班员",
     timeout: 10,
     form: "F1",
-    keywords: "核实,感染主机,范围",
+    keywords: "终端清单,网段,仍在加密,受影响主机",
     action: "告警核实",
     required: true,
     score: 7,
@@ -49,6 +52,9 @@ SCEN['S01'] = {
     receiver: "系统管理员",
     posX: 536,
     posY: 489,
+    descr: "按网段与科室拉清单，分已加密、疑似、正常三类，标出仍在加密的主机，报系统管理员。",
+    guide: "先查共享目录访问告警，再逐网段核对主机名与科室；清单要能定位到人。",
+    evidence_req: [{"type":"处置记录","name":"受影响终端清单","note":"含主机名、科室、已加密/疑似/正常"},{"type":"附件截图","name":"共享目录访问告警截图","note":"含最近写入时间"}]
   },
   {
     id: "S01-3",
@@ -57,8 +63,8 @@ SCEN['S01'] = {
     short_title: "隔离感染主机",
     target: "网络安全管理员",
     timeout: 15,
-    form: "F9",
-    keywords: "隔离,断网,封堵,共享",
+    form: "F10",
+    keywords: "共享目录,ACL,核心服务器,隔离清单",
     action: "隔离处置",
     required: true,
     score: 7,
@@ -66,16 +72,19 @@ SCEN['S01'] = {
     receiver: "系统管理员",
     posX: 536,
     posY: 657,
+    descr: "先关闭共享目录写入，再隔离已加密与高置信主机；HIS/EMR 核心服务器只做 ACL 降权，不直接断网。",
+    guide: "隔离前记录 IP、MAC 与交换机端口；核心服务器变更双人复核并留操作日志。",
+    evidence_req: [{"type":"处置记录","name":"隔离主机清单","note":"含 IP、MAC、交换机端口与隔离方式"},{"type":"操作日志","name":"网络设备/防火墙操作日志","note":"含 ACL 变更时间与执行人"}]
   },
   {
     id: "S01-4",
     type: "parallel",
-    title: "检查数据备份可用性",
+    title: "核对恢复点并抽验备份可读",
     short_title: "数据备份校验",
     target: "数据安全管理员",
     timeout: 15,
-    form: "F9",
-    keywords: "备份,可用性,检查",
+    form: "F11",
+    keywords: "恢复点,RPO,可读性,备份校验",
     action: "告警核实",
     required: true,
     score: 7,
@@ -83,6 +92,9 @@ SCEN['S01'] = {
     receiver: "系统管理员",
     posX: 536,
     posY: 828,
+    descr: "核对最近 3 个恢复点时间与大小，确认 RPO；抽 1 个非核心库验证可读，登记不可用备份。",
+    guide: "先看备份完成时间与容量，再抽验表结构可读；不在生产库做覆盖恢复。",
+    evidence_req: [{"type":"处置记录","name":"备份校验记录","note":"含恢复点时间、抽验库名与结论"},{"type":"附件截图","name":"备份任务状态截图","note":"含最近 3 次备份完成时间"}]
   },
   {
     id: "S01-5",
@@ -92,7 +104,7 @@ SCEN['S01'] = {
     target: "系统管理员",
     timeout: 15,
     form: "F3",
-    keywords: "研判,分级,重大,Ⅱ级",
+    keywords: "定级依据,患者安全,扩散趋势,Ⅱ级",
     action: "研判分级",
     required: true,
     score: 7,
@@ -100,6 +112,9 @@ SCEN['S01'] = {
     receiver: "信息科负责人",
     posX: 841,
     posY: 656,
+    descr: "汇总核实、隔离、备份三路结果，按预案条款比对影响系统、患者安全、数据量与扩散趋势，形成重大（Ⅱ级）意见。",
+    guide: "先列事实再对条款；每条定级依据注明来源节点与时间，报信息科负责人。",
+    evidence_req: [{"type":"表单文书","name":"定级意见","note":"含四类依据与建议等级"},{"type":"处置记录","name":"影响评估记录","note":"含系统、科室、患者安全影响"}]
   },
   {
     id: "S01-6",
@@ -109,7 +124,7 @@ SCEN['S01'] = {
     target: "信息科负责人",
     timeout: 10,
     form: "F4",
-    keywords: "报告,启动,预案,上报",
+    keywords: "简报,启动建议,Ⅱ级",
     action: "上报审批",
     required: true,
     score: 6,
@@ -117,6 +132,9 @@ SCEN['S01'] = {
     receiver: "院应急指挥部",
     posX: 1124,
     posY: 645,
+    descr: "10 分钟内出一页简报：事件、影响、已采取措施、请求启动Ⅱ级；口头先报，书面随后，不等外部回复。",
+    guide: "先报结论与请求，再报依据；写明需指挥部批准的事项。",
+    evidence_req: [{"type":"上报材料","name":"上报材料/审批记录","note":"含报送时间与口头报告对象"},{"type":"表单文书","name":"启动申请单","note":"含事件摘要、建议等级与申请部门"}]
   },
   {
     id: "S01-7",
@@ -126,7 +144,7 @@ SCEN['S01'] = {
     target: "院应急指挥部",
     timeout: 10,
     form: "F9",
-    keywords: "启动,响应,Ⅱ级,指挥部",
+    keywords: "启动令,授权范围,响应级别,启动时间",
     action: "启动预案",
     required: true,
     score: 6,
@@ -134,6 +152,9 @@ SCEN['S01'] = {
     receiver: "信息科负责人、医务处、网络安全管理员、系统管理员",
     posX: 1418,
     posY: 657,
+    descr: "批准启动Ⅱ级：明确响应级别、启动时间、授权范围（停机、断网、数据恢复、对外上报），形成启动令。",
+    guide: "先确认定级依据齐全，再批授权范围；启动时间以指令下达时刻为准并通知到岗。",
+    evidence_req: [{"type":"表单文书","name":"Ⅱ级响应启动令","note":"含批准人、启动时间与授权范围"},{"type":"处置记录","name":"通知到岗记录","note":"含通知对象与时间"}]
   },
   {
     id: "S01-8",
@@ -143,7 +164,7 @@ SCEN['S01'] = {
     target: "信息科负责人",
     timeout: 15,
     form: "F2",
-    keywords: "上报,网信,1小时",
+    keywords: "双报,时限,回执,1小时",
     action: "上报审批",
     required: true,
     score: 6,
@@ -151,6 +172,9 @@ SCEN['S01'] = {
     receiver: "市卫生健康局、市网信办",
     posX: 1712,
     posY: 381,
+    descr: "同一时点向市卫生健康局与市网信办双报，不等回复；重大事件按 1 小时内时限，先电话后书面。",
+    guide: "备齐事件、影响、已采取措施三要素；分别记录报送时间、接收人与回执。",
+    evidence_req: [{"type":"上报材料","name":"上报回执","note":"两个接收单位各一份，含时间与接收人"},{"type":"表单文书","name":"网络安全事件上报表","note":"含上报对象与时限依据"}]
   },
   {
     id: "S01-10",
@@ -160,7 +184,7 @@ SCEN['S01'] = {
     target: "医务处",
     timeout: 25,
     form: "F9",
-    keywords: "兜底,纸质,手工,六大环节",
+    keywords: "手工兜底,单据号段,回退,四项",
     action: "业务兜底",
     required: true,
     score: 6,
@@ -168,6 +192,9 @@ SCEN['S01'] = {
     receiver: "院应急指挥部",
     posX: 1711,
     posY: 722,
+    descr: "先切挂号收费、门诊医嘱、发药、检验申请四项手工流程，再扩展；明确责任人、单据号段与回退条件。",
+    guide: "先保患者安全与资金流向，再保查询统计；每项切换留存纸质单据样例。",
+    evidence_req: [{"type":"处置记录","name":"兜底启动记录","note":"含四项流程、责任人、启动时间"},{"type":"附件","name":"手工单据样例","note":"含号段与填写示例"}]
   },
   {
     id: "S01-9",
@@ -176,7 +203,7 @@ SCEN['S01'] = {
     short_title: "固定证据",
     target: "网络安全管理员",
     timeout: 20,
-    keywords: "取证,样本,日志,证据",
+    keywords: "内存镜像,样本,哈希,日志",
     action: "取证留痕",
     required: true,
     score: 6,
@@ -184,6 +211,9 @@ SCEN['S01'] = {
     receiver: "院应急指挥部",
     posX: 1711,
     posY: 549,
+    descr: "隔离后、恢复前完成内存镜像、样本与勒索信提取、登录与共享访问日志导出，生成 SHA-256 清单。",
+    guide: "先保全易失证据再动磁盘；每份证据先算哈希再复制，未经批准不得重启或重装。",
+    evidence_req: [{"type":"样本摘要","name":"样本/日志摘要归档","note":"含样本名称、来源主机与提取时间"},{"type":"附件","name":"哈希清单与取证材料","note":"含 SHA-256 与备份副本比对结果"}]
   },
   {
     id: "S01-11",
@@ -193,14 +223,17 @@ SCEN['S01'] = {
     target: "系统管理员",
     timeout: 30,
     form: "F7",
-    keywords: "恢复,验证,HIS,备份",
+    keywords: "恢复点,RPO,业务验证,二次加密",
     action: "处置恢复",
     required: true,
     score: 6,
-    deps: ["S01-7"],
+    deps: ["S01-7","S01-9"],
     receiver: "收费窗口",
     posX: 1713,
     posY: 895,
+    descr: "选恢复点→隔离环境恢复→抽 3 条业务用例验证→切换生产；记录 RPO、RTO、未恢复系统与二次加密检查。",
+    guide: "先验备份完整性与哈希，再恢复；验证不通过不得切生产。",
+    evidence_req: [{"type":"处置记录","name":"备份/恢复操作记录","note":"含恢复点、RPO/RTO 与执行人"},{"type":"附件截图","name":"业务验证用例结果","note":"含 3 条用例与通过情况"}]
   },
   {
     id: "S01-12",
@@ -210,7 +243,7 @@ SCEN['S01'] = {
     target: "市卫生健康局",
     timeout: 15,
     form: "F9",
-    keywords: "研判,指导",
+    keywords: "行业指导,响应级别,证据保全,回执",
     action: "研判分级",
     required: true,
     score: 6,
@@ -218,16 +251,19 @@ SCEN['S01'] = {
     receiver: "信息科负责人",
     posX: 1990,
     posY: 314,
+    descr: "接收上报后给出行业处置意见：是否升级响应、是否要求保全证据、上报时限与联系人，形成回执。",
+    guide: "先核对上报材料要素，再给意见；意见要落到责任人与时限。",
+    evidence_req: [{"type":"处置记录","name":"市卫生健康局指导意见回执","note":"含意见要点、联系人与时间"}]
   },
   {
     id: "S01-13",
     type: "parallel",
-    title: "市网信办研判指导",
+    title: "接收市网信办舆情与监管口径指导",
     short_title: "网信研判指导",
     target: "市网信办",
     timeout: 60,
-    form: "F9",
-    keywords: "研判,指导",
+    form: "F6",
+    keywords: "舆情口径,监管要求,复查,回执",
     action: "研判分级",
     required: true,
     score: 6,
@@ -235,6 +271,9 @@ SCEN['S01'] = {
     receiver: "信息科负责人",
     posX: 1991,
     posY: 483,
+    descr: "接收网信办口径指导：对外统一表述、舆情监测要求、是否需监管复查；形成口径回执并转指挥部。",
+    guide: "先确认对外口径与禁用表述，再明确监测频次与复查要求。",
+    evidence_req: [{"type":"处置记录","name":"口径回执","note":"含统一表述、监测要求与复查意见"},{"type":"表单文书","name":"舆情风险研判表","note":"含监测渠道与风险等级"}]
   },
   {
     id: "S01-14",
@@ -244,14 +283,17 @@ SCEN['S01'] = {
     target: "收费窗口",
     timeout: 30,
     form: "F9",
-    keywords: "补录,数据,手工,稽核",
+    keywords: "补录,双人复核,差异,封账",
     action: "处置恢复",
     required: true,
     score: 6,
-    deps: ["S01-11"],
+    deps: ["S01-11","S01-10"],
     receiver: "院应急指挥部",
     posX: 1995,
     posY: 907,
+    descr: "先补当日挂号收费与发药记录，双人复核；差异逐笔登记，限时封账，补录范围与稽核规则留痕。",
+    guide: "先补有资金与药品流向的记录，再补查询类；差异未查清不得封账。",
+    evidence_req: [{"type":"处置记录","name":"补录清单","note":"含补录范围、数量与双人复核签名"},{"type":"附件","name":"差异登记表","note":"含差异单据号、原因与处理结果"}]
   },
   {
     id: "S01-15",
@@ -261,13 +303,17 @@ SCEN['S01'] = {
     target: "信息科负责人",
     timeout: 15,
     form: "F5",
+    keywords: "报案,受理,证据材料,先行",
     action: "上报审批",
     required: true,
     score: 6,
-    deps: ["S01-12","S01-13"],
+    deps: ["S01-8"],
     receiver: "市网安大队",
     posX: 2277,
     posY: 399,
+    descr: "不等待外部研判，先行向市网安大队报案；提交事件经过、受影响系统、已保全证据与联系人。",
+    guide: "先报案再补材料；书面材料与证据清单同步提交，保留受理编号。",
+    evidence_req: [{"type":"表单文书","name":"报案登记表","note":"含事件经过、损失与证据清单"},{"type":"上报材料","name":"受理回执","note":"含受理编号与受理人"}]
   },
   {
     id: "S01-16",
@@ -277,7 +323,7 @@ SCEN['S01'] = {
     target: "市网安大队",
     timeout: 15,
     form: "F9",
-    keywords: "取证,样本,日志,证据",
+    keywords: "受理回执,取证要求,保护现场",
     action: "处置恢复",
     required: true,
     score: 6,
@@ -285,6 +331,9 @@ SCEN['S01'] = {
     receiver: "院应急指挥部",
     posX: 2562,
     posY: 399,
+    descr: "网安大队受理后出具取证要求：保护现场、封存镜像、不得擅自重装；院方按清单配合，非涉案业务可恢复。",
+    guide: "先确认受理编号与取证边界；保护现场不等于全院停机。",
+    evidence_req: [{"type":"上报材料","name":"受理回执","note":"含受理编号与受理人"},{"type":"处置记录","name":"取证要求清单","note":"含保全范围、联系人与时限"}]
   },
   {
     id: "S01-17",
@@ -293,14 +342,18 @@ SCEN['S01'] = {
     short_title: "结束应急状态",
     target: "院应急指挥部",
     timeout: 15,
-    form: "F9",
-    keywords: "结束,终止,响应,指挥部",
+    form: "F8",
+    keywords: "结束条件,二次加密,复盘,闭环",
+    action: "其他",
     required: true,
     score: 6,
     deps: ["S01-14","S01-16"],
     receiver: "院应急指挥部",
     posX: 2892,
     posY: 601,
+    descr: "四项结束条件全部满足后宣布结束：业务恢复、无二次加密、证据固定、上报闭环；解除响应并转复盘。",
+    guide: "逐条核对结束条件并留痕；未满足项写明责任人与完成时限。",
+    evidence_req: [{"type":"表单文书","name":"应急结束审批与反馈单","note":"含四项条件核对结果与批准人"},{"type":"处置记录","name":"整改初稿","note":"含整改项、责任人与时限"}]
   },
   {
     id: "S01-18",
@@ -309,8 +362,7 @@ SCEN['S01'] = {
     short_title: "总结经验教训",
     target: "信息科负责人",
     timeout: 300,
-    form: "F8",
-    keywords: "总结,上报",
+    keywords: "复盘,整改,时限,报告",
     action: "上报审批",
     required: true,
     score: 6,
@@ -318,16 +370,19 @@ SCEN['S01'] = {
     receiver: "院应急指挥部",
     posX: 3197,
     posY: 593,
+    descr: "按时间线复盘处置得失、根因与整改责任，形成总结报告报指挥部与主管部门。",
+    guide: "先还原时间线，再列问题与整改项；每项整改明确责任人与时限。",
+    evidence_req: [{"type":"上报材料","name":"总结报告","note":"含时间线、问题清单与整改计划"}]
   },
   ],
   dist: [
   {
     id: "DSS01-duty-0-1",
     type: "alert",
-    title: "先等 10 分钟观察告警是否自动消失，再考虑召集其他人员应急",
+    title: "先观察 10 分钟，确认告警是否重复出现",
     target: "信息科值班员",
     timeout: 10,
-    guide: "勒索病毒首次加密后常需要手动触发或网络激活，先观望一轮可以排除偶发告警。",
+    keywords: "观察,误报,等待",
     action: "告警核实",
     required: false,
     score: 10,
@@ -335,14 +390,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 519,
     posY: 620,
+    descr: "偶发告警常由采集抖动引起，先观察一轮可排除误报，避免全员空跑；这 10 分钟内加密范围会继续扩大。",
+    guide: "先看告警是否持续、是否同一终端重复上报。",
+    evidence_req: [{"type":"处置记录","name":"观察记录","note":"记录观察时长与告警变化"}]
   },
   {
     id: "DSS01-duty-0-2",
     type: "alert",
-    title: "逐个让各临床科室确认是否系统异常，搜集反馈情况后再处置",
+    title: "按科室逐一确认业务是否异常，汇总后再统一处置",
     target: "信息科值班员",
     timeout: 10,
-    guide: "先横向问同事有没有同样问题，确认是局部还是全局。",
+    keywords: "科室确认,汇总,等待",
     action: "告警核实",
     required: false,
     score: 10,
@@ -350,14 +408,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 519,
     posY: 670,
+    descr: "多科室同时报障才能确认范围，逐个电话核对可避免把单点故障当全院事件；逐个联系约需 20 分钟。",
+    guide: "按科室通讯录逐个确认，收齐反馈再汇总。",
+    evidence_req: [{"type":"处置记录","name":"科室反馈汇总","note":"含联系科室、反馈内容与时间"}]
   },
   {
     id: "DSS01-duty-1-1",
     type: "task",
-    title: "先逐一电话联系各业务科室上报的异常情况",
+    title: "按科室通讯录批量外呼，等反馈齐后再处置",
     target: "信息科值班员",
     timeout: 10,
-    guide: "一线科室最了解自己业务是否中断，让各科室先报一份异常清单。",
+    keywords: "科室外呼,反馈,汇总",
     action: "告警核实",
     required: false,
     score: 10,
@@ -365,14 +426,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 816,
     posY: 439,
+    descr: "一线科室最了解业务是否中断，收齐反馈可避免误判；外呼与回电通常需要 15-20 分钟。",
+    guide: "先收集再汇总，以科室反馈为准。",
+    evidence_req: [{"type":"处置记录","name":"外呼记录","note":"含外呼科室、接通时间与反馈"}]
   },
   {
     id: "DSS01-netsec-1-2",
     type: "task",
-    title: "直接从防火墙日志看横向传播痕迹，确定是否需要进行隔离",
+    title: "只看防火墙日志，不核查终端，判断无需扩大隔离",
     target: "网络安全管理员",
     timeout: 10,
-    guide: "防火墙最清楚内网流量走向，直接从日志能锁定传播路径。",
+    keywords: "边界日志,孤立事件,不扩大",
     action: "告警核实",
     required: false,
     score: 10,
@@ -380,6 +444,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 816,
     posY: 489,
+    descr: "边界日志未见异常外联，可判断加密为孤立终端事件，据此不扩大隔离范围；横向扩散可能已在院内发生，隔离窗口被错过。",
+    guide: "以边界流量为准，终端侧仅做抽样。",
+    evidence_req: [{"type":"操作日志","name":"防火墙日志摘录","note":"含时间范围与过滤条件"}]
   },
   {
     id: "DSS01-netsec-2-1",
@@ -387,7 +454,7 @@ SCEN['S01'] = {
     title: "只隔离已加密的主机，其他疑似被感染主机先观察",
     target: "网络安全管理员",
     timeout: 15,
-    guide: "精准打击已确认的加密终端，避免大范围断网影响正常业务。",
+    keywords: "隔离,断网,封堵,共享",
     action: "隔离处置",
     required: false,
     score: 10,
@@ -395,14 +462,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 816,
     posY: 607,
+    descr: "精准隔离已加密终端，其他疑似主机继续联网观察，避免大范围断网影响门诊；疑似主机可能在此期间继续加密。",
+    guide: "先保业务连续性，疑似主机加密后再追加隔离。",
+    evidence_req: [{"type":"处置记录","name":"已隔离主机清单","note":"含主机、时间与隔离方式"}]
   },
   {
     id: "DSS01-sysadmin-2-2",
     type: "task",
-    title: "先备份主机硬盘镜像再隔离",
+    title: "先对全部主机做整盘镜像，镜像完成后再统一隔离",
     target: "系统管理员",
     timeout: 15,
-    guide: "断网后主机可能无法再访问，先做整盘镜像留作后续溯源。",
+    keywords: "整盘镜像,取证优先,延迟隔离",
     action: "隔离处置",
     required: false,
     score: 10,
@@ -410,14 +480,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 816,
     posY: 657,
+    descr: "整盘镜像可完整保留现场，单机约 1-2 小时；期间主机保持联网以便复制，加密可能继续扩散。",
+    guide: "先镜像后隔离，取证更完整。",
+    evidence_req: [{"type":"处置记录","name":"镜像任务清单","note":"含主机、容量与预计完成时间"}]
   },
   {
     id: "DSS01-datasafe-3-1",
     type: "task",
-    title: "只查最近一次成功备份的时间点和大小，不进行恢复测试确定备份是否可用",
+    title: "核对备份任务成功日志，确认无失败即视为可用",
     target: "数据安全管理员",
     timeout: 15,
-    guide: "先确认备份文件的时间戳和体积，判断是否有可用恢复点。",
+    keywords: "备份日志,成功,可用",
     action: "告警核实",
     required: false,
     score: 10,
@@ -425,6 +498,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 816,
     posY: 778,
+    descr: "备份系统显示最近一次任务成功、体积正常，按惯例可视为可用恢复点，无需再做读取验证。",
+    guide: "先看任务状态与完成时间，再看容量。",
+    evidence_req: [{"type":"处置记录","name":"备份任务日志","note":"含最近一次成功时间与容量"}]
   },
   {
     id: "DSS01-datasafe-3-2",
@@ -432,7 +508,7 @@ SCEN['S01'] = {
     title: "联系数据存储厂商远程协助验证恢复可行性，等待厂商确认",
     target: "数据安全管理员",
     timeout: 15,
-    guide: "备份系统由厂商维护，让厂商工程师协助核查更专业。",
+    keywords: "厂商,远程,等待",
     action: "告警核实",
     required: false,
     score: 10,
@@ -440,14 +516,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 816,
     posY: 828,
+    descr: "备份系统由厂商维护，请厂商远程核查恢复可行性；厂商排期与远程接入通常需要 30-60 分钟。",
+    guide: "等厂商确认更稳妥，避免自行操作出错。",
+    evidence_req: [{"type":"处置记录","name":"厂商沟通记录","note":"含请求时间、接入方式与回复"}]
   },
   {
     id: "DSS01-sysadmin-4-1",
     type: "task",
-    title: "不评估受影响系统，按\"加密主机>30 台 = Ⅱ级\"快速定级",
+    title: "按加密主机数量对照预案阈值，超过 30 台即定Ⅱ级",
     target: "系统管理员",
     timeout: 15,
-    guide: "先快速给出一个判断，后续再根据更多信息细化。",
+    keywords: "阈值,数量,快速定级",
     action: "研判分级",
     required: false,
     score: 10,
@@ -455,14 +534,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1121,
     posY: 606,
+    descr: "预案有现成阈值，先套用可快速定级，后续再补影响评估；阈值口径不覆盖患者安全与数据量。",
+    guide: "先套阈值再补评估。",
+    evidence_req: [{"type":"处置记录","name":"定级草稿","note":"含主机数量与阈值对照"}]
   },
   {
     id: "DSS01-sysadmin-4-2",
     type: "task",
-    title: "直接上报科室负责人按最高等级Ⅰ级响应，确保万无一失",
+    title: "按Ⅰ级先行处置，定级后续再修正",
     target: "系统管理员",
     timeout: 15,
-    guide: "宁高勿低，按最高级启动可以获得最多应急资源支持。",
+    keywords: "过度升级,Ⅰ级,先高后低",
     action: "研判分级",
     required: false,
     score: 10,
@@ -470,6 +552,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1121,
     posY: 656,
+    descr: "宁可高定避免追责，先按Ⅰ级调集资源；过度升级会挤占其他应急资源并触发更高层级审批。",
+    guide: "先高后低更安全。",
+    evidence_req: [{"type":"处置记录","name":"升级申请草稿","note":"含申请等级与理由"}]
   },
   {
     id: "DSS01-itlead-5-1",
@@ -477,7 +562,7 @@ SCEN['S01'] = {
     title: "先在信息科内部对报告内容做一次完整审议再上报",
     target: "信息科负责人",
     timeout: 10,
-    guide: "报告内容要准确、要素齐全，先内部对齐避免前后说法不一。",
+    keywords: "内部审议,统一口径,延迟",
     action: "上报审批",
     required: false,
     score: 10,
@@ -485,14 +570,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1411,
     posY: 608,
+    descr: "报告要素要齐全，科内碰头统一口径约需 30 分钟，可避免被指挥部追问细节。",
+    guide: "先统一意见再上报。",
+    evidence_req: [{"type":"处置记录","name":"内部审议记录","note":"含参会人、意见与耗时"}]
   },
   {
     id: "DSS01-itlead-5-2",
     type: "report",
-    title: "等待系统厂商指导意见到了再报告指挥部",
+    title: "等备份恢复结果出来后再一并上报",
     target: "信息科负责人",
     timeout: 10,
-    guide: "上级部门有更全面的信息和经验，等上级意见到了再给指挥部。",
+    keywords: "等信息,一次上报,延迟",
     action: "上报审批",
     required: false,
     score: 10,
@@ -500,14 +588,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1411,
     posY: 658,
+    descr: "一次报全可避免多次打扰指挥部；等待恢复结果通常需要 30 分钟以上。",
+    guide: "等信息齐全再报。",
+    evidence_req: [{"type":"处置记录","name":"等待记录","note":"含等待事项与预计时间"}]
   },
   {
     id: "DSS01-commander-6-1",
     type: "report",
-    title: "警告各相关责任人对网络安全事件进行保密，核实准确处置完成后再行上报",
+    title: "先小范围口头启动，正式启动令待处置完成后补签",
     target: "院应急指挥部",
     timeout: 10,
-    guide: "紧急情况下先用群通知快速传达，正式启动指令稍后补发。",
+    keywords: "口头启动,补签,授权缺失",
     action: "启动预案",
     required: false,
     score: 10,
@@ -515,14 +606,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1698,
     posY: 607,
+    descr: "避免过早惊动全院，先由信息科口头传达；正式授权缺失期间，停机与对外上报缺少依据。",
+    guide: "先口头后书面。",
+    evidence_req: [{"type":"处置记录","name":"口头通知记录","note":"含通知对象与时间"}]
   },
   {
     id: "DSS01-commander-6-2",
     type: "report",
-    title: "等业务系统真的瘫痪了再启动响应",
+    title: "维持现有响应级别，待业务大面积中断后再升级",
     target: "院应急指挥部",
     timeout: 10,
-    guide: "应急流程很复杂，启动过早可能反而影响正常运转。",
+    keywords: "维持级别,等待,升级",
     action: "启动预案",
     required: false,
     score: 10,
@@ -530,6 +624,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1698,
     posY: 657,
+    descr: "当前影响尚可控，升级过早会占用全院资源；响应级别未提升期间，跨科室协调缺少授权。",
+    guide: "看业务中断比例再决定。",
+    evidence_req: [{"type":"处置记录","name":"级别维持说明","note":"含当前影响与观察指标"}]
   },
   {
     id: "DSS01-itlead-7-1",
@@ -537,7 +634,7 @@ SCEN['S01'] = {
     title: "先报市卫生健康局，等他们给意见再同步报网信办",
     target: "信息科负责人",
     timeout: 15,
-    guide: "卫健局是行业主管部门，先听他们的意见再综合汇报。",
+    keywords: "分批上报,等意见,时限",
     action: "上报审批",
     required: false,
     score: 10,
@@ -545,6 +642,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1992,
     posY: 331,
+    descr: "卫健局是行业主管，先报并等其意见再同步网信办，可保证口径一致；等待回复通常超过 1 小时上报时限。",
+    guide: "先等主管单位意见。",
+    evidence_req: [{"type":"上报材料","name":"首次上报记录","note":"含上报对象、时间与回复"}]
   },
   {
     id: "DSS01-itlead-7-2",
@@ -552,7 +652,7 @@ SCEN['S01'] = {
     title: "让网络安全管理员先写一份详细技术报告再上报",
     target: "信息科负责人",
     timeout: 15,
-    guide: "上报材料越详细越好，显得专业、能准确传达事态。",
+    keywords: "技术报告,成文,延迟",
     action: "上报审批",
     required: false,
     score: 10,
@@ -560,6 +660,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1992,
     posY: 381,
+    descr: "技术报告写全攻击链与影响面，可减少上级反复补充；成文通常需要 1 小时以上。",
+    guide: "先成文再报。",
+    evidence_req: [{"type":"上报材料","name":"技术报告草稿","note":"含攻击链与影响面"}]
   },
   {
     id: "DSS01-medlead-8-1",
@@ -567,7 +670,7 @@ SCEN['S01'] = {
     title: "仅把最核心的收费、发药环节切手工，其他医疗环节等待系统恢复",
     target: "医务处",
     timeout: 25,
-    guide: "不是所有环节都有立即手动的必要，先保障核心收费。",
+    keywords: "部分兜底,两条线,滞留",
     action: "业务兜底",
     required: false,
     score: 10,
@@ -575,14 +678,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1991,
     posY: 672,
+    descr: "先切收费与发药两条线，保住资金与药品流向；门诊医嘱、检验申请仍依赖系统，患者会滞留。",
+    guide: "先切两条线，其他等恢复。",
+    evidence_req: [{"type":"处置记录","name":"部分兜底记录","note":"含已切流程与未切流程"}]
   },
   {
     id: "DSS01-medlead-8-2",
     type: "task",
-    title: "继续依赖 HIS，等系统完全恢复",
+    title: "先维持 HIS 运行，仅对报障科室做局部手工登记",
     target: "医务处",
     timeout: 25,
-    guide: "勒索病毒加密常有限制范围，没被加密的业务系统还能正常跑。",
+    keywords: "局部登记,维持系统,覆盖不足",
     action: "业务兜底",
     required: false,
     score: 10,
@@ -590,14 +696,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1991,
     posY: 722,
+    descr: "局部登记可撑住门诊，避免全院切换造成混乱；系统再次中断时局部登记无法覆盖住院与检验。",
+    guide: "先局部后整体。",
+    evidence_req: [{"type":"处置记录","name":"局部登记样例","note":"含科室、单据与登记方式"}]
   },
   {
     id: "DSS01-netsec-9-1",
     type: "task",
-    title: "为保证医院业务运行，让系统管理员直接利用备份进行系统恢复",
+    title: "先恢复业务，恢复后再补做取证",
     target: "网络安全管理员",
     timeout: 20,
-    guide: "硬盘镜像完璧归赵保留了现场，后续做数字取证更方便。",
+    keywords: "先恢复,后取证,证据灭失",
     action: "取证留痕",
     required: false,
     score: 10,
@@ -605,29 +714,35 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1991,
     posY: 499,
+    descr: "业务中断影响患者，先恢复可快速止损；重启与重装会覆盖内存与临时文件，部分证据无法再取。",
+    guide: "先恢复，证据后补。",
+    evidence_req: [{"type":"处置记录","name":"恢复优先说明","note":"含恢复时间与计划补证范围"}]
   },
   {
     id: "DSS01-netsec-9-2",
     type: "task",
-    title: "先恢复业务系统，系统恢复后在进行取证",
+    title: "取证完成后删除加密样本与内存镜像，释放存储",
     target: "网络安全管理员",
     timeout: 20,
-    guide: "业务恢复优先，取证只需要记一下哪些文件被加密。",
+    keywords: "清理,释放存储,证据灭失",
     action: "取证留痕",
     required: false,
     score: 10,
     anchor_id: "S01-9",
-    release_timing: "before",
+    release_timing: "after",
     posX: 1991,
     posY: 549,
+    descr: "镜像与样本占用较大存储，取证记录归档后可清理；删除后无法复核样本哈希与内存痕迹。",
+    guide: "先归档再清理，释放空间。",
+    evidence_req: [{"type":"处置记录","name":"清理记录","note":"含清理对象、时间与审批人"}]
   },
   {
     id: "DSS01-sysadmin-10-1",
     type: "task",
-    title: "利用系统快照直接恢复受影响系统",
+    title: "直接用最新快照全量回滚，不校验快照完整性",
     target: "系统管理员",
     timeout: 30,
-    guide: "系统快照是最快速的恢复方式，减小医院因业务系统故障带来的损失",
+    keywords: "快照,全量回滚,未校验",
     action: "处置恢复",
     required: false,
     score: 10,
@@ -635,14 +750,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1993,
     posY: 845,
+    descr: "快照是事发前半小时的，直接回滚最快；未校验完整性，可能把损坏或带毒快照恢复到生产。",
+    guide: "快照即备份，先回滚再观察。",
+    evidence_req: [{"type":"处置记录","name":"回滚记录","note":"含快照时间与回滚范围"}]
   },
   {
     id: "DSS01-sysadmin-10-2",
     type: "task",
-    title: "跳过应用验证，直接上线测试",
+    title: "数据恢复后立即上线，边运行边观察",
     target: "系统管理员",
     timeout: 30,
-    guide: "数据文件恢复成功就说明备份没问题，直接上线跑业务再看。",
+    keywords: "先上线,边运行,未验证",
     action: "处置恢复",
     required: false,
     score: 10,
@@ -650,6 +768,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 1993,
     posY: 895,
+    descr: "业务等不起，先上线可快速缓解窗口压力；未做用例验证，异常可能在上线后才暴露。",
+    guide: "先恢复可用，再逐步排障。",
+    evidence_req: [{"type":"处置记录","name":"上线记录","note":"含上线时间与观察指标"}]
   },
   {
     id: "DSS01-healthbureau-11-1",
@@ -657,7 +778,7 @@ SCEN['S01'] = {
     title: "建议院方以业务为重，先保障业务，后续再考虑溯源取证",
     target: "市卫生健康局",
     timeout: 15,
-    guide: "建议医院先恢复业务，其他工作可以后续逐项开展。",
+    keywords: "业务优先,后取证,现场",
     action: "研判分级",
     required: false,
     score: 10,
@@ -665,14 +786,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2270,
     posY: 264,
+    descr: "业务中断直接影响患者安全，建议先保业务，溯源取证可在恢复后补做；恢复过程会覆盖部分现场。",
+    guide: "先保业务连续性。",
+    evidence_req: [{"type":"处置记录","name":"指导意见","note":"含建议事项与提出时间"}]
   },
   {
     id: "DSS01-healthbureau-11-2",
     type: "task",
-    title: "建议院方将事件核实清楚，确保业务正常再上报",
+    title: "建议由医院自行定级，卫健局不参与研判",
     target: "市卫生健康局",
     timeout: 15,
-    guide: "建议院方将事件核实清楚，确保业务正常再上报",
+    keywords: "自行定级,不参与,偏低",
     action: "研判分级",
     required: false,
     score: 10,
@@ -680,14 +804,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2270,
     posY: 314,
+    descr: "医院更了解自身系统与影响，自行定级可减少层级往返；缺少行业口径，定级可能偏低。",
+    guide: "院内有能力定级。",
+    evidence_req: [{"type":"处置记录","name":"指导意见","note":"含定级意见与联系人"}]
   },
   {
     id: "DSS01-cac-12-1",
     type: "task",
-    title: "单个系统受到影响，可先行处置，后续上报",
+    title: "单系统事件先院内处置，达到上报标准再报",
     target: "市网信办",
     timeout: 60,
-    guide: "单个系统受到影响，可先行处置，后续上报",
+    keywords: "单系统,后上报,时限",
     action: "研判分级",
     required: false,
     score: 10,
@@ -695,6 +822,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2271,
     posY: 433,
+    descr: "未达上报标准不必上报，可减少监管打扰；标准判断需要时间，可能错过 1 小时时限。",
+    guide: "先看标准再决定。",
+    evidence_req: [{"type":"处置记录","name":"标准判断记录","note":"含对照标准与结论"}]
   },
   {
     id: "DSS01-cac-12-2",
@@ -702,7 +832,7 @@ SCEN['S01'] = {
     title: "建议院方把所有受感染服务器重新装系统",
     target: "市网信办",
     timeout: 60,
-    guide: "最彻底的办法是重装机，避免勒索病毒残留后门。",
+    keywords: "重装,彻底,证据灭失",
     action: "研判分级",
     required: false,
     score: 10,
@@ -710,6 +840,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2271,
     posY: 483,
+    descr: "重装是最彻底的清除方式，可避免残留后门；重装会丢失现场与日志，业务恢复时间显著延长。",
+    guide: "彻底清除优先。",
+    evidence_req: [{"type":"处置记录","name":"重装方案","note":"含范围、耗时与备份安排"}]
   },
   {
     id: "DSS01-clinical-13-1",
@@ -717,7 +850,7 @@ SCEN['S01'] = {
     title: "让挂号收费窗口集中时段再补录",
     target: "收费窗口",
     timeout: 30,
-    guide: "集中在中午病人少的时候统一补录，避免两边忙。",
+    keywords: "集中补录,晚间,积压",
     action: "处置恢复",
     required: false,
     score: 10,
@@ -725,14 +858,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2275,
     posY: 857,
+    descr: "晚间患者少，集中补录更省人力；当日单据积压到晚间，收费与发药核对会出现空档。",
+    guide: "先处置再集中补录。",
+    evidence_req: [{"type":"处置记录","name":"补录排期","note":"含补录时段与责任人"}]
   },
   {
     id: "DSS01-clinical-13-2",
     type: "task",
-    title: "只补录大额和重要患者单据",
+    title: "先补急诊与住院，普通门诊后续批量补",
     target: "收费窗口",
     timeout: 30,
-    guide: "优先保障重点患者数据完整，小额单据后续慢慢补。",
+    keywords: "先急后缓,门诊,对平",
     action: "处置恢复",
     required: false,
     score: 10,
@@ -740,14 +876,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2275,
     posY: 907,
+    descr: "优先保障急危重症，普通门诊单据量大，后续批量补可省时；门诊费用与库存当日无法对平。",
+    guide: "先急后缓。",
+    evidence_req: [{"type":"处置记录","name":"补录范围说明","note":"含已补与待补范围"}]
   },
   {
     id: "DSS01-itlead-14-1",
     type: "task",
-    title: "不报案，等网信办调查完再说",
+    title: "先内部核查，确认攻击来源后再报案",
     target: "信息科负责人",
     timeout: 15,
-    guide: "网安报案流程长，等网信办那边给了结论再决定。",
+    keywords: "先自查,来源,延迟报案",
     action: "上报审批",
     required: false,
     score: 10,
@@ -755,14 +894,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2557,
     posY: 349,
+    descr: "来源不清时报案可能无法立案，先自查可提高材料质量；自查通常需要数小时，错过报案与保全时机。",
+    guide: "先查来源再报。",
+    evidence_req: [{"type":"处置记录","name":"自查记录","note":"含核查项、结论与耗时"}]
   },
   {
     id: "DSS01-itlead-14-2",
     type: "task",
-    title: "直接报案让网安大队介入",
+    title: "仅电话口头报案，不提交书面材料与证据",
     target: "信息科负责人",
     timeout: 15,
-    guide: "勒索病毒属于刑事犯罪，公安有能力溯源。",
+    keywords: "口头报案,后补材料,受理",
     action: "上报审批",
     required: false,
     score: 10,
@@ -770,6 +912,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2557,
     posY: 399,
+    descr: "先电话占受理号，材料后补，可快速建立联系；无书面材料与证据清单，受理与立案难以推进。",
+    guide: "口头也算报案。",
+    evidence_req: [{"type":"处置记录","name":"电话记录","note":"含通话时间、对象与受理号"}]
   },
   {
     id: "DSS01-cyberpolice-15-1",
@@ -777,7 +922,7 @@ SCEN['S01'] = {
     title: "先让院方自行恢复业务，取证由警方处理",
     target: "市网安大队",
     timeout: 15,
-    guide: "业务恢复优先，警方会到现场取证据。",
+    keywords: "先恢复,后取证,现场",
     action: "处置恢复",
     required: false,
     score: 10,
@@ -785,14 +930,17 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2842,
     posY: 349,
+    descr: "业务优先，院方先自行恢复，警方到场后再取证；恢复会覆盖现场，后续取证只能依赖残留日志。",
+    guide: "先恢复业务。",
+    evidence_req: [{"type":"处置记录","name":"指导意见","note":"含恢复范围与取证安排"}]
   },
   {
     id: "DSS01-cyberpolice-15-2",
     type: "task",
-    title: "等警方到场再恢复，保护现场",
+    title: "要求院方全面停机等待，不得做任何恢复准备",
     target: "市网安大队",
     timeout: 15,
-    guide: "取证前不要动现场，否则破坏证据链。",
+    keywords: "全面停机,保护现场,业务中断",
     action: "处置恢复",
     required: false,
     score: 10,
@@ -800,6 +948,9 @@ SCEN['S01'] = {
     release_timing: "before",
     posX: 2842,
     posY: 399,
+    descr: "现场不能动，全部系统停机等待勘验，可最大限度保全证据；停机期间门诊与住院业务全部中断。",
+    guide: "先保护现场再谈恢复。",
+    evidence_req: [{"type":"处置记录","name":"停机通知","note":"含停机范围、时间与联系人"}]
   },
   {
     id: "DSS01-commander-16-1",
@@ -807,30 +958,38 @@ SCEN['S01'] = {
     title: "等所有业务环节恢复一周后再宣布结束",
     target: "院应急指挥部",
     timeout: 15,
-    guide: "应急结束不宜过早，至少观察一周确保没有二次加密。",
+    keywords: "观察一周,延迟结束,资源占用",
+    action: "其他",
     required: false,
     score: 10,
     anchor_id: "S01-17",
     release_timing: "before",
     posX: 3172,
     posY: 551,
+    descr: "观察一周无复发再结束更稳妥，可确认无二次加密；一周内响应状态与资源占用持续，复盘无法启动。",
+    guide: "先观察再结束。",
+    evidence_req: [{"type":"处置记录","name":"观察记录","note":"含观察周期与复发情况"}]
   },
   {
     id: "DSS01-commander-16-2",
     type: "report",
-    title: "部分环节恢复就可以先宣布结束",
+    title: "核心业务恢复即可结束，剩余系统并行恢复",
     target: "院应急指挥部",
     timeout: 15,
-    guide: "大部分业务都已经正常，剩下个别小环节慢慢完善。",
+    keywords: "核心业务,提前结束,闭环缺失",
+    action: "其他",
     required: false,
     score: 10,
     anchor_id: "S01-17",
     release_timing: "before",
     posX: 3172,
     posY: 601,
+    descr: "核心业务可用即达到结束标准，剩余系统可并行恢复；证据固定与上报闭环未完成，结束手续缺少依据。",
+    guide: "看核心业务即可。",
+    evidence_req: [{"type":"处置记录","name":"结束申请","note":"含核心业务状态与未闭环事项"}]
   },
   ],
-}
+};
 MAIN_DEPS['S01'] = null;
 
 /* ======== S02 (13主流+15混淆) ======== */
@@ -4175,10 +4334,10 @@ function apply(db, opts) {
   const today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
 
   /* INSERT SQL（含全部新字段：short_title, anchor_id, release_timing, receiver） */
-  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,short_title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,required,deps,flow_type,score,receiver,pos_x,pos_y,parallel_desc,anchor_id,release_timing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  const ins = db.prepare('INSERT INTO script_nodes (id,scenario_id,type,title,short_title,target,time,timeout,form,att,descr,branches,seq,guide,keywords,action,required,evidence_req,deps,flow_type,score,receiver,pos_x,pos_y,parallel_desc,anchor_id,release_timing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
 
   /* 补齐字段：DB 中为空但 baseline 有值时，只补齐这些字段（不覆盖已有值） */
-  const patchEmpty = db.prepare('UPDATE script_nodes SET short_title=COALESCE(NULLIF(short_title,\'\'),?), guide=COALESCE(NULLIF(guide,\'\'),?), descr=COALESCE(NULLIF(descr,\'\'),?), action=COALESCE(NULLIF(action,\'\'),?) WHERE id=?');
+  const patchEmpty = db.prepare('UPDATE script_nodes SET short_title=COALESCE(NULLIF(short_title,\'\'),?), guide=COALESCE(NULLIF(guide,\'\'),?), descr=COALESCE(NULLIF(descr,\'\'),?), action=COALESCE(NULLIF(action,\'\'),?), keywords=COALESCE(NULLIF(keywords,\'\'),?), evidence_req=COALESCE(NULLIF(evidence_req,\'\'),?) WHERE id=?');
 
   const out = [];
   Object.keys(_SCEN).forEach(function (sid) {
@@ -4219,16 +4378,16 @@ function apply(db, opts) {
         const py = (o.posY !== undefined && o.posY !== null) ? o.posY : null;
         const st = o.short_title || '';
         const rc = o.receiver || '';
-        if (!dryRun) ins.run(o.id, sid, o.type, o.title, st, o.target, '', o.timeout || null, '', '', o.desc || '',
+        if (!dryRun) ins.run(o.id, sid, o.type, o.title, st, o.target, '', o.timeout || null, o.form || '', '', o.descr || o.desc || '',
           JSON.stringify([]), i, o.guide || '', o.keywords || '', o.action || '', o.required,
-          JSON.stringify(o.deps || []), ft, sc, rc, px, py, o.parallel_desc || '', '', 'before');
+          JSON.stringify(o.evidence_req || []), JSON.stringify(o.deps || []), ft, sc, rc, px, py, o.parallel_desc || '', '', 'before');
       });
       /* merge 模式下，对已存在节点补齐空字段 */
       if (MERGE_ONLY) {
         main.forEach(function (o) {
           if (!existingIds[o.id]) return; /* 新增的已经 INSERT 了，跳过 */
           patched++;
-          if (!dryRun) patchEmpty.run(o.short_title || '', o.guide || '', o.desc || '', o.action || '', o.id);
+          if (!dryRun) patchEmpty.run(o.short_title || '', o.guide || '', o.descr || o.desc || '', o.action || '', o.keywords || '', JSON.stringify(o.evidence_req || []), o.id);
         });
       }
     } else {
@@ -4248,7 +4407,7 @@ function apply(db, opts) {
         const deps = mainDeps && mainDeps[i] ? mainDeps[i].map(function (di) { return sid + '-' + (di + 1); }) : [];
         if (!dryRun) ins.run(id, sid, r[0], r[1], '', r[2], '', r[4] || null, '', '', r[6] || '',
           JSON.stringify([]), i, r[7] || '', r[8] || '', r[9] || '', 1,
-          JSON.stringify(deps), 'correct', score, '', null, null, '', '', 'before');
+          JSON.stringify([]), JSON.stringify(deps), 'correct', score, '', null, null, '', '', 'before');
       });
     }
 
@@ -4261,9 +4420,9 @@ function apply(db, opts) {
         const ft = o.flow_type || 'distractor';
         const px = (o.posX !== undefined && o.posX !== null) ? o.posX : null;
         const py = (o.posY !== undefined && o.posY !== null) ? o.posY : null;
-        if (!dryRun) ins.run(o.id, sid, o.type, o.title, o.short_title || '', o.target, '', o.timeout || null, '', '', o.desc || '',
+        if (!dryRun) ins.run(o.id, sid, o.type, o.title, o.short_title || '', o.target, '', o.timeout || null, o.form || '', '', o.descr || o.desc || '',
           JSON.stringify([]), main.length + i, o.guide || '', o.keywords || '', o.action || '', o.required,
-          JSON.stringify(o.deps || []), ft, sc, '', px, py, o.parallel_desc || '', o.anchor_id || '', o.release_timing || 'before');
+          JSON.stringify(o.evidence_req || []), JSON.stringify(o.deps || []), ft, sc, '', px, py, o.parallel_desc || '', o.anchor_id || '', o.release_timing || 'before');
       });
     } else {
       const roleByTarget = {};
@@ -4278,7 +4437,7 @@ function apply(db, opts) {
         added++;
         if (!dryRun) ins.run(id, sid, r[0], r[1], '', r[2], '', r[4] || null, '', '', r[6] || '',
           JSON.stringify([]), seq + i, r[7] || '', r[8] || '', r[9] || '', 0,
-          JSON.stringify([]), 'distractor', 10, '', null, null, '', '', 'before');
+          JSON.stringify([]), JSON.stringify([]), 'distractor', 10, '', null, null, '', '', 'before');
       });
     }
 

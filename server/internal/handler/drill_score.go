@@ -108,6 +108,7 @@ type DrillStepForScore struct {
 	Target       string
 	RoleID       string
 	User         string
+	Forms        string
 }
 
 // ProjectForScore score() 内部使用的项目轻量结构
@@ -189,7 +190,7 @@ func loadNodesForScore(database *db.DB, scenarioID string) []ScriptNodeForScore 
 func loadStepsForScore(database *db.DB, projectID string) []DrillStepForScore {
 	rows, err := database.Query(`SELECT id,matched_node,correct,ontime,skipped,
 		COALESCE(receiver,''),COALESCE(receiver_ok,1),COALESCE(step_time,''),COALESCE(created_at,''),
-		COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(role_id,''),COALESCE(user,'')
+		COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(role_id,''),COALESCE(user,''),COALESCE(forms,'')
 		FROM drill_steps WHERE project_id=? ORDER BY step_time,id`, projectID)
 	if err != nil {
 		return nil
@@ -201,7 +202,7 @@ func loadStepsForScore(database *db.DB, projectID string) []DrillStepForScore {
 		var s DrillStepForScore
 		if err := rows.Scan(&s.ID, &s.MatchedNode, &s.Correct, &s.Ontime, &s.Skipped,
 			&s.Receiver, &s.ReceiverOK, &s.StepTime, &s.CreatedAt,
-			&s.FlowType, &s.Score, &s.RoleID, &s.User); err != nil {
+			&s.FlowType, &s.Score, &s.RoleID, &s.User, &s.Forms); err != nil {
 			continue
 		}
 		out = append(out, s)
@@ -373,6 +374,173 @@ func planText(n ScriptNodeForScore) string {
 	return "未设置处置时长"
 }
 
+// ========== 表单关键字段判定（A-3） ==========
+// 规则仅在“该节点有表单、已提交非空表单、且模板中确实存在该字段”时生效；
+// 旧记录 forms 为空或不含新字段时安全跳过，不改变历史分数。
+
+type formFieldRule struct {
+	Label    string
+	Kind     string // equals | contains | nonempty
+	Values   []string
+	MinRunes int
+}
+
+var nodeFormFieldRules = map[string][]formFieldRule{
+	"S01-2": {
+		{Label: "是否仍在加密", Kind: "equals", Values: []string{"是"}},
+		{Label: "加密文件扩展名", Kind: "nonempty"},
+		{Label: "受影响主机清单", Kind: "nonempty", MinRunes: 5},
+	},
+	"S01-3": {
+		{Label: "共享目录处置", Kind: "equals", Values: []string{"已关闭写入"}},
+		{Label: "隔离主机清单", Kind: "nonempty", MinRunes: 5},
+	},
+	"S01-4": {
+		{Label: "可读性验证", Kind: "equals", Values: []string{"通过"}},
+	},
+	"S01-5": {
+		{Label: "建议等级", Kind: "equals", Values: []string{"重大"}},
+		{Label: "定级依据", Kind: "nonempty", MinRunes: 20},
+	},
+	"S01-6": {
+		{Label: "建议响应等级", Kind: "equals", Values: []string{"Ⅱ级"}},
+	},
+	"S01-7": {
+		{Label: "批准响应级别", Kind: "equals", Values: []string{"Ⅱ级"}},
+		{Label: "启动时间", Kind: "nonempty"},
+		{Label: "授权范围", Kind: "contains", Values: []string{"数据恢复"}},
+	},
+	"S01-8": {
+		{Label: "上报对象", Kind: "contains", Values: []string{"市卫生健康局", "市网信办"}},
+	},
+	"S01-11": {
+		{Label: "二次加密检查", Kind: "equals", Values: []string{"未发现"}},
+		{Label: "恢复验证用例", Kind: "nonempty", MinRunes: 12},
+	},
+	"S01-15": {
+		{Label: "证据清单", Kind: "nonempty", MinRunes: 8},
+	},
+}
+
+func loadFormLabels(database *db.DB) map[string]map[string]bool {
+	out := make(map[string]map[string]bool)
+	rows, err := database.Query(`SELECT id,COALESCE(fields,'[]') FROM form_templates`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, fields string
+		if rows.Scan(&id, &fields) != nil {
+			continue
+		}
+		var arr []struct {
+			Label string `json:"label"`
+		}
+		if json.Unmarshal([]byte(fields), &arr) != nil {
+			continue
+		}
+		set := make(map[string]bool)
+		for _, f := range arr {
+			if strings.TrimSpace(f.Label) != "" {
+				set[strings.TrimSpace(f.Label)] = true
+			}
+		}
+		out[id] = set
+	}
+	return out
+}
+
+func formValueString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, x := range t {
+			parts = append(parts, formValueString(x))
+		}
+		return strings.Join(parts, "、")
+	case float64:
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", t), "0"), ".")
+	case bool:
+		if t {
+			return "是"
+		}
+		return "否"
+	default:
+		return ""
+	}
+}
+
+func formFieldDeductions(step DrillStepForScore, n ScriptNodeForScore, labels map[string]map[string]bool) ([]Deduction, float64) {
+	if n.Form == "" || len(nodeFormFieldRules[n.ID]) == 0 {
+		return nil, 0
+	}
+	labelSet := labels[n.Form]
+	if len(labelSet) == 0 {
+		return nil, 0
+	}
+	if strings.TrimSpace(step.Forms) == "" {
+		return nil, 0
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(step.Forms), &m) != nil || len(m) == 0 {
+		return nil, 0
+	}
+	per := math.Round(float64(n.Score)*0.1*10) / 10
+	capDeduct := math.Round(float64(n.Score)*0.3*10) / 10
+	total := 0.0
+	var out []Deduction
+	for _, r := range nodeFormFieldRules[n.ID] {
+		if !labelSet[r.Label] {
+			continue // 模板尚未升级到该字段：不判、不扣
+		}
+		v := formValueString(m[r.Label])
+		ok := false
+		switch r.Kind {
+		case "equals":
+			for _, want := range r.Values {
+				if v == want {
+					ok = true
+					break
+				}
+			}
+		case "contains":
+			ok = true
+			for _, want := range r.Values {
+				if !strings.Contains(v, want) {
+					ok = false
+					break
+				}
+			}
+		default:
+			need := r.MinRunes
+			if need < 1 {
+				need = 1
+			}
+			ok = len([]rune(v)) >= need
+		}
+		if ok {
+			continue
+		}
+		d := per
+		if total+d > capDeduct {
+			d = capDeduct - total
+		}
+		if d <= 0 {
+			break
+		}
+		total += d
+		out = append(out, Deduction{
+			NodeID: n.ID, Title: n.Title,
+			Type:  fmt.Sprintf("表单关键字段缺失或错误（%s）（扣10%%）", r.Label),
+			Point: -d,
+		})
+	}
+	return out, total
+}
+
 // ========== Score 纯函数（复刻 drill.js:162 score） ==========
 
 // Score 是单一纯函数：从 MySQL 读取项目 + 剧本 + tasks + drill_steps，计算扣分制评分结果。
@@ -424,6 +592,7 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	}
 
 	tasks := loadTasksForScore(database, projectID)
+	formLabels := loadFormLabels(database)
 
 	// correct ID 集合（用于 matchNode）
 	correctIDs := make(map[string]bool)
@@ -536,6 +705,7 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	deductions := []Deduction{}
 	skippedCorrect := 0
 	skippedDistract := 0
+	formMissCnt := 0
 
 	// 正确流程节点
 	for _, n := range correct {
@@ -594,6 +764,13 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 					NodeID: n.ID, Title: n.Title,
 					Type: "接收人选择错误（扣10%）", Point: -d,
 				})
+			}
+			if step, ok := hit["step"].(DrillStepForScore); ok {
+				if fds, fd := formFieldDeductions(step, n, formLabels); fd > 0 {
+					deduct += fd
+					deductions = append(deductions, fds...)
+					formMissCnt += len(fds)
+				}
 			}
 			earned -= deduct
 			stepTime, _ := hit["stepTime"].(string)
@@ -710,6 +887,22 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 		})
 	}
 
+	// 实战版演练中强制查看脚本：首次记录即扣 10 分（幂等，靠审计扣分标记判断）
+	forceView := false
+	if mode == "实战版" {
+		var forceCnt int
+		_ = database.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE action LIKE ?`,
+			"查看演练脚本|项目="+projectID+"|类型=强制|扣分=是|%").Scan(&forceCnt)
+		if forceCnt > 0 {
+			earned -= 10
+			forceView = true
+			deductions = append(deductions, Deduction{
+				NodeID: "__script__", Title: "实战版演练中强制查看演练脚本",
+				Type: "演练中强制查看脚本（扣 10 分）", Point: -10,
+			})
+		}
+	}
+
 	// ========== 汇总 ==========
 	total := len(correct)
 	hitCnt := 0
@@ -764,6 +957,12 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	}
 	if wrongCnt > 0 {
 		formula += fmt.Sprintf("，执行混淆流程 %d 项", wrongCnt)
+	}
+	if formMissCnt > 0 {
+		formula += fmt.Sprintf("，表单关键字段缺失/错误 %d 项（每项扣本节点 10%%，单节点上限 30%%）", formMissCnt)
+	}
+	if forceView {
+		formula += "，演练中强制查看脚本 1 次（扣 10 分）"
 	}
 	if missedCnt > 0 {
 		formula += fmt.Sprintf("，未完成正确流程 %d 项", missedCnt)

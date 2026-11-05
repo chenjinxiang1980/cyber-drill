@@ -2367,6 +2367,57 @@ module.exports = {
           "type": "text"
         },
         {
+          "label": "受影响主机数量",
+          "hint": "填写已确认受影响的主机台数，仅演练虚拟数据。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "受影响主机清单",
+          "hint": "按科室/主机名/状态逐条列明，至少含已加密与疑似两类。",
+          "required": true,
+          "type": "textarea"
+        },
+        {
+          "label": "加密文件扩展名",
+          "hint": "如 .locked、.enc；用于与告警信息比对。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "是否仍在加密",
+          "hint": "选择当前是否仍有终端在写入加密文件。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "是",
+            "否",
+            "无法确认"
+          ]
+        },
+        {
+          "label": "是否已隔离",
+          "hint": "选择受影响主机的隔离进度。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "是",
+            "部分",
+            "否"
+          ]
+        },
+        {
+          "label": "共享目录是否受影响",
+          "hint": "确认共享文件服务器/共享目录是否出现加密文件。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "是",
+            "否",
+            "无法确认"
+          ]
+        },
+        {
           "label": "受影响系统",
           "hint": "勾选受到本次事件影响的业务系统，用于驱动业务影响看板变更。",
           "required": true,
@@ -2394,9 +2445,15 @@ module.exports = {
         },
         {
           "label": "初步判断",
-          "hint": "结合告警与现象初判事件类型和等级，注明为模拟核实结论。",
+          "hint": "结合告警与现象初判事件类型，注明为模拟核实结论。",
           "required": true,
-          "type": "textarea"
+          "type": "select",
+          "options": [
+            "勒索病毒",
+            "其他病毒",
+            "误报",
+            "待定"
+          ]
         },
         {
           "label": "初步影响范围",
@@ -2522,6 +2579,36 @@ module.exports = {
           "type": "text"
         },
         {
+          "label": "上报对象",
+          "hint": "勾选本次上报的全部接收单位，双报须两家同时勾选。",
+          "required": true,
+          "type": "multiselect",
+          "options": [
+            "市卫生健康局",
+            "市网信办",
+            "市网安大队",
+            "院应急指挥部"
+          ]
+        },
+        {
+          "label": "时限依据",
+          "hint": "引用的上报时限条款，如重大事件 1 小时内。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "签发人",
+          "hint": "负责签发本次上报材料的院领导或信息科负责人。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "回执编号",
+          "hint": "接收单位反馈的回执编号，未取得可留空。",
+          "required": false,
+          "type": "text"
+        },
+        {
           "label": "报送时间",
           "hint": "实际报送时间，精确到分钟。",
           "required": true,
@@ -2558,6 +2645,42 @@ module.exports = {
           "type": "text"
         },
         {
+          "label": "建议等级",
+          "hint": "按预案条款与影响评估给出建议事件等级，与上报表保持一致。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "一般",
+            "较大",
+            "重大",
+            "特别重大"
+          ]
+        },
+        {
+          "label": "定级依据",
+          "hint": "逐条写明影响系统、患者安全、数据量、扩散趋势四类依据及来源节点。",
+          "required": true,
+          "type": "textarea"
+        },
+        {
+          "label": "患者安全影响",
+          "hint": "评估本次事件对患者诊疗与生命安全的影响程度。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "无影响",
+            "潜在风险",
+            "已影响诊疗",
+            "危及生命安全"
+          ]
+        },
+        {
+          "label": "关键业务中断比例",
+          "hint": "按核心业务中断项数估算，如 60%（仅演练虚拟数据）。",
+          "required": true,
+          "type": "text"
+        },
+        {
           "label": "关键业务兜底方案",
           "hint": "如纸质处方、人工挂号收费、手工登记，注明启动条件。",
           "required": true,
@@ -2585,7 +2708,7 @@ module.exports = {
     },
     {
       "id": "F4",
-      "name": "应急启动审批单",
+      "name": "应急启动申请单",
       "controls": [
         {
           "label": "事件摘要",
@@ -2622,24 +2745,6 @@ module.exports = {
           "hint": "提出启动申请的单位与人员。",
           "required": true,
           "type": "text"
-        },
-        {
-          "label": "审批人",
-          "hint": "具备启动审批权限的院领导。",
-          "required": true,
-          "type": "text"
-        },
-        {
-          "label": "审批意见",
-          "hint": "同意/不同意及补充要求。",
-          "required": true,
-          "type": "textarea"
-        },
-        {
-          "label": "审批时间",
-          "hint": "审批完成时间。",
-          "required": true,
-          "type": "datetime"
         }
       ]
     },
@@ -2694,6 +2799,34 @@ module.exports = {
           "hint": "已固定的日志、样本摘要、截图等材料名称。",
           "required": true,
           "type": "textarea"
+        },
+        {
+          "label": "报案方式",
+          "hint": "选择实际采用的报案方式。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "电话",
+            "书面",
+            "线上平台"
+          ]
+        },
+        {
+          "label": "同步上报",
+          "hint": "勾选同步报送的其他单位，未同步则选「未同步」。",
+          "required": false,
+          "type": "multiselect",
+          "options": [
+            "市卫生健康局",
+            "市网信办",
+            "未同步"
+          ]
+        },
+        {
+          "label": "受理编号",
+          "hint": "网安大队反馈的受理编号，未受理可留空。",
+          "required": false,
+          "type": "text"
         },
         {
           "label": "报案时间",
@@ -2803,6 +2936,47 @@ module.exports = {
           "options": ["正常", "隔离中", "灾备切换中", "恢复验证中", "已恢复"]
         },
         {
+          "label": "恢复点时间",
+          "hint": "实际使用的备份恢复点时间，精确到分钟。",
+          "required": true,
+          "type": "datetime"
+        },
+        {
+          "label": "RPO（数据丢失窗口）",
+          "hint": "填写实际数据丢失时间窗口，如 15 分钟。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "RTO（恢复耗时）",
+          "hint": "填写实际恢复耗时，如 45 分钟。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "恢复验证用例",
+          "hint": "逐条写明 3 条业务验证用例及结果，如挂号、收费、发药各一条。",
+          "required": true,
+          "type": "textarea"
+        },
+        {
+          "label": "二次加密检查",
+          "hint": "恢复后检查是否出现新的加密写入。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "未发现",
+            "发现二次加密",
+            "未检查"
+          ]
+        },
+        {
+          "label": "未恢复系统",
+          "hint": "列出仍未恢复的系统及原因，全部恢复填「无」。",
+          "required": true,
+          "type": "textarea"
+        },
+        {
           "label": "恢复情况说明",
           "hint": "逐项说明各系统恢复过程、验证结果及遗留问题。",
           "required": false,
@@ -2867,6 +3041,253 @@ module.exports = {
           "hint": "整改措施、责任部门、完成时限与复查安排。",
           "required": true,
           "type": "textarea"
+        }
+      ]
+    },
+    {
+      "id": "F9",
+      "name": "综合处置记录单",
+      "controls": [
+        {
+          "label": "处置对象",
+          "hint": "写明本次处置的系统、主机或业务环节，仅演练虚拟数据。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "处置时间",
+          "hint": "处置开始时间，精确到分钟。",
+          "required": true,
+          "type": "datetime"
+        },
+        {
+          "label": "执行人",
+          "hint": "实际执行处置的岗位与人员。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "处置动作",
+          "hint": "按顺序写明做了什么，如关闭共享写入、隔离主机、切换手工流程。",
+          "required": true,
+          "type": "textarea"
+        },
+        {
+          "label": "验证结果",
+          "hint": "处置完成后的验证结论。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "通过",
+            "部分通过",
+            "未通过"
+          ]
+        },
+        {
+          "label": "证据材料",
+          "hint": "支撑本次处置的日志、截图、单据名称。",
+          "required": true,
+          "type": "textarea"
+        },
+        {
+          "label": "遗留风险",
+          "hint": "尚未消除的风险与计划，无则填「无」。",
+          "required": false,
+          "type": "textarea"
+        },
+        {
+          "label": "接收人确认",
+          "hint": "接收处置结果的岗位与人员。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "审批结论",
+          "hint": "仅启动审批节点填写，其余节点留空。",
+          "required": false,
+          "type": "select",
+          "options": [
+            "同意",
+            "不同意",
+            "有条件同意"
+          ]
+        },
+        {
+          "label": "批准响应级别",
+          "hint": "仅启动审批节点填写，须与研判等级一致。",
+          "required": false,
+          "type": "select",
+          "options": [
+            "Ⅰ级",
+            "Ⅱ级",
+            "Ⅲ级",
+            "Ⅳ级"
+          ]
+        },
+        {
+          "label": "启动时间",
+          "hint": "仅启动审批节点填写，以指令下达时刻为准。",
+          "required": false,
+          "type": "datetime"
+        },
+        {
+          "label": "授权范围",
+          "hint": "仅启动审批节点填写，勾选本次启动授权的处置范围。",
+          "required": false,
+          "type": "multiselect",
+          "options": [
+            "停机",
+            "断网隔离",
+            "数据恢复",
+            "对外上报",
+            "对外发布口径"
+          ]
+        },
+        {
+          "label": "审批人",
+          "hint": "仅启动审批节点填写。",
+          "required": false,
+          "type": "text"
+        },
+        {
+          "label": "启动令编号",
+          "hint": "仅启动审批节点填写，可填演练虚拟编号。",
+          "required": false,
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "id": "F10",
+      "name": "隔离处置单",
+      "controls": [
+        {
+          "label": "隔离时间",
+          "hint": "完成隔离的时间，精确到分钟。",
+          "required": true,
+          "type": "datetime"
+        },
+        {
+          "label": "隔离主机清单",
+          "hint": "按主机名/IP/科室逐条列明，仅演练虚拟数据。",
+          "required": true,
+          "type": "textarea"
+        },
+        {
+          "label": "隔离方式",
+          "hint": "选择实际采用的隔离方式。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "断网",
+            "禁用网卡",
+            "交换机端口关闭",
+            "ACL限制"
+          ]
+        },
+        {
+          "label": "共享目录处置",
+          "hint": "确认共享目录写入是否已关闭。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "已关闭写入",
+            "只读",
+            "未处置"
+          ]
+        },
+        {
+          "label": "核心服务器处置",
+          "hint": "说明 HIS/EMR 等核心服务器的处置方式。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "未动",
+            "ACL降权",
+            "停机"
+          ]
+        },
+        {
+          "label": "隔离执行人",
+          "hint": "执行隔离的岗位与人员。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "隔离验证",
+          "hint": "确认受影响主机已无法访问共享与业务。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "已断网确认",
+            "部分确认",
+            "未确认"
+          ]
+        },
+        {
+          "label": "证据材料",
+          "hint": "交换机端口、防火墙 ACL 变更等操作记录名称。",
+          "required": false,
+          "type": "textarea"
+        }
+      ]
+    },
+    {
+      "id": "F11",
+      "name": "备份校验单",
+      "controls": [
+        {
+          "label": "恢复点时间",
+          "hint": "选定的备份恢复点时间。",
+          "required": true,
+          "type": "datetime"
+        },
+        {
+          "label": "恢复点大小",
+          "hint": "恢复点数据量，如 120GB。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "RPO要求",
+          "hint": "预案要求的数据丢失窗口。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "抽验库名",
+          "hint": "用于可读性抽验的非核心库名称（虚拟）。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "可读性验证",
+          "hint": "抽验表结构与数据是否可读。",
+          "required": true,
+          "type": "select",
+          "options": [
+            "通过",
+            "不通过",
+            "未验证"
+          ]
+        },
+        {
+          "label": "不可用备份清单",
+          "hint": "列出损坏或不可读的恢复点，无则填「无」。",
+          "required": false,
+          "type": "textarea"
+        },
+        {
+          "label": "校验人",
+          "hint": "执行备份校验的岗位与人员。",
+          "required": true,
+          "type": "text"
+        },
+        {
+          "label": "校验时间",
+          "hint": "完成校验的时间。",
+          "required": true,
+          "type": "datetime"
         }
       ]
     }
