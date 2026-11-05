@@ -274,7 +274,7 @@ Invoke-WebRequest http://127.0.0.1:8090/api/health -UseBasicParsing
 |------|------|
 | 角色 | upsert **12 个系统角色**（含 `platformadmin`，具备完整权限）；任何情况下都不删除角色 |
 | 剧本 | `INSERT IGNORE` 补齐 **8 个标准场景、268 个剧本节点**（S01 共 52 条：18 主流 + 34 混淆）；不覆盖用户已编辑内容 |
-| 流程字典 | 补齐 **16 个键**（`chat_channels`、`drill_action_meta`、`role_feed_mapping` 等） |
+| 流程字典 | `INSERT IGNORE` 补齐 **19 个键**（`notif_templates` 站内消息模板、`chat_channels`、`drill_action_meta`、`role_feed_mapping` 等）；只补缺失键，**不覆盖用户已修改的值** |
 | 表单模板 | 补齐 8 类模板 |
 | 管理员账号 | `admin`、`platformadmin` 不存在时创建，初始密码为 `ADMIN_INIT_PASSWORD`；已存在则保留原密码 |
 | 删除范围 | **仅测试账号**；初始化本身不执行任何 `DELETE` / `TRUNCATE` |
