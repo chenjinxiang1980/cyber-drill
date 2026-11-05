@@ -97,8 +97,7 @@ var NAV_GROUPS = [
     {key:'ledger', icon:'ledger', label:'台账与统计', href:'ledger.html'}
   ]},
   { title:'系统管理', items:[
-    {key:'admin', icon:'admin', label:'系统设置', href:'admin.html'},
-    {key:'dictionary', icon:'db', label:'流程字典', href:'dictionary.html'}
+    {key:'admin', icon:'admin', label:'系统设置', href:'admin.html'}
   ]}
 ];
 

@@ -30,6 +30,21 @@ table.mx-table tr.ext td:first-child{background:rgba(210,153,34,.07)}
 table.mx-table tr:hover td:first-child{background:var(--hover)}
 table.mx-table tr.ext:hover td:first-child{background:rgba(210,153,34,.14)}
 
+/* ===== 字典编辑器（业务字典 / 通知模板 / 会商频道） ===== */
+#admTabs{flex-wrap:wrap}
+.dict-mini-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:var(--sp3)}
+.dict-mini-tabs .tab{padding:5px 12px;font-size:12px;border-radius:var(--r-sm);border:1px solid var(--border2);background:var(--elev);margin-bottom:0}
+.dict-mini-tabs .tab:hover{border-color:var(--accent)}
+.dict-mini-tabs .tab.on{background:var(--accent-dim);border-color:var(--accent);color:#fff}
+.dict-edit-area{padding:var(--sp4);background:var(--bg);border-radius:var(--r-sm);min-height:120px;border:1px solid var(--border)}
+.dict-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.dict-hint{font-size:12px;color:var(--text3);padding:8px 12px;background:rgba(88,166,255,.06);border-left:2px solid var(--info);border-radius:4px;margin-bottom:12px;line-height:1.7}
+.dict-sub-card{padding:12px;margin-bottom:10px;border:1px solid var(--border);border-radius:var(--r-sm)}
+.nt-ev-name{font-size:11px;color:var(--text3);background:var(--elev);padding:2px 8px;border-radius:10px;font-weight:400}
+.nt-var-chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:2px 0 8px 56px}
+.nt-var-chips .btn{font-size:11px;padding:2px 8px;line-height:1.6}
+.nt-var-chips .nt-lbl{font-size:11px;color:var(--text3);margin-right:2px}
+
 </style>
 </head>
 <body data-page="admin">
@@ -48,7 +63,7 @@ document.addEventListener('app:ready', function(e){
   var auditPage = 1;
   var auditPageSize = 10;
   var BRAND_ADMIN = role.id === 'platformadmin'; /* 系统设置仅平台管理员可维护 */
-  var MODS = [['dashboard','演练看板'],['workbench','角色工作台'],['collab','演练导调'],['scenarios','剧本库与编排'],['projects','演练项目'],['screen','监视大屏'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['report','演练报告'],['ledger','台账统计'],['knowledge','预案知识库'],['admin','系统设置'],['dictionary','流程字典']];
+  var MODS = [['dashboard','演练看板'],['workbench','角色工作台'],['collab','演练导调'],['scenarios','剧本库与编排'],['projects','演练项目'],['screen','监视大屏'],['evidence','取证归档'],['replay','时序回放'],['evaluation','复盘评估'],['report','演练报告'],['ledger','台账统计'],['knowledge','预案知识库'],['admin','系统设置']];
   function roleName(id){ var r = MOCK.ROLES.filter(function(x){ return x.id===id; })[0]; return r ? r.name : id; }
   function objOf(a){ var m = a.match(/《(.+?)》/); if(m) return m[1]; var i = a.indexOf('：'); return i>=0 ? a.slice(i+1) : '—'; }
 
@@ -61,6 +76,7 @@ document.addEventListener('app:ready', function(e){
     +   '<div class="tab" data-t="forms">'+App.icon('file')+'表单模板</div>'
     +   '<div class="tab" data-t="audit">'+App.icon('eye')+'审计日志</div>'
     +   '<div class="tab" data-t="ops">'+App.icon('db')+'通知与备份</div>'
+    +   (BRAND_ADMIN ? '<div class="tab" data-t="dict">'+App.icon('file')+'业务字典</div>' : '')
     +   (BRAND_ADMIN ? '<div class="tab" data-t="brand">'+App.icon('admin')+'基本信息设置</div>' : '')
     + '</div>'
     + '<div class="adm-pane on" id="pane-users">'
@@ -78,7 +94,11 @@ document.addEventListener('app:ready', function(e){
     +   '<div class="table-wrap"><table class="table mx-table"><thead><tr><th>角色 / 说明</th>'+MODS.map(function(m){ return '<th>'+m[1]+'</th>'; }).join('')+'</tr></thead><tbody id="mxBody"></tbody></table></div>'
     +   '<div class="tiny mt3"><span class="tag yellow">高亮行</span> = 外部单位角色（卫健局/网信办/网安大队），仅可见医院主动上报的报送材料，不可见内网原始数据与技术日志。平台管理员「系统管理」权限不可移除；停用角色不再出现在登录页；仍有账号绑定的角色不可删除；上移/下移调整登录页角色卡片顺序。</div>'
     +   '<div class="flex gap3 mt4" style="align-items:center;flex-wrap:wrap"><button class="btn" id="mxAddBtn">'+App.icon('plus')+'新增角色</button><button class="btn primary" id="mxSaveBtn">'+App.icon('check')+'保存权限变更</button><span class="tiny dim">新增角色后可为其分配账号；保存后已登录账号刷新页面即生效</span></div>'
-    + '</div></div>'
+    + '</div>'
+    + (BRAND_ADMIN ? '<div class="card mt4"><div class="card-title">'+App.icon('chat')+'会商频道配置<span class="more tiny dim">频道 key → 名称 + 允许访问的角色</span></div>'
+        + '<div class="dict-hint">分组成员当前由服务端策略决定（<code>bootstrap.go</code> 硬编码），本配置仅控制频道定义与可见角色。</div>'
+        + '<div id="chBox"><span class="tiny dim">加载中…</span></div></div>' : '')
+    + '</div>'
     + '<div class="adm-pane" id="pane-forms">'
     +   '<div class="card"><div class="card-title">'+App.icon('file')+'上报文书表单模板<span class="more" id="fAddBtn">'+App.icon('plus')+'新建模板</span></div>'
     +   '<div class="table-wrap"><table class="table"><thead><tr><th>编号</th><th>模板名称</th><th>字段数</th><th>已配置说明</th><th>操作</th></tr></thead><tbody id="fBody"></tbody></table></div></div>'
@@ -122,7 +142,16 @@ document.addEventListener('app:ready', function(e){
     +       '</div>'
     +     '</div>'
     +   '</div>'
+    + (BRAND_ADMIN ? '<div class="card mt4" id="ntCard"><div class="card-title">'+App.icon('bell')+'站内消息模板<span class="more tiny dim">8 种系统事件 · {变量} 发送时替换</span></div>'
+        + '<div id="ntBox"><span class="tiny dim">加载中…</span></div></div>' : '')
     + '</div>'
+    + (BRAND_ADMIN ?
+      '<div class="adm-pane" id="pane-dict">'
+      + '<div class="card"><div class="card-title">'+App.icon('file')+'业务字典<span class="more tiny dim">前端下拉与枚举的唯一真源 · 修改后保存即生效</span></div>'
+      +   '<div class="dict-mini-tabs" id="bdTabs"></div>'
+      +   '<div class="dict-edit-area" id="bdBox"><span class="tiny dim">加载中…</span></div>'
+      + '</div>'
+      + '</div>' : '')
     + (BRAND_ADMIN ?
       '<div class="adm-pane" id="pane-brand">'
       + '<div class="grid grid-3">'
@@ -155,12 +184,17 @@ document.addEventListener('app:ready', function(e){
     + '';
 
   /* ---------- 页签 ---------- */
+  function showTab(name){
+    var pane = document.getElementById('pane-'+name);
+    if(!pane) return false;
+    document.querySelectorAll('#admTabs .tab').forEach(function(x){ x.classList.toggle('active', x.dataset.t===name); });
+    document.querySelectorAll('.adm-pane').forEach(function(p){ p.classList.toggle('on', p.id==='pane-'+name); });
+    return true;
+  }
   document.querySelectorAll('#admTabs .tab').forEach(function(tab){
-    tab.onclick = function(){
-      document.querySelectorAll('#admTabs .tab').forEach(function(x){ x.classList.toggle('active', x===tab); });
-      document.querySelectorAll('.adm-pane').forEach(function(p){ p.classList.toggle('on', p.id==='pane-'+tab.dataset.t); });
-    };
+    tab.onclick = function(){ showTab(tab.dataset.t); };
   });
+  if(/^#(users|matrix|forms|audit|ops|dict|brand)$/.test(location.hash)){ showTab(location.hash.slice(1)); }
 
   /* ---------- a) 用户账号 ---------- */
   function roleTags(u){
@@ -896,8 +930,319 @@ document.addEventListener('app:ready', function(e){
   }
 
 
+  /* ---------- h) 字典类编辑器（站内消息模板 / 会商频道 / 业务字典） ---------- */
+  var NT_VARS = {
+    project:{cn:'项目名称',sample:'XX医院勒索病毒应急演练'}, projectId:{cn:'演练项目编号',sample:'P20261105-01'},
+    mode:{cn:'演练模式',sample:'实战版'}, scenario:{cn:'关联剧本名称',sample:'勒索病毒攻击应急响应'},
+    level:{cn:'事件等级',sample:'较大'}, date:{cn:'计划演练日期',sample:'2026-11-05'},
+    target:{cn:'演练目标',sample:'检验应急响应流程'}, action:{cn:'动作',sample:'演练开始'},
+    resumed:{cn:'状态描述',sample:'已启动'}, title:{cn:'节点/任务标题',sample:'隔离受感染主机'},
+    taskId:{cn:'任务编号',sample:'T001'}, user:{cn:'处置人姓名',sample:'张医生'},
+    role:{cn:'处置人角色',sample:'信息科'}, done:{cn:'已完成节点数',sample:'3'},
+    total:{cn:'节点总数',sample:'12'}, correct:{cn:'判定结果',sample:'判定正确'},
+    reason:{cn:'跳过原因',sample:'该流程不属于本次事件处置范围'}, score:{cn:'得分',sample:'85'},
+    hit:{cn:'正确流程完成数',sample:'9'}, grade:{cn:'评级',sample:'良好'},
+    count:{cn:'考评指标数',sample:'9'}, sum:{cn:'合计得分',sample:'82.5'}, max:{cn:'满分说明',sample:'（满分 100）'}
+  };
+  var NT_EVENTS = [
+    {key:'drill_start',name:'演练开始/继续',vars:['action','project','resumed','mode','level']},
+    {key:'drill_end',name:'演练结束',vars:['project','mode']},
+    {key:'drill_end_score',name:'演练结束·综合得分',vars:['project','mode','score','hit','total','grade']},
+    {key:'node_done',name:'节点完成',vars:['title','project','taskId','user','role','done','total']},
+    {key:'node_submit',name:'节点处置提交',vars:['title','project','user','correct']},
+    {key:'node_skip',name:'节点跳过',vars:['title','project','user','reason','score']},
+    {key:'auto_eval',name:'系统自动考评完成',vars:['count','sum','max']},
+    {key:'project_created',name:'演练项目创建',vars:['project','projectId','mode','scenario','level','date','target']}
+  ];
+  var NT_SOURCES = [
+    {v:'演练调度',l:'演练调度（项目创建/开始/结束等自动通知）'},
+    {v:'角色工作台',l:'角色工作台（节点完成等任务提醒）'},
+    {v:'演练导调中心',l:'演练导调中心（节点处置/跳过提醒）'},
+    {v:'复盘评估',l:'复盘评估（自动考评结果）'}
+  ];
+  var NT_FALLBACK = {
+    drill_start:{title:'{action} · {project}',desc:'演练项目「{project}」{resumed}（{mode}，{level}级事件）。请各参演角色进入角色工作台按预案处置。',source:'演练调度',level:'P0'},
+    drill_end:{title:'演练结束 · {project}',desc:'演练项目「{project}」（{mode}）已结束，请前往复盘评估查看综合得分与考评结果。',source:'演练调度',level:'P1'},
+    drill_end_score:{title:'演练结束 · 综合得分 {score} 分',desc:'演练项目「{project}」（{mode}）已结束；正确流程完成 {hit}/{total} 项，评级 {grade}。',source:'演练调度',level:'P1'},
+    node_done:{title:'节点完成 · {title}',desc:'演练项目「{project}」任务 {taskId} 已由 {user}（{role}）完成，已完成 {done}/{total} 个节点。',source:'角色工作台',level:'P2'},
+    node_submit:{title:'节点处置 · {title}',desc:'演练项目「{project}」由 {user} 提交处置记录；{correct}。',source:'演练导调中心',level:'P2'},
+    node_skip:{title:'节点处置 · {title}',desc:'演练项目「{project}」由 {user} 判定该流程不执行（跳过）；{reason}。',source:'演练导调中心',level:'P2'},
+    auto_eval:{title:'系统自动考评完成',desc:'已更新 {count} 项考评指标，合计得分 {sum}{max}。',source:'复盘评估',level:'P1'},
+    project_created:{title:'演练项目已创建 · {project}',desc:'演练项目「{project}」（{mode}）已创建，关联剧本「{scenario}」（{level}级），计划日期 {date}。请参演角色进入系统查看演练脚本。',source:'演练调度',level:'P1'}
+  };
+  function ntEventMeta(k){ for(var i=0;i<NT_EVENTS.length;i++){ if(NT_EVENTS[i].key===k) return NT_EVENTS[i]; } return null; }
+  function ntVarChips(evKey, target){
+    var meta = ntEventMeta(evKey); if(!meta) return '';
+    return '<div class="nt-var-chips"><span class="nt-lbl">插入变量：</span>'
+      + meta.vars.map(function(v){
+          var d = NT_VARS[v] || {cn:v,sample:''};
+          return '<button type="button" class="btn tiny ntVarChip" data-target="'+target+'" data-var="'+v
+            +'" title="{'+v+'} = '+App.esc(d.cn)+'，示例：'+App.esc(d.sample)+'">{'+v+'} '+App.esc(d.cn)+'</button>';
+        }).join('') + '</div>';
+  }
+  function ntSourceOptions(cur){
+    var html = '<option value="">请选择消息来源</option>' + NT_SOURCES.map(function(s){
+      return '<option value="'+App.esc(s.v)+'"'+(cur===s.v?' selected':'')+'>'+App.esc(s.l)+'</option>';
+    }).join('');
+    if(cur && !NT_SOURCES.some(function(s){ return s.v===cur; })){
+      html += '<option value="'+App.esc(cur)+'" selected>'+App.esc(cur)+'（历史值，非系统内置）</option>';
+    }
+    return html;
+  }
+  function markDirty(boxId, id){
+    var d = document.getElementById(id); if(d) d.style.display = '';
+  }
+  function dictSave(key, value, btn, okMsg){
+    btn.disabled = true;
+    API.saveDict(key, value).then(function(){
+      App.toast(okMsg||'字典已保存','ok');
+    }).catch(function(e){
+      btn.disabled = false;
+      App.toast((e&&e.message)||(e&&e.error)||'保存失败','err');
+    });
+  }
+
+  /* --- 站内消息模板（通知与备份页签） --- */
+  function initNotif(){
+    var box = document.getElementById('ntBox'); if(!box) return;
+    var cur = {};
+    function paint(){
+      var keys = Object.keys(cur);
+      if(!keys.length){ box.innerHTML = '<span class="dim">未读取到 notif_templates，请检查种子数据。</span>'; return; }
+      var html = '<div class="dict-hint">模板中 <code>{变量名}</code> 会在发送时自动替换；点击「插入变量」可插入到标题/正文的光标位置。'
+        + '消息来源只能从系统内置的 '+NT_SOURCES.length+' 个来源中选择。level：P0=紧急 / P1=重要 / P2=一般。</div>';
+      keys.forEach(function(evKey){
+        var ev = cur[evKey] || {title:'',desc:'',source:'',level:'P2'};
+        var meta = ntEventMeta(evKey);
+        var lvSel = ['P0','P1','P2'].map(function(l){ return '<option value="'+l+'"'+(l===ev.level?' selected':'')+'>'+l+'</option>'; }).join('');
+        html += '<div class="dict-sub-card nt-ev-card" data-ev="'+App.esc(evKey)+'">'
+          + '<div class="dict-row" style="margin-bottom:8px">'
+          +  '<span style="font-weight:700;color:var(--text);font-family:monospace">event: '+App.esc(evKey)+'</span>'
+          +  (meta ? '<span class="nt-ev-name">'+App.esc(meta.name)+'</span>' : '<span class="nt-ev-name" style="color:var(--warn)">未被系统读取的事件键</span>')
+          +  '<button class="btn sm danger ntDel" data-ev="'+App.esc(evKey)+'" style="margin-left:auto">'+App.icon('trash')+'</button></div>'
+          + '<div class="dict-row"><label class="tiny dim" style="min-width:48px">标题 <span class="req">*</span></label><input class="input ntTitle" data-ev="'+App.esc(evKey)+'" value="'+App.esc(ev.title||'')+'" style="flex:1"></div>'
+          + ntVarChips(evKey,'title')
+          + '<div class="dict-row" style="align-items:flex-start"><label class="tiny dim" style="min-width:48px">正文 <span class="req">*</span></label><textarea class="input ntDesc" data-ev="'+App.esc(evKey)+'" rows="3" style="flex:1;resize:vertical">'+App.esc(ev.desc||'')+'</textarea></div>'
+          + ntVarChips(evKey,'desc')
+          + '<div class="dict-row"><label class="tiny dim" style="min-width:48px">来源 <span class="req">*</span></label><select class="input ntSource" data-ev="'+App.esc(evKey)+'" style="max-width:340px">'+ntSourceOptions(ev.source||'')+'</select>'
+          +  '<label class="tiny dim" style="margin-left:16px">等级</label><select class="input ntLevel" data-ev="'+App.esc(evKey)+'" style="max-width:100px">'+lvSel+'</select></div>'
+          + '</div>';
+      });
+      html += '<div class="flex gap3 mt3" style="align-items:center;flex-wrap:wrap"><button class="btn primary" id="ntSaveBtn">'+App.icon('check')+'保存模板</button>'
+        + '<button class="btn" id="ntReloadBtn">'+App.icon('refresh')+'重新加载</button>'
+        + '<span class="tiny dim" id="ntDirty" style="display:none;color:var(--warn)">有未保存的修改</span></div>';
+      box.innerHTML = html;
+      box.querySelectorAll('.ntTitle,.ntDesc').forEach(function(inp){
+        ['click','keyup','select','blur'].forEach(function(evt){
+          inp.addEventListener(evt, function(){ inp.dataset.caret = inp.selectionStart==null?inp.value.length:inp.selectionStart; });
+        });
+      });
+      box.querySelectorAll('.ntTitle,.ntDesc,.ntSource,.ntLevel').forEach(function(inp){
+        inp.addEventListener('input', function(){ markDirty('ntBox','ntDirty'); });
+      });
+    }
+    function collect(){
+      var obj = {}, seen = {};
+      box.querySelectorAll('.ntTitle,.ntDesc,.ntSource,.ntLevel').forEach(function(inp){
+        var ev = inp.getAttribute('data-ev');
+        if(!seen[ev]){ seen[ev]=1; obj[ev] = {title:'',desc:'',source:'',level:'P2'}; }
+        if(inp.classList.contains('ntTitle')) obj[ev].title = (inp.value||'').trim();
+        if(inp.classList.contains('ntDesc')) obj[ev].desc = (inp.value||'').trim();
+        if(inp.classList.contains('ntSource')) obj[ev].source = (inp.value||'').trim();
+        if(inp.classList.contains('ntLevel')) obj[ev].level = inp.value||'P2';
+      });
+      return obj;
+    }
+    function validate(){
+      var missing = [], unknown = [], unused = [];
+      box.querySelectorAll('.nt-ev-card').forEach(function(card){
+        var evKey = card.getAttribute('data-ev'), meta = ntEventMeta(evKey);
+        var title = (card.querySelector('.ntTitle')||{}).value||'';
+        var desc = (card.querySelector('.ntDesc')||{}).value||'';
+        var source = (card.querySelector('.ntSource')||{}).value||'';
+        var name = meta ? meta.name : evKey;
+        if(!title.trim()) missing.push(name+' 的标题');
+        if(!desc.trim()) missing.push(name+' 的正文');
+        if(!source.trim()) missing.push(name+' 的消息来源');
+        if(!meta){ unused.push(evKey); return; }
+        [title,desc].forEach(function(txt){
+          var re = /\{([A-Za-z0-9_]+)\}/g, m;
+          while((m = re.exec(txt))){ if(meta.vars.indexOf(m[1])<0 && unknown.indexOf('{'+m[1]+'}')<0) unknown.push('{'+m[1]+'}'); }
+        });
+      });
+      return {ok:!missing.length, missing:missing, unknown:unknown, unused:unused};
+    }
+    box.addEventListener('click', function(ev){
+      var chip = ev.target.closest('.ntVarChip');
+      if(chip){
+        var card = chip.closest('.nt-ev-card');
+        var inp = card && card.querySelector(chip.getAttribute('data-target')==='title'?'.ntTitle':'.ntDesc');
+        if(inp){
+          var token = '{'+chip.getAttribute('data-var')+'}';
+          var pos = inp.dataset.caret==null ? inp.value.length : Math.min(+inp.dataset.caret, inp.value.length);
+          inp.value = inp.value.slice(0,pos)+token+inp.value.slice(pos);
+          var next = pos+token.length;
+          inp.dataset.caret = next; inp.focus();
+          if(inp.setSelectionRange) inp.setSelectionRange(next,next);
+          inp.dispatchEvent(new Event('input',{bubbles:true}));
+        }
+        return;
+      }
+      if(ev.target.closest('#ntReloadBtn')){ load(); return; }
+      if(ev.target.closest('#ntSaveBtn')){
+        var btn = ev.target.closest('#ntSaveBtn'), chk = validate();
+        if(!chk.ok){ App.toast('请补全必填项：'+chk.missing.slice(0,4).join('、')+(chk.missing.length>4?' 等':''),'err'); return; }
+        dictSave('notif_templates', collect(), btn, '站内消息模板已保存');
+        var d = document.getElementById('ntDirty'); if(d) d.style.display='none';
+        var warn = [];
+        if(chk.unknown.length) warn.push('未知变量 '+chk.unknown.join(' ')+' 不会被替换');
+        if(chk.unused.length) warn.push('event 键 '+chk.unused.join('、')+' 未被系统读取');
+        if(warn.length) setTimeout(function(){ App.toast(warn.join('；'),'warn'); }, 600);
+        return;
+      }
+      var del = ev.target.closest('.ntDel');
+      if(del){
+        var evKey = del.getAttribute('data-ev'), meta = ntEventMeta(evKey);
+        var doDel = function(){ delete cur[evKey]; paint(); };
+        if(!meta){ doDel(); return; }
+        App.modal({ title:'删除站内消息模板',
+          body:'<div class="sim-banner" style="border-color:rgba(248,81,73,.5);color:var(--err);background:var(--err-dim)">'+App.icon('alert')
+            +'<span>Go 服务端没有内置兜底：删除后「'+App.esc(meta.name)+'」事件将<b>不再发送任何站内消息</b>。保存后生效。</span></div>',
+          foot:'<button class="btn" id="ntDelNo">取消</button><button class="btn danger" id="ntDelYes">'+App.icon('trash')+'确认删除</button>',
+          onOpen:function(ov){
+            ov.querySelector('#ntDelNo').onclick = ov.close;
+            ov.querySelector('#ntDelYes').onclick = function(){ ov.close(); doDel(); };
+          } });
+      }
+    });
+    function load(){
+      box.innerHTML = '<span class="tiny dim">加载中…</span>';
+      API.getDict('notif_templates').then(function(res){ cur = res.value||{}; paint(); })
+        .catch(function(e){ box.innerHTML='<span class="dim">加载失败：'+App.esc((e&&e.message)||'未知错误')+'</span>'; });
+    }
+    load();
+  }
+
+  /* --- 会商频道（权限矩阵页签） --- */
+  function initChannels(){
+    var box = document.getElementById('chBox'); if(!box) return;
+    var cur = {};
+    function paint(){
+      var roles = (window.MOCK && MOCK.ROLES) ? MOCK.ROLES : [];
+      var html = '';
+      var keys = Object.keys(cur);
+      if(!keys.length) html = '<span class="dim">未读取到 chat_channels</span>';
+      keys.forEach(function(chKey){
+        var ch = cur[chKey] || {label:'',roles:[]};
+        var rolesChk = roles.map(function(r){
+          var ck = (ch.roles||[]).indexOf(r.id)>=0 ? ' checked':'';
+          return '<label class="tiny" style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;margin-bottom:4px"><input type="checkbox" class="chRole" value="'+r.id+'" data-ch="'+App.esc(chKey)+'"'+ck+'>'+App.esc(r.name)+'</label>';
+        }).join('');
+        html += '<div class="dict-sub-card"><div class="dict-row">'
+          + '<input class="input chKey" style="max-width:150px" value="'+App.esc(chKey)+'" data-old="'+App.esc(chKey)+'" placeholder="频道key">'
+          + '<input class="input chLabel" style="max-width:280px;flex:1" value="'+App.esc(ch.label||'')+'" data-ch="'+App.esc(chKey)+'" placeholder="频道名称">'
+          + '<button class="btn sm danger chDel" data-ch="'+App.esc(chKey)+'">'+App.icon('trash')+'</button></div>'
+          + '<div class="mt2">'+rolesChk+'</div></div>';
+      });
+      html += '<div class="flex gap3 mt3" style="align-items:center;flex-wrap:wrap"><button class="btn primary" id="chSaveBtn">'+App.icon('check')+'保存频道配置</button>'
+        + '<button class="btn" id="chAddBtn">'+App.icon('plus')+'新增频道</button>'
+        + '<button class="btn" id="chReloadBtn">'+App.icon('refresh')+'重新加载</button>'
+        + '<span class="tiny dim" id="chDirty" style="display:none;color:var(--warn)">有未保存的修改</span></div>';
+      box.innerHTML = html;
+      box.querySelectorAll('input,select').forEach(function(inp){ inp.addEventListener('input', function(){ markDirty('chBox','chDirty'); }); });
+    }
+    function collect(){
+      var obj = {};
+      box.querySelectorAll('.chKey').forEach(function(kInput){
+        var oldKey = kInput.getAttribute('data-old'), newKey = (kInput.value||'').trim();
+        if(!newKey) return;
+        var labelInput = box.querySelector('.chLabel[data-ch="'+oldKey+'"]');
+        var roles = [];
+        box.querySelectorAll('.chRole[data-ch="'+oldKey+'"]:checked').forEach(function(c){ roles.push(c.value); });
+        obj[newKey] = { label: labelInput ? (labelInput.value||'').trim() : '', roles: roles };
+      });
+      return obj;
+    }
+    box.addEventListener('click', function(ev){
+      if(ev.target.closest('#chReloadBtn')){ load(); return; }
+      if(ev.target.closest('#chAddBtn')){ cur['频道'+Object.keys(cur).length] = {label:'新频道',roles:[]}; paint(); return; }
+      var del = ev.target.closest('.chDel');
+      if(del){ delete cur[del.getAttribute('data-ch')]; paint(); return; }
+      if(ev.target.closest('#chSaveBtn')){
+        var v = collect();
+        if(!Object.keys(v).length){ App.toast('至少保留一个频道','err'); return; }
+        dictSave('chat_channels', v, ev.target.closest('#chSaveBtn'), '会商频道配置已保存');
+        var d = document.getElementById('chDirty'); if(d) d.style.display='none';
+      }
+    });
+    function load(){
+      box.innerHTML = '<span class="tiny dim">加载中…</span>';
+      API.getDict('chat_channels').then(function(res){ cur = res.value||{}; paint(); })
+        .catch(function(e){ box.innerHTML='<span class="dim">加载失败：'+App.esc((e&&e.message)||'未知错误')+'</span>'; });
+    }
+    load();
+  }
+
+  /* --- 业务字典（新增页签，5 个数组型枚举可视化编辑） --- */
+  var BD_KEYS = [
+    {key:'levels',label:'演练等级',desc:'剧本与项目下拉使用的等级枚举'},
+    {key:'projTypes',label:'项目类型',desc:'新建演练项目时的类型选项'},
+    {key:'eventTypes',label:'事件类型',desc:'台账统计中的事件类型选项'},
+    {key:'ev_types',label:'证据类型',desc:'取证归档与证据计划使用的材料类型'},
+    {key:'script_action_types',label:'剧本处置动作',desc:'剧本编排「处置动作」下拉选项'}
+  ];
+  function initBizDict(){
+    var tabsEl = document.getElementById('bdTabs'), box = document.getElementById('bdBox');
+    if(!tabsEl || !box) return;
+    var curKey = BD_KEYS[0].key, curVal = [], loaded = {};
+    tabsEl.innerHTML = BD_KEYS.map(function(k){ return '<button class="tab bdTab" data-key="'+k.key+'">'+App.esc(k.label)+'</button>'; }).join('');
+    function meta(){ return BD_KEYS.filter(function(k){ return k.key===curKey; })[0]; }
+    function paint(){
+      tabsEl.querySelectorAll('.bdTab').forEach(function(t){ t.classList.toggle('on', t.getAttribute('data-key')===curKey); });
+      var m = meta();
+      var html = '<div class="dict-hint">'+App.esc(m.desc)+'。数组项为空时无法保存；修改后点击「保存」即对所有页面生效。</div>';
+      html += curVal.map(function(item,i){
+        return '<div class="dict-row"><input class="input bdItem" value="'+App.esc(item)+'" data-i="'+i+'" style="flex:1;max-width:420px">'
+          + '<button class="btn sm danger bdDel" data-i="'+i+'">'+App.icon('x')+'</button></div>';
+      }).join('');
+      html += '<div class="flex gap3 mt3" style="align-items:center;flex-wrap:wrap"><button class="btn primary" id="bdSaveBtn">'+App.icon('check')+'保存字典</button>'
+        + '<button class="btn" id="bdAddBtn">'+App.icon('plus')+'新增一项</button>'
+        + '<button class="btn" id="bdReloadBtn">'+App.icon('refresh')+'重新加载</button>'
+        + '<span class="tiny dim" id="bdDirty" style="display:none;color:var(--warn)">有未保存的修改</span></div>';
+      box.innerHTML = html;
+    }
+    function collect(){
+      return Array.prototype.map.call(box.querySelectorAll('.bdItem'), function(i){ return (i.value||'').trim(); }).filter(Boolean);
+    }
+    function load(key){
+      curKey = key; box.innerHTML = '<span class="tiny dim">加载中…</span>';
+      API.getDict(key).then(function(res){
+        curVal = Array.isArray(res.value) ? res.value.slice() : [];
+        loaded[key] = true; paint();
+      }).catch(function(e){ box.innerHTML = '<span class="dim">加载失败：'+App.esc((e&&e.message)||'未知错误')+'</span>'; });
+    }
+    tabsEl.addEventListener('click', function(ev){
+      var t = ev.target.closest('.bdTab'); if(!t) return;
+      load(t.getAttribute('data-key'));
+    });
+    box.addEventListener('input', function(ev){ if(ev.target.classList.contains('bdItem')) markDirty('bdBox','bdDirty'); });
+    box.addEventListener('click', function(ev){
+      if(ev.target.closest('#bdReloadBtn')){ load(curKey); return; }
+      if(ev.target.closest('#bdAddBtn')){ curVal = collect(); curVal.push('新条目'); paint(); return; }
+      var del = ev.target.closest('.bdDel');
+      if(del){ curVal = collect(); curVal.splice(+del.getAttribute('data-i'),1); paint(); return; }
+      if(ev.target.closest('#bdSaveBtn')){
+        var v = collect();
+        if(!v.length){ App.toast('字典至少保留一项','err'); return; }
+        dictSave(curKey, v, ev.target.closest('#bdSaveBtn'), '「'+meta().label+'」已保存');
+        var d = document.getElementById('bdDirty'); if(d) d.style.display='none';
+      }
+    });
+    load(curKey);
+  }
+
   renderUsers(); renderForms(); renderAudit(); loadLastBackup(); renderBackupList();
-  if(BRAND_ADMIN){ initBrand(); initReset(); }
+  if(BRAND_ADMIN){ initBrand(); initReset(); initNotif(); initChannels(); initBizDict(); }
 });
 App.boot('admin');
 </script>

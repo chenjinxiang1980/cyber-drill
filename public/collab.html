@@ -35,7 +35,7 @@ document.addEventListener('app:ready', function(e){
         +   '<div class="sb-acts">'
         +     '<a class="btn primary" href="projects.html">'+App.icon('projects')+'创建演练项目</a>'
         +     '<a class="btn" href="scenarios.html">'+App.icon('scenarios')+'选择剧本启动推演</a>'
-        +     '<a class="btn" href="dictionary.html">'+App.icon('dictionary')+'查看频道权限配置</a>'
+        +     '<a class="btn" href="admin.html#matrix">'+App.icon('chat')+'查看频道权限配置</a>'
         +   '</div>'
         +   '<div class="sb-meta">'
         +     '<div class="m-item"><b>'+scens.length+'</b>内置场景</div>'
@@ -48,7 +48,7 @@ document.addEventListener('app:ready', function(e){
         +   '<b>· 院内演练会商频道</b>：值守员、网安管理员、系统管理员、医务处、临床科室、信息科负责人、院应急指挥部等院内角色之间同步研判结论、处置进展与资源需求。<br>'
         +   '<b>· 院外上报沟通频道</b>：向市卫健局、市网信办、市网安大队报送材料与进展，并接收上级反馈意见。<br>'
         +   '<b>· 节点操作情况盘面</b>：实时显示各角色在剧本节点上的处置状态（未处置 / 处置中 / 已完成 / 超时），导调组可据此调度资源、督导关键节点。<br>'
-        +   '频道访问权限由「流程字典 → 角色映射与权限矩阵 → 会商频道配置」统一维护；消息与附件写入演练数据库并记入审计日志，聊天附件自动归档至取证模块。</div>'
+        +   '频道访问权限由「系统设置 → 权限矩阵 → 会商频道配置」统一维护；消息与附件写入演练数据库并记入审计日志，聊天附件自动归档至取证模块。</div>'
         + '</div>';
     }).catch(function(){
       page.innerHTML = '<div class="forbidden">'+App.icon('alert')+'<h2>数据加载失败</h2><p>请检查网络或联系管理员</p></div>';
@@ -56,7 +56,7 @@ document.addEventListener('app:ready', function(e){
     return;
   }
 
-  /* 频道列表 + 权限：**全部**来自流程字典 chat_channels；无硬编码 fallback */
+  /* 频道列表 + 权限：**全部**来自系统设置「权限矩阵」的 chat_channels；无硬编码 fallback */
   var esc = App.esc; /* 本地别名，文件内大量复用 */
   var CHAT_ACCESS = {}; /* 运行时字典：{ inner:{label, roles:[...]}, external:{label, roles:[...]} } */
   var GROUPS = [], curGroup = ''; /* GROUPS：当前角色可访问的频道 {key, label}  */
@@ -100,9 +100,9 @@ document.addEventListener('app:ready', function(e){
         + '<div class="embed" style="min-height:320px">'
         + '<div class="empty">'+App.icon('lock')
         + (noAccess
-          ? '<div>当前角色「'+App.esc(role.name)+'」未开通任何演练导调中心频道权限</div><div class="tiny dim mt2">频道权限由流程字典维护，请联系演练导调组授权。</div>'
-          : '<div>系统尚未配置会商频道</div><div class="tiny dim mt2">请到「流程字典 → 角色映射与权限矩阵 → 会商频道配置」添加频道。</div>')
-        + '<div class="tiny dim mt3">点击左侧「流程字典」→ 会商频道配置 → 编辑「roles」数组，把需要授权的角色 id 加进去即可。</div></div></div>';
+          ? '<div>当前角色「'+App.esc(role.name)+'」未开通任何演练导调中心频道权限</div><div class="tiny dim mt2">频道权限由「系统设置 → 权限矩阵」维护，请联系演练导调组授权。</div>'
+          : '<div>系统尚未配置会商频道</div><div class="tiny dim mt2">请到「系统设置 → 权限矩阵 → 会商频道配置」添加频道。</div>')
+        + '<div class="tiny dim mt3">进入「系统设置 → 权限矩阵 → 会商频道配置」，勾选需要授权的角色即可。</div></div></div>';
       return;
     }
 
@@ -111,7 +111,7 @@ document.addEventListener('app:ready', function(e){
       +   '<div class="sub">院内演练会商与院外上报沟通 · 消息实时同步、附件真实上传并留痕归档</div></div>'
       +   '<div class="acts"><span class="tag green" id="liveTag">● 实时同步中</span>'
       +   '<button class="btn" id="btnReload">'+App.icon('refresh')+'刷新消息</button></div></div>'
-      + '<div class="sim-banner">'+App.icon('archive')+'<span>当前角色可用频道：<b>'+GROUPS.map(function(g){ return g.label; }).join('、')+'</b>。频道权限由「流程字典 → 会商频道配置」统一维护，可按角色细化授权。消息与附件写入演练数据库并记入审计日志；聊天附件自动归档至取证模块。演练数据均为模拟，不得发送真实患者信息或恶意样本。</span></div>'
+      + '<div class="sim-banner">'+App.icon('archive')+'<span>当前角色可用频道：<b>'+GROUPS.map(function(g){ return g.label; }).join('、')+'</b>。频道权限由「系统设置 → 权限矩阵」统一维护，可按角色细化授权。消息与附件写入演练数据库并记入审计日志；聊天附件自动归档至取证模块。演练数据均为模拟，不得发送真实患者信息或恶意样本。</span></div>'
       + '<div class="tabs" id="chatTabs"></div>'
       + '<div class="card" style="padding:0;overflow:hidden">'
       +   '<div class="collab-split">'

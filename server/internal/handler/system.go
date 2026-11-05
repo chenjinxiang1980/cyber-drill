@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -240,6 +241,49 @@ func GetDrillDict(database *db.DB) gin.HandlerFunc {
 	}
 }
 
+// notifSourceOptions 站内消息来源合法取值。与各 pushNotif 调用点实际写入 notifs.source 的值一致。
+var notifSourceOptions = map[string]bool{
+	"演练调度":     true,
+	"角色工作台":   true,
+	"演练导调中心": true,
+	"复盘评估":     true,
+}
+
+// validateNotifTemplatesDict 校验 notif_templates：必填标题/正文/来源，来源必须在合法枚举内。
+// 未知变量不在此阻断（Go fillVars 会原样保留未知占位符）。
+func validateNotifTemplatesDict(payload any) string {
+	m, ok := payload.(map[string]any)
+	if !ok {
+		return "消息模板必须是 {event: {title,desc,source,level}} 对象"
+	}
+	for ev, raw := range m {
+		t, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Sprintf("模板 %s 格式无效", ev)
+		}
+		title, _ := t["title"].(string)
+		desc, _ := t["desc"].(string)
+		source, _ := t["source"].(string)
+		level, _ := t["level"].(string)
+		if strings.TrimSpace(title) == "" {
+			return fmt.Sprintf("模板 %s 缺少标题", ev)
+		}
+		if strings.TrimSpace(desc) == "" {
+			return fmt.Sprintf("模板 %s 缺少正文", ev)
+		}
+		if strings.TrimSpace(source) == "" {
+			return fmt.Sprintf("模板 %s 缺少消息来源", ev)
+		}
+		if !notifSourceOptions[source] {
+			return fmt.Sprintf("模板 %s 的消息来源「%s」非法，必须是：演练调度 / 角色工作台 / 演练导调中心 / 复盘评估", ev, source)
+		}
+		if level != "" && level != "P0" && level != "P1" && level != "P2" {
+			return fmt.Sprintf("模板 %s 的消息等级「%s」非法，必须是 P0 / P1 / P2", ev, level)
+		}
+	}
+	return ""
+}
+
 // PutDrillDict PUT /api/system/dict/:key —— 写 dict 条目
 // body 可为任意 JSON（存为 value TEXT）
 // Node 版返回 {ok: true}
@@ -257,6 +301,12 @@ func PutDrillDict(database *db.DB) gin.HandlerFunc {
 		payload, wrapped := body["value"]
 		if !wrapped {
 			payload = any(body) // 兼容直接提交裸对象
+		}
+		if k == "notif_templates" {
+			if msg := validateNotifTemplatesDict(payload); msg != "" {
+				util.BadRequest(c, msg)
+				return
+			}
 		}
 		if isEmptyDictPayload(payload) {
 			util.BadRequest(c, "字典内容为空，拒绝保存（防止清空配置）")

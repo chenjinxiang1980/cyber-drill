@@ -62,6 +62,12 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 		r.NoRoute(func(c *gin.Context) {
 			orig := c.Request.URL.Path
 
+			// 流程字典页已并入系统设置：旧链接 302 到 admin.html#dict，避免历史书签 404
+			if strings.TrimPrefix(orig, "/") == "dictionary.html" {
+				c.Redirect(http.StatusFound, "/admin.html#dict")
+				return
+			}
+
 			// ---- 安全静态文件服务 ----
 			// 1. URL 解码 + 去除查询串
 			pathRaw := c.Request.URL.Path
