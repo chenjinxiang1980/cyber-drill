@@ -68,6 +68,10 @@ window.API = (function () {
   function getProjectScript(id) {
     return DRILL.get('/content/projects/' + encodeURIComponent(id) + '/script');
   }
+  /* 实战版演练中强制查看脚本（需填写原因；首次记录扣 10 分） */
+  function forceViewProjectScript(id, reason) {
+    return DRILL.post('/content/projects/' + encodeURIComponent(id) + '/script/force', { reason: reason });
+  }
   /* 演练脚本导出：fmt = word(默认) | txt | html，返回带 token 的完整 URL */
   function exportProjectScriptUrl(id, fmt) {
     return '/api/content/projects/' + encodeURIComponent(id) + '/script/export?fmt=' + (fmt || 'word') + '&t=' + encodeURIComponent(sessionStorage.getItem('pzy_token') || '');
@@ -530,7 +534,7 @@ window.API = (function () {
     getSystemStatus: getSystemStatus, resetSystem: resetSystem,
     getDict: getDict, saveDict: saveDict,
     getDrillReport: getDrillReport, markReportExported: markReportExported,
-    getProjectScript: getProjectScript, exportProjectScriptUrl: exportProjectScriptUrl,
+    getProjectScript: getProjectScript, forceViewProjectScript: forceViewProjectScript, exportProjectScriptUrl: exportProjectScriptUrl,
     generateProjectNotify: generateProjectNotify, exportProjectNotifyUrl: exportProjectNotifyUrl,
     getDrillWorkbench: getDrillWorkbench,
     getDrillFlows: getDrillFlows, getDrillFaults: getDrillFaults,

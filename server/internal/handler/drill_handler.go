@@ -570,10 +570,26 @@ func GetProjectScript(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "该项目未关联剧本"})
 			return
 		}
-		// 基础版：只返回正确流程（过滤 end + distractor），与 Node 口径一致。
-		// 实战版：返回全部处置流程（仅过滤 end），混淆流程作为并列选项供参演人员自主研判。
+		// 查看门控（A-8）：实战版演练开始后，参演角色不可直接查看脚本；
+		// 平台管理员（演练项目管理页）不受门控影响，可随时查看全部流程。
+		u := auth.CurrentUser(c)
+		isAdmin := u != nil && u.Role.ID == "platformadmin"
+		forceOK := false
+		if v, ok := c.Get("script_force_ok"); ok {
+			forceOK, _ = v.(bool)
+		}
+		if mode == "实战版" && !isAdmin && statusStarted(status) && !forceOK {
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":  "script_locked",
+				"error": "演练已开始，演练脚本已锁定；如确需查看，请提交强制查看申请（系统将记录并扣 10 分）",
+			})
+			return
+		}
+		// 基础版、以及实战版开始前：只返回正确流程（过滤 end + distractor），与基础版口径一致。
+		// 实战版管理员视角：返回全部处置流程（仅过滤 end），混淆流程作为并列选项。
+		includeDistractors := mode == "实战版" && isAdmin
 		nodeWhere := `scenario_id=? AND type!='end'`
-		if mode != "实战版" {
+		if !includeDistractors {
 			nodeWhere += ` AND COALESCE(flow_type,'correct')!='distractor'`
 		}
 		rows, err := database.Query(`SELECT seq,id,type,title,COALESCE(target,''),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),COALESCE(guide,''),COALESCE(keywords,''),COALESCE(score,0),COALESCE(receiver,''),COALESCE(evidence_req,'[]'),COALESCE(deps,'[]'),COALESCE(timeout,0),COALESCE(form,''),COALESCE(required,1),COALESCE(flow_type,'correct'),COALESCE(anchor_id,'') FROM script_nodes WHERE `+nodeWhere+` ORDER BY seq`, scenarioID)
@@ -636,7 +652,7 @@ func GetProjectScript(database *db.DB) gin.HandlerFunc {
 				"flowType": n.flowType,
 				"anchorId": n.anchorID,
 			}
-			if mode != "实战版" {
+			if !includeDistractors {
 				base["desc"] = n.descr
 				base["guide"] = n.guide
 				if kw := strings.TrimSpace(n.keywords); kw != "" {
@@ -683,20 +699,127 @@ func GetProjectScript(database *db.DB) gin.HandlerFunc {
 		database.QueryRow(`SELECT COALESCE(name,''),COALESCE(type,''),COALESCE(`+"`descr`"+`,''),COALESCE(alert,'') FROM scenarios WHERE id=?`, scenarioID).
 			Scan(&scName, &scType, &scDescr, &scAlert)
 
-		c.JSON(http.StatusOK, gin.H{
+		viewMode := "实战版"
+		if !includeDistractors {
+			viewMode = "基础版"
+		}
+		// 基础版：全程可看，但留一条非扣分类查看审计（A-8 要求）
+		if mode == "基础版" {
+			writeScriptAudit(database, c, u, id, "普通", "", false)
+		}
+
+		resp := gin.H{
 			"ok":           true,
 			"projectId":    id,
 			"name":         name,
 			"projectName":  name,
 			"mode":         mode,
+			"viewMode":     viewMode,
 			"status":       status,
 			"level":        level,
 			"scenario":     gin.H{"id": scenarioID, "name": scName, "type": scType, "desc": scDescr, "alert": scAlert},
 			"members":      members,
 			"script":       list,
-			"instructions": instructionsForMode(mode),
-		})
+			"instructions": instructionsForMode(viewMode),
+		}
+		if v, ok := c.Get("script_force_deducted"); ok {
+			resp["forceView"] = gin.H{"recorded": true, "deducted": v}
+		}
+		c.JSON(http.StatusOK, resp)
 	}
+}
+
+// PostProjectScriptForceView POST /api/content/projects/:id/script/force
+// 实战版演练开始后，参演角色强制查看脚本：校验原因、写审计、首次扣分（幂等），随后复用脚本渲染逻辑返回内容。
+func PostProjectScriptForceView(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.ID == "platformadmin" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "平台管理员可直接查看实战版脚本，无需强制查看"})
+			return
+		}
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		_ = c.ShouldBindJSON(&body)
+
+		var mode, status string
+		err := database.QueryRow(`SELECT COALESCE(mode,'基础版'),COALESCE(status,'') FROM projects WHERE id=?`, id).Scan(&mode, &status)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+			return
+		}
+		if mode != "实战版" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "基础版脚本可直接查看，无需强制查看"})
+			return
+		}
+		if !statusForceAllowed(status) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "当前状态不允许强制查看（仅演练中/暂停时可申请）"})
+			return
+		}
+		reason := strings.TrimSpace(body.Reason)
+		if len([]rune(reason)) < 8 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请填写不少于 8 个字的强制查看原因"})
+			return
+		}
+		var already int
+		_ = database.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE action LIKE ?`,
+			"查看演练脚本|项目="+id+"|类型=强制|扣分=是|%").Scan(&already)
+		deducted := already == 0
+
+		writeScriptAudit(database, c, u, id, "强制", reason, deducted)
+
+		c.Set("script_force_ok", true)
+		c.Set("script_force_deducted", deducted)
+		GetProjectScript(database)(c)
+	}
+}
+
+// statusStarted 判断项目是否已开始（演练中/暂停/已结束/已归档均视为已开始）
+func statusStarted(status string) bool {
+	switch status {
+	case "演练中", "暂停", "已结束", "已归档":
+		return true
+	}
+	return false
+}
+
+// statusForceAllowed 强制查看仅在演练进行中（含暂停）允许
+func statusForceAllowed(status string) bool {
+	return status == "演练中" || status == "暂停"
+}
+
+// writeScriptAudit 写入脚本查看审计（audit_logs 既有表，action 内编码项目/类型/扣分/原因）
+func writeScriptAudit(database *db.DB, c *gin.Context, u *auth.User, projectID, kind, reason string, deducted bool) {
+	if u == nil {
+		return
+	}
+	flag := "否"
+	if deducted {
+		flag = "是"
+	}
+	action := fmt.Sprintf("查看演练脚本|项目=%s|类型=%s|扣分=%s|原因=%s",
+		projectID, kind, flag, truncateRunes(strings.TrimSpace(reason), 200))
+	var uid any
+	if u.ID > 0 {
+		uid = u.ID
+	}
+	_, _ = database.Exec(`INSERT INTO audit_logs (time,user,role_id,user_id,action,ip) VALUES (?,?,?,?,?,?)`,
+		time.Now().Format("2006-01-02 15:04:05"), u.Name, u.Role.ID, uid, action, c.ClientIP())
+}
+
+// truncateRunes 按字符截断，避免 512 列宽溢出
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 func instructionsForMode(mode string) []string {

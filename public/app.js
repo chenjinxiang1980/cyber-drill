@@ -668,11 +668,13 @@ function buildScriptGroups(list){
 function renderScriptBody(container, data, p){
   if(!data || !data.ok){ container.innerHTML = '<div class="center dim">脚本数据异常</div>'; return; }
   var mode = scriptModeOf(data, p);
+  /* 实战版开始前服务端按基础版口径下发（viewMode=基础版），仅展示正确流程 */
+  var viewAs = (data && data.viewMode) || mode;
   var all = Array.isArray(data.script) ? data.script : [];
-  /* 终止节点一律不展示；基础版再过滤混淆节点，实战版保留全部动作 */
+  /* 终止节点一律不展示；基础版口径再过滤混淆节点，实战版保留全部动作 */
   var list = all.filter(function(n){
     if(n.type === 'end') return false;
-    if(mode === '基础版' && String(n.flowType || '') === 'distractor') return false;
+    if(viewAs === '基础版' && String(n.flowType || '') === 'distractor') return false;
     return true;
   });
   var instructionsHtml = (data.instructions || []).map(function(s){ return '<li>'+App.esc(s)+'</li>'; }).join('');
@@ -680,7 +682,7 @@ function renderScriptBody(container, data, p){
   var projectName = data.projectName || data.name || (p && p.name) || '—';
 
   var flowSection;
-  if(mode === '实战版'){
+  if(viewAs === '实战版'){
     /* 一个主流节点 = 一个步骤组；组内主流动作与锚定动作随机混排，外观完全一致 */
     var groups = buildScriptGroups(list);
     var groupsHtml = groups.map(function(g, gi){
@@ -701,7 +703,7 @@ function renderScriptBody(container, data, p){
   container.innerHTML =
     '<div class="script-instructions"><h4>'+App.esc(mode)+'演练脚本说明</h4><ul>'+instructionsHtml+'</ul>'
     + '<div class="tiny dim mt2" style="margin-top:8px">'
-    + (mode === '实战版'
+    + (viewAs === '实战版'
         ? '每个步骤组内的动作顺序为随机排列，不提前标注执行结果'
         : '✅ 已自动过滤全部混淆节点与终止节点，仅展示主流处置流程')
     + '</div></div>'
@@ -721,6 +723,71 @@ function renderScriptBody(container, data, p){
     + '</div>'
     + flowSection;
 }
+function scriptModalBody(bannerHtml){
+  return (bannerHtml ? '<div id="scriptBanner" style="margin-bottom:10px;padding:9px 12px;border:1px solid rgba(251,191,36,.55);background:rgba(251,191,36,.10);border-radius:6px;font-size:12.5px;color:#ffd76a">'+bannerHtml+'</div>' : '')
+    + '<div id="scriptBody" class="script-body"><div class="center dim">加载中…</div></div>';
+}
+function showScriptModal(p, opts, preloaded, bannerHtml){
+  var foot = '<button class="btn" id="scClose">关闭</button>';
+  if(opts.canExport){
+    foot += '<a class="btn ok" id="scWord" style="text-decoration:none" target="_blank">'+icon('download')+'导出 Word</a>';
+  }
+  modal({ title:'演练脚本 · '+App.esc(p.name)+'（'+(p.mode||'基础版')+'）', wide:true,
+    body:scriptModalBody(bannerHtml),
+    foot:foot,
+    onOpen:function(ov){
+      var box = ov.querySelector('#scriptBody');
+      ov.querySelector('#scClose').onclick = ov.close;
+      if(opts.canExport && ov.querySelector('#scWord')) ov.querySelector('#scWord').href = API.exportProjectScriptUrl(p.id);
+      function render(data){
+        try { renderScriptBody(box, data, p); }
+        catch(err){
+          console.error('[script-view] renderScriptBody error:', err);
+          box.innerHTML = '<div class="center dim" style="color:#e74c3c">渲染异常：'+App.esc(err.message)+'<br>请刷新页面重试</div>';
+        }
+      }
+      if(preloaded){ render(preloaded); return; }
+      API.getProjectScript(p.id).then(render).catch(function(err){
+        console.error('[script-view] getProjectScript error:', err);
+        var msg = (err && err.message) || '未知错误';
+        box.innerHTML = '<div class="center dim" style="color:#e74c3c">加载失败：'+App.esc(msg)+'<br>请检查登录状态或刷新页面</div>';
+      });
+    } });
+}
+/* 实战版演练中：强制查看申请（填原因 → 记录并扣分） */
+function requestForceScript(p, opts){
+  modal({ title:'演练脚本查看确认 · '+App.esc(p.name), wide:false,
+    body:'<div style="font-size:13px;line-height:1.9">'
+      + '<div style="padding:9px 12px;border:1px solid rgba(251,191,36,.55);background:rgba(251,191,36,.10);border-radius:6px;color:#ffd76a">'
+      + '演练已开始，演练脚本已锁定。如确需查看，系统将<b>记录本次查看</b>，并在本次演练中<b>扣 10 分</b>（仅首次扣分）。</div>'
+      + '<div class="mt2" style="margin-top:12px"><label style="display:block;margin-bottom:6px;color:var(--text2)">强制查看原因（不少于 8 个字）</label>'
+      + '<textarea id="scReason" class="input" style="width:100%;height:88px;resize:vertical;padding:8px" placeholder="例如：需要核对已下发候选流程与院方处置记录是否一致"></textarea></div>'
+      + '<div id="scReasonErr" class="tiny" style="color:#e74c3c;margin-top:6px"></div>'
+      + '</div>',
+    foot:'<button class="btn" id="scForceCancel">取消</button><button class="btn primary" id="scForceOk">确认查看并记录</button>',
+    onOpen:function(ov){
+      ov.querySelector('#scForceCancel').onclick = ov.close;
+      var errBox = ov.querySelector('#scReasonErr');
+      var btn = ov.querySelector('#scForceOk');
+      ov.querySelector('#scForceOk').onclick = function(){
+        var reason = (ov.querySelector('#scReason').value || '').trim();
+        if(reason.length < 8){ errBox.textContent = '请填写不少于 8 个字的强制查看原因'; ov.querySelector('#scReason').focus(); return; }
+        errBox.textContent = '';
+        btn.disabled = true; btn.textContent = '提交中…';
+        API.forceViewProjectScript(p.id, reason).then(function(data){
+          var deducted = !!(data && data.forceView && data.forceView.deducted);
+          var banner = deducted
+            ? '已记录本次查看，本次演练扣 10 分。'
+            : '已记录本次查看；本次演练此前已扣分，不再重复扣分。';
+          ov.close();
+          showScriptModal(p, opts, data, banner);
+        }).catch(function(err){
+          btn.disabled = false; btn.textContent = '确认查看并记录';
+          errBox.textContent = (err && err.message) || '提交失败，请稍后重试';
+        });
+      };
+    } });
+}
 function openScript(p, opts){
   opts = opts || {};
   /* 无进行中项目：给空态提示，不弹错误 */
@@ -737,27 +804,22 @@ function openScript(p, opts){
     });
     return;
   }
-  var foot = '<button class="btn" id="scClose">关闭</button>';
-  if(opts.canExport){
-    foot += '<a class="btn ok" id="scWord" style="text-decoration:none" target="_blank">'+icon('download')+'导出 Word</a>';
+  var role = curRole();
+  var isAdmin = !!(role && role.id === 'platformadmin');
+  var mode = p.mode || '基础版';
+  var st = p.status || '';
+  var started = (st === '演练中' || st === '暂停' || st === '已结束' || st === '已归档');
+  /* 实战版演练开始后锁定脚本；平台管理员（演练项目管理页）不受限 */
+  if(mode === '实战版' && !isAdmin && started){
+    if(st === '已结束' || st === '已归档'){
+      modal({ title:'演练脚本 · '+App.esc(p.name), body:'<div class="center dim" style="padding:18px 0;line-height:1.9">演练已结束，演练脚本不再开放查看。<br>如需复盘，请联系指挥长或平台管理员导出演练报告。</div>',
+        foot:'<button class="btn" id="scLockClose">关闭</button>', onOpen:function(ov){ ov.querySelector('#scLockClose').onclick = ov.close; } });
+      return;
+    }
+    requestForceScript(p, opts);
+    return;
   }
-  modal({ title:'演练脚本 · '+App.esc(p.name)+'（'+(p.mode||'基础版')+'）', wide:true,
-    body:'<div id="scriptBody" class="script-body"><div class="center dim">加载中…</div></div>',
-    foot:foot,
-    onOpen:function(ov){
-      ov.querySelector('#scClose').onclick = ov.close;
-      if(opts.canExport && ov.querySelector('#scWord')) ov.querySelector('#scWord').href = API.exportProjectScriptUrl(p.id);
-      API.getProjectScript(p.id).then(function(data){
-        try { renderScriptBody(ov.querySelector('#scriptBody'), data, p); }
-        catch(err){
-          console.error('[script-view] renderScriptBody error:', err);
-          ov.querySelector('#scriptBody').innerHTML = '<div class="center dim" style="color:#e74c3c">渲染异常：'+App.esc(err.message)+'<br>请刷新页面重试</div>';
-        }
-      }).catch(function(err){
-        console.error('[script-view] getProjectScript error:', err);
-        ov.querySelector('#scriptBody').innerHTML = '<div class="center dim" style="color:#e74c3c">加载失败：'+App.esc((err&&err.message)||'未知错误')+'<br>请检查登录状态或刷新页面</div>';
-      });
-    } });
+  showScriptModal(p, opts, null, '');
 }
 
 window.App = { boot:boot, icon:icon, ICONS:ICONS, toast:toast, modal:modal, drawer:drawer, confirmSim:confirmSim,

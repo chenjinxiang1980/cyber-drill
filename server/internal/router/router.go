@@ -245,6 +245,7 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			// ---- P2-4 Drill Core ----
 			cnt.POST("/projects", handler.PostProject(database))
 			cnt.GET("/projects/:id/script", handler.GetProjectScript(database))
+			cnt.POST("/projects/:id/script/force", handler.PostProjectScriptForceView(database))
 			cnt.GET("/projects/:id/script/export", handler.GetProjectScriptExport(database))
 			cnt.POST("/projects/:id/notify", handler.PostProjectNotify(database))
 			cnt.GET("/projects/:id/notify/export", handler.GetProjectNotifyExport(database))
