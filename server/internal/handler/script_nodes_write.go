@@ -49,6 +49,23 @@ type scriptNodeIn struct {
 	AnchorID      string `json:"-"`
 	ParallelDesc  string `json:"parallel_desc"`
 	ReleaseTiming string `json:"-"`
+
+	// present 记录本次请求里实际携带的字段（按权威字段名）。
+	// 增量更新时只有请求中出现的字段才允许覆盖库内值，
+	// 未出现的字段（如 time、branches、seq）原样保留。
+	present map[string]bool
+}
+
+// has 判断请求是否显式携带某字段（值为 null 视为未携带）。
+func (n *scriptNodeIn) has(name string) bool {
+	return n.present != nil && n.present[name]
+}
+
+// markPresent 按候选键名记录字段是否出现。
+func markPresent(m map[string]json.RawMessage, out map[string]bool, name string, keys ...string) {
+	if _, ok := firstRaw(m, keys...); ok {
+		out[name] = true
+	}
 }
 
 // UnmarshalJSON 归一并行两套前端字段名（camelCase / snake_case）到单一权威字段。
@@ -86,6 +103,35 @@ func (n *scriptNodeIn) UnmarshalJSON(data []byte) error {
 	n.Deps = anyOf(raw, "deps")
 	n.PosX = anyOf(raw, "posX", "pos_x")
 	n.PosY = anyOf(raw, "posY", "pos_y")
+
+	n.present = make(map[string]bool, 24)
+	markPresent(raw, n.present, "id", "id")
+	markPresent(raw, n.present, "scenarioId", "scenarioId", "scenario_id")
+	markPresent(raw, n.present, "type", "type")
+	markPresent(raw, n.present, "title", "title")
+	markPresent(raw, n.present, "shortTitle", "shortTitle", "short_title")
+	markPresent(raw, n.present, "target", "target")
+	markPresent(raw, n.present, "time", "time")
+	markPresent(raw, n.present, "timeout", "timeout")
+	markPresent(raw, n.present, "form", "form")
+	markPresent(raw, n.present, "att", "att")
+	markPresent(raw, n.present, "desc", "desc", "descr")
+	markPresent(raw, n.present, "branches", "branches")
+	markPresent(raw, n.present, "guide", "guide")
+	markPresent(raw, n.present, "keywords", "keywords")
+	markPresent(raw, n.present, "action", "action")
+	markPresent(raw, n.present, "wrong", "wrong")
+	markPresent(raw, n.present, "evidenceReq", "evidenceReq", "evidence_req")
+	markPresent(raw, n.present, "required", "required")
+	markPresent(raw, n.present, "flowType", "flowType", "flow_type")
+	markPresent(raw, n.present, "score", "score")
+	markPresent(raw, n.present, "receiver", "receiver")
+	markPresent(raw, n.present, "deps", "deps")
+	markPresent(raw, n.present, "posX", "posX", "pos_x")
+	markPresent(raw, n.present, "posY", "posY", "pos_y")
+	markPresent(raw, n.present, "anchorId", "anchorId", "anchor_id")
+	markPresent(raw, n.present, "releaseTiming", "releaseTiming", "release_timing")
+	markPresent(raw, n.present, "parallelDesc", "parallel_desc", "parallelDesc")
 	return nil
 }
 
@@ -632,7 +678,7 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 			ordered = append(ordered, &distractors[i])
 		}
 
-		// ========== 事务：DELETE + INSERT + UPDATE scenarios ==========
+		// ========== 事务：按节点 id 增量更新，仅删除真正被移除的节点 ==========
 		tx, err := database.Begin()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "开启事务失败"})
@@ -640,37 +686,22 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 		}
 		defer func() { _ = tx.Rollback() }()
 
-		// 保存前记录既有节点的 seq：结构未变化的节点沿用原 seq，
-		// 避免「打开即保存」时因拓扑重排导致序号漂移（多次保存结果不一致）。
-		existingSeq := make(map[string]int64)
-		var maxSeq int64
-		seqRows, err := tx.Query(`SELECT id,seq FROM script_nodes WHERE scenario_id=?`, scenarioID)
+		// 先读取既有节点关键字段。结构未变化的节点只更新页面确实改动的字段，
+		// 不做物理删除重建，避免覆盖 descr/short_title/keywords/evidence_req/
+		// anchor_id/release_timing 等已改造数据。
+		existing, maxSeq, err := loadScriptNodeRows(tx, scenarioID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取旧节点序号失败：" + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取旧节点失败：" + err.Error()})
 			return
 		}
-		for seqRows.Next() {
-			var nid string
-			var sq sql.NullInt64
-			if err := seqRows.Scan(&nid, &sq); err == nil {
-				v := int64(0)
-				if sq.Valid {
-					v = sq.Int64
-				}
-				existingSeq[nid] = v
-				if v > maxSeq {
-					maxSeq = v
-				}
-			}
-		}
-		seqRows.Close()
 
-		if _, err := tx.Exec(`DELETE FROM script_nodes WHERE scenario_id=?`, scenarioID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "清理旧节点失败：" + err.Error()})
-			return
-		}
+		incomingIDs := make([]string, 0, len(ordered))
+		seqByID := make(map[string]int64, len(ordered))
 
 		for _, n := range ordered {
+			id := strings.TrimSpace(n.ID)
+			incomingIDs = append(incomingIDs, id)
+
 			flowType := "correct"
 			if n.GetFlowType() == "distractor" {
 				flowType = "distractor"
@@ -687,38 +718,114 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 					}
 				}
 			}
-			receiver := ""
-			if flowType != "distractor" {
-				receiver = receiverStr(strings.TrimSpace(n.Receiver))
-				if receiver == "" {
-					targets := succTargets[strings.TrimSpace(n.ID)]
-					if len(targets) > 0 {
-						receiver = strings.Join(targets, "、")
-					} else {
-						receiver = "院应急指挥部"
+			depsForNode := []string{}
+			if flowType != "distractor" && depMap[id] != nil {
+				depsForNode = depMap[id]
+			}
+
+			ex, exOK := existing[id]
+			depsChanged := true
+			if exOK {
+				depsChanged = !sameStringSet(depsForNode, parseDepsJSON(ex.deps.String))
+			}
+
+			// seq 由后端按依赖拓扑生成，前端提交顺序不参与计算：
+			// 已有节点沿用原 seq（保证「打开即保存」不漂移）；
+			// 新增节点或连线变化导致拓扑次序被破坏时，在末尾顺延。
+			var seqVal int64
+			if exOK && ex.seq.Valid {
+				seqVal = ex.seq.Int64
+			} else {
+				maxSeq++
+				seqVal = maxSeq
+			}
+			if depsChanged {
+				var need int64
+				for _, d := range depsForNode {
+					if s, ok := seqByID[d]; ok && s > need {
+						need = s
 					}
 				}
+				if seqVal <= need {
+					maxSeq++
+					seqVal = maxSeq
+				}
 			}
+			seqByID[id] = seqVal
+
+			// receiver：请求携带非空值时以请求为准；否则只在节点新增或连线变化时
+			// 按后继 target 推导，结构未变则保留库内已有值。
+			// 混淆节点通常不设 receiver（库内为 NULL），不得无谓改写为 ''。
+			receiver := ""
+			receiverWrite := true
+			if flowType == "distractor" {
+				if n.has("receiver") {
+					receiver = receiverStr(strings.TrimSpace(n.Receiver))
+				}
+				if exOK && receiver == "" && strings.TrimSpace(ex.flowType.String) == "distractor" {
+					receiverWrite = false
+				}
+			} else {
+				incomingReceiver := ""
+				if n.has("receiver") {
+					incomingReceiver = receiverStr(strings.TrimSpace(n.Receiver))
+				}
+				switch {
+				case incomingReceiver != "":
+					receiver = incomingReceiver
+				case exOK && !depsChanged && strings.TrimSpace(ex.receiver.String) != "":
+					receiver = ex.receiver.String
+				case len(succTargets[id]) > 0:
+					receiver = strings.Join(succTargets[id], "、")
+				default:
+					receiver = "院应急指挥部"
+				}
+			}
+
+			// evidence_req：请求携带时归一化写入；未携带或归一为空时保留库内值，
+			// 仅新建节点或库内为空时才自动生成。混淆节点同理，避免覆盖改造数据。
 			var evReq []evItem
-			if flowType != "distractor" {
+			if n.has("evidenceReq") {
 				evReq = normalizeEvItemsFromAny(n.EvidenceReq)
-				if len(evReq) == 0 && strings.TrimSpace(n.Type) != "end" {
-					evReq = autoEvidenceReq(
+			}
+			evWrite := false
+			evReqJSON := "[]"
+			if flowType == "distractor" {
+				switch {
+				case len(evReq) > 0:
+					evWrite = true
+					b, _ := json.Marshal(evReq)
+					evReqJSON = string(b)
+				case !exOK:
+					evWrite = true
+				case strings.TrimSpace(ex.flowType.String) != "distractor":
+					// 由正确流程转为混淆：清空取证要求
+					evWrite = true
+				}
+			} else {
+				switch {
+				case len(evReq) > 0:
+					evWrite = true
+					b, _ := json.Marshal(evReq)
+					evReqJSON = string(b)
+				case exOK && strings.TrimSpace(ex.evidenceReq.String) != "":
+					// 保留库内取证要求，不因自动生成规则被覆盖
+				case strings.TrimSpace(n.Type) == "end":
+					evWrite = true
+				default:
+					evWrite = true
+					b, _ := json.Marshal(autoEvidenceReq(
 						strings.TrimSpace(n.Title),
 						strings.TrimSpace(n.Target),
 						strings.TrimSpace(n.Action),
 						strings.TrimSpace(n.Guide),
 						strings.TrimSpace(n.Desc),
 						strings.TrimSpace(n.Form),
-					)
+					))
+					evReqJSON = string(b)
 				}
 			}
 			wrongJSON, _ := json.Marshal(wrongList)
-			evReqJSON, _ := json.Marshal(evReq)
-			depsForNode := []string{}
-			if flowType != "distractor" {
-				depsForNode = depMap[strings.TrimSpace(n.ID)]
-			}
 			depsJSON, _ := json.Marshal(depsForNode)
 			branchesJSON, _ := json.Marshal(nilSafeJSON(n.Branches))
 
@@ -744,14 +851,17 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 			}
 
 			var posX, posY sql.NullInt64
+			posXOK, posYOK := false, false
 			if n.PosX != nil {
 				if v, err := strconv.Atoi(anyToString(n.PosX)); err == nil {
 					posX = sql.NullInt64{Int64: int64(v), Valid: true}
+					posXOK = true
 				}
 			}
 			if n.PosY != nil {
 				if v, err := strconv.Atoi(anyToString(n.PosY)); err == nil {
 					posY = sql.NullInt64{Int64: int64(v), Valid: true}
+					posYOK = true
 				}
 			}
 
@@ -781,33 +891,131 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 				requiredVal = 0
 			}
 
-			seqVal := maxSeq + 1
-			if v, ok := existingSeq[strings.TrimSpace(n.ID)]; ok {
-				seqVal = v
-			} else {
-				maxSeq++
+			if !exOK {
+				if _, err := tx.Exec(`INSERT INTO script_nodes
+					(id,scenario_id,type,title,short_title,target,time,timeout,form,att,
+					`+"`descr`"+`,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,
+					score,receiver,deps,pos_x,pos_y,parallel_desc,anchor_id,release_timing)
+					VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+					id, scenarioID,
+					strings.TrimSpace(n.Type), strings.TrimSpace(n.Title), strings.TrimSpace(n.ShortTitle),
+					strings.TrimSpace(n.Target), "",
+					timeoutVal,
+					strings.TrimSpace(n.Form), strings.TrimSpace(n.Att), strings.TrimSpace(n.Desc),
+					string(branchesJSON), seqVal,
+					strings.TrimSpace(n.Guide), strings.TrimSpace(n.Keywords), strings.TrimSpace(n.Action),
+					string(wrongJSON), evReqJSON, requiredVal,
+					flowType, scoreVal, receiver,
+					string(depsJSON), posX, posY,
+					strings.TrimSpace(n.ParallelDesc), anchorVal, timingVal,
+				); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "写入节点 " + id + " 失败：" + err.Error()})
+					return
+				}
+				continue
 			}
 
-			if _, err := tx.Exec(`INSERT INTO script_nodes
-				(id,scenario_id,type,title,short_title,target,time,timeout,form,att,
-				` + "`descr`" + `,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,
-				score,receiver,deps,pos_x,pos_y,parallel_desc,anchor_id,release_timing)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-				strings.TrimSpace(n.ID), scenarioID,
-				strings.TrimSpace(n.Type), strings.TrimSpace(n.Title), strings.TrimSpace(n.ShortTitle),
-				strings.TrimSpace(n.Target), "",
-				timeoutVal,
-				strings.TrimSpace(n.Form), strings.TrimSpace(n.Att), strings.TrimSpace(n.Desc),
-				string(branchesJSON), seqVal,
-				strings.TrimSpace(n.Guide), strings.TrimSpace(n.Keywords), strings.TrimSpace(n.Action),
-				string(wrongJSON), string(evReqJSON), requiredVal,
-				flowType, scoreVal, receiver,
-				string(depsJSON), posX, posY,
-				strings.TrimSpace(n.ParallelDesc), anchorVal, timingVal,
-			); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "写入节点 " + strings.TrimSpace(n.ID) + " 失败：" + err.Error()})
+			// 已有节点：只更新请求中实际携带的字段 + 服务端权威字段。
+			cols := make([]string, 0, 20)
+			args := make([]any, 0, 20)
+			set := func(col string, v any) {
+				cols = append(cols, col+"=?")
+				args = append(args, v)
+			}
+			if n.has("type") {
+				set("type", strings.TrimSpace(n.Type))
+			}
+			if n.has("title") {
+				set("title", strings.TrimSpace(n.Title))
+			}
+			if n.has("shortTitle") {
+				set("short_title", strings.TrimSpace(n.ShortTitle))
+			}
+			if n.has("target") {
+				set("target", strings.TrimSpace(n.Target))
+			}
+			if n.has("form") {
+				set("form", strings.TrimSpace(n.Form))
+			}
+			if n.has("att") {
+				set("att", strings.TrimSpace(n.Att))
+			}
+			if n.has("desc") {
+				set("`descr`", strings.TrimSpace(n.Desc))
+			}
+			if n.has("guide") {
+				set("guide", strings.TrimSpace(n.Guide))
+			}
+			if n.has("keywords") {
+				set("keywords", strings.TrimSpace(n.Keywords))
+			}
+			if n.has("action") {
+				set("action", strings.TrimSpace(n.Action))
+			}
+			if n.has("timeout") {
+				set("timeout", timeoutVal)
+			}
+			if len(wrongList) > 0 || !exOK || strings.TrimSpace(ex.wrong.String) != "" {
+				set("wrong", string(wrongJSON))
+			}
+			if n.has("branches") {
+				set("branches", string(branchesJSON))
+			}
+			if n.has("required") {
+				set("required", requiredVal)
+			}
+			if posXOK {
+				set("pos_x", posX)
+			}
+			if posYOK {
+				set("pos_y", posY)
+			}
+			if n.has("parallelDesc") {
+				set("parallel_desc", strings.TrimSpace(n.ParallelDesc))
+			} else if n.has("type") && strings.TrimSpace(n.Type) != "parallel" {
+				set("parallel_desc", "")
+			}
+			if flowType == "distractor" {
+				set("anchor_id", anchorVal)
+				set("release_timing", timingVal)
+			} else if strings.TrimSpace(ex.flowType.String) == "distractor" {
+				// 由混淆转正确：清空锚点与时机，避免残留
+				set("anchor_id", nil)
+				set("release_timing", "before")
+			}
+			set("flow_type", flowType)
+			set("deps", string(depsJSON))
+			set("seq", seqVal)
+			if receiverWrite {
+				set("receiver", receiver)
+			}
+			set("score", scoreVal)
+			if evWrite {
+				set("evidence_req", evReqJSON)
+			}
+
+			args = append(args, id)
+			if _, err := tx.Exec(`UPDATE script_nodes SET `+strings.Join(cols, ",")+` WHERE id=?`, args...); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新节点 " + id + " 失败：" + err.Error()})
 				return
 			}
+		}
+
+		// 仅删除本场景中确实被移除的节点
+		if len(incomingIDs) > 0 {
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(incomingIDs)), ",")
+			delArgs := make([]any, 0, len(incomingIDs)+1)
+			delArgs = append(delArgs, scenarioID)
+			for _, id := range incomingIDs {
+				delArgs = append(delArgs, id)
+			}
+			if _, err := tx.Exec(`DELETE FROM script_nodes WHERE scenario_id=? AND id NOT IN (`+placeholders+`)`, delArgs...); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "清理移除节点失败：" + err.Error()})
+				return
+			}
+		} else if _, err := tx.Exec(`DELETE FROM script_nodes WHERE scenario_id=?`, scenarioID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "清理旧节点失败：" + err.Error()})
+			return
 		}
 
 		finalName := strings.TrimSpace(body.Name)
@@ -841,15 +1049,78 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 
 		nowSc, _ := queryScenario(database, scenarioID)
 		c.JSON(200, gin.H{
-			"ok":          true,
-			"count":       len(correctNodes),
-			"scenarioId":  scenarioID,
-			"version":     nowSc.Version,
-			"updated":     nowSc.Updated,
-			"alert":       nowSc.Alert,
-			"name":        nowSc.Name,
+			"ok":         true,
+			"count":      len(correctNodes),
+			"scenarioId": scenarioID,
+			"version":    nowSc.Version,
+			"updated":    nowSc.Updated,
+			"alert":      nowSc.Alert,
+			"name":       nowSc.Name,
 		})
 	}
+}
+
+// scriptNodeRow 保存节点的既有关键字段，用于增量更新时判断结构是否变化、保留未改动数据。
+type scriptNodeRow struct {
+	deps        sql.NullString
+	receiver    sql.NullString
+	evidenceReq sql.NullString
+	wrong       sql.NullString
+	flowType    sql.NullString
+	seq         sql.NullInt64
+}
+
+// loadScriptNodeRows 读取场景下现有节点的关键字段，并返回当前最大 seq。
+func loadScriptNodeRows(tx *sql.Tx, scenarioID string) (map[string]*scriptNodeRow, int64, error) {
+	rows, err := tx.Query(
+		`SELECT id,seq,deps,receiver,evidence_req,wrong,flow_type FROM script_nodes WHERE scenario_id=?`, scenarioID)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]*scriptNodeRow)
+	var maxSeq int64
+	for rows.Next() {
+		var id string
+		row := &scriptNodeRow{}
+		if err := rows.Scan(&id, &row.seq, &row.deps, &row.receiver, &row.evidenceReq, &row.wrong, &row.flowType); err != nil {
+			return nil, 0, err
+		}
+		out[id] = row
+		if row.seq.Valid && row.seq.Int64 > maxSeq {
+			maxSeq = row.seq.Int64
+		}
+	}
+	return out, maxSeq, rows.Err()
+}
+
+// parseDepsJSON 把库内 deps（JSON 数组文本）解析为字符串切片。
+func parseDepsJSON(raw string) []string {
+	out := []string{}
+	if strings.TrimSpace(raw) == "" {
+		return out
+	}
+	_ = json.Unmarshal([]byte(raw), &out)
+	return out
+}
+
+// sameStringSet 判断两个依赖集合是否等价（顺序无关）。
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := make(map[string]int, len(a))
+	for _, x := range a {
+		m[x]++
+	}
+	for _, x := range b {
+		m[x]--
+		if m[x] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // --- 辅助 ---
