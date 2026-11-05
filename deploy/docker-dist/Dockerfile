@@ -3,17 +3,17 @@
 #
 # 构建（仓库根作为 context）：
 #   DOCKER_BUILDKIT=1 docker build -f deploy/docker-dist/Dockerfile \
-#       -t drill-server:0.5.0 .
+#       -t drill-server:0.5.1 .
 #
 # 带代理（UOS Server 20 / VMware NAT 下，宿主 Fclash）：
 #   DOCKER_BUILDKIT=1 docker build -f deploy/docker-dist/Dockerfile \
 #       --build-arg HTTP_PROXY=http://192.168.97.1:7890 \
 #       --build-arg HTTPS_PROXY=http://192.168.97.1:7890 \
-#       -t drill-server:0.5.0 .
+#       -t drill-server:0.5.1 .
 #
 # arm64 跨平台：
 #   DOCKER_BUILDKIT=1 docker buildx build --platform linux/arm64 \
-#       -f deploy/docker-dist/Dockerfile -t drill-server:0.5.0 . --load
+#       -f deploy/docker-dist/Dockerfile -t drill-server:0.5.1 . --load
 #
 # 关键设计（踩坑后规避）：
 #   1. 不使用 COPY --chown / COPY --chmod —— 旧版 builder（非 BuildKit）不生效；
@@ -63,7 +63,7 @@ COPY public/      /src/public/
 # 编译参数（buildx 自动注入 TARGETOS/TARGETARCH；纯 docker build 默认 linux/amd64）
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
-ARG VERSION=0.5.0
+ARG VERSION=0.5.1
 ARG BUILD_TIME=unknown
 ARG GIT_COMMIT=unknown
 
@@ -149,7 +149,7 @@ ENV HTTPS_PROXY=
 # --- OCI Label —— 给发布用的元数据（docs 里说明了如何 build 时注入 revision）---
 # 用户可以在 build 时 --label org.opencontainers.image.revision=$(git rev-parse HEAD)
 # 或在 .env / docker-compose.yml 里用 build.args 注入 VERSION
-ARG VERSION=0.5.0
+ARG VERSION=0.5.1
 ARG VCS_REF=unknown
 ARG BUILD_TIME=unknown
 # 发布元数据：全部可由 --build-arg 覆盖，避免源码里残留占位值

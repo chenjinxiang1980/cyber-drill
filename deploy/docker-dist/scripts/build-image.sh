@@ -12,8 +12,8 @@
 set -euo pipefail
 
 ARCH="amd64"
-TAG="drill-server:0.5.0"
-VERSION="0.5.0"
+TAG="drill-server:0.5.1"
+VERSION="0.5.1"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

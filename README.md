@@ -2,7 +2,7 @@
 
 面向医院 / 企事业单位内网的 **桌面推演 + 实战演练** 指挥调度平台。内置 8 类高频安全事件剧本（勒索病毒、横向渗透、DDoS、钓鱼邮件、存储故障等），支持值班员、指挥员、管理员等多角色协同、剧本时序控制、处置步骤记录、1920×1080 监视大屏、自动考评与复盘报告。
 
-> 当前版本：**0.5.0**（Go 版首发）
+> 当前版本：**0.5.1**（Go 版）
 > 许可证：MIT © 2026 陈金祥
 
 ---
@@ -97,7 +97,7 @@ Emergency/
 │   │   ├── middleware/      # 安全头 / CORS / 限流 / BodyLimit
 │   │   ├── router/          # 路由组装与安全静态文件服务
 │   │   ├── util/
-│   │   └── version/         # 版本号（0.5.0）
+│   │   └── version/         # 版本号（0.5.1）
 │   ├── cmd/                 # bootstrap / migrate / verify_* 工具
 │   ├── winres/              # Windows 资源清单
 │   └── deploy-linux/        # Linux 构建产物与签名文本（二进制不入库）
@@ -277,7 +277,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install\install-windows.ps
 
 ```bash
 curl http://localhost:8090/api/health
-# 期望：{"ok":true,"service":"cyber-drill-system","version":"0.5.0",...}
+# 期望：{"ok":true,"service":"cyber-drill-system","version":"0.5.1",...}
 ```
 
 Windows PowerShell 可用：
@@ -325,7 +325,7 @@ docker compose -p drill -f deploy/docker-dist/docker-compose.yml \
 ### 5.5 离线包
 
 - Linux 离线包：`dist/drill-linux-bundle.tar.gz`，SHA256 `BB448855A4BB9F3F00ACD7803F4A0364C7D9091B936349BE8BB0D16FBA459B71`（systemd 安装，步骤见 [docs/install.md](docs/install.md)）。
-- 离线镜像：`docker save drill-server:0.5.0` 后用 `install/install-linux.sh --registry local --image-tar <tar>`。
+- 离线镜像：`docker save drill-server:0.5.1` 后用 `install/install-linux.sh --registry local --image-tar <tar>`。
 
 ### 5.6 从源码自主编译安装（Linux 交叉编译优先）
 
@@ -378,7 +378,33 @@ docker compose -p drill -f deploy/docker-dist/docker-compose.yml \
 
 ---
 
-## 八、版本与更新日志（0.5.0）
+## 八、版本与更新日志（0.5.1）
+
+### 0.5.1（2026-11-06）
+
+**新增**
+
+- S01 剧本内容、记录表单与评分口径改造；新增外部指导意见记录单与 S01 专用记录单。
+- 业务影响联动与审议模式（migration 0008）。
+- 监视大屏免登录只读观摩（匿名限流）；站内消息播报收敛到大屏，工作台仅提示新消息。
+- 混淆节点按严重程度分档扣分（高 8 / 中 5 / 低 3），评分改为关键词与证据口径。
+- Windows / Linux 一键安装器（`install/`），支持源码与镜像来源选择、compose 项目隔离。
+
+**修复**
+
+- 脚本编排保存按 id 增量更新，避免整表删除重建覆盖节点；逐字段容错解析并修正 seq 重排。
+- 业务影响更新 SQL 的 MySQL 1093 自引用错误；F7 恢复确认单按「状态」后缀识别业务系统。
+- migration 0010 修正 S01-9 / S01-10 执行顺序；初始化幂等补齐角色/剧本/字典，不再删除角色。
+- 实战版演练中锁定脚本并支持强制查看扣分；登录页不再启动通知轮询与顶栏时钟。
+
+**构建与发布**
+
+- 镜像升级到 `0.5.1`（`latest` 同步），GHCR 与华为云 SWR 双仓库发布，公开匿名可拉。
+- `.gitattributes` 强制 shell 脚本 LF，修复容器入口 CRLF 导致 tini exec 失败。
+
+完整说明见 [docs/release-0.5.1.md](docs/release-0.5.1.md)。
+
+### 0.5.0（2026-11-05）
 
 **新增**
 

@@ -10,7 +10,7 @@ import (
 )
 
 // Health 健康检查。在 Node 版 /api/health 字段基础上增加 version：
-// {"ok":true,"service":"cyber-drill-system","version":"0.5.0","time":"YYYY-MM-DD HH:mm"}
+// {"ok":true,"service":"cyber-drill-system","version":"0.5.1","time":"YYYY-MM-DD HH:mm"}
 // 此接口无需鉴权。
 func Health(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {

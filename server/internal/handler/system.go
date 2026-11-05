@@ -20,7 +20,7 @@ var brandDefaults = gin.H{
 	"systemName": "网络安全应急演练系统",
 	"unitName":   "示例医院",
 	"logo":       "img/logo.png",
-	"version":    "v0.5.0",
+	"version":    "v0.5.1",
 	"github":     "https://github.com/chenjinxiang1980/cyber-drill",
 	"gitee":      "https://gitee.com/habeas/cyber-drill",
 }

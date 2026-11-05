@@ -108,13 +108,15 @@ echo "$GH_TOKEN" | docker login ghcr.io -u <github 用户名> --password-stdin
 ### 7.2 华为云 SWR（区域 cn-east-3）
 
 ```bash
-docker login swr.cn-east-3.myhuaweicloud.com        # 用户名形如 cn-east-3@<AK>，口令交互输入
 docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:0.5.0
 docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:latest
+
+# 仅在匿名拉取失败时才需要登录（用户名形如 cn-east-3@<AK>，口令交互输入）
+docker login swr.cn-east-3.myhuaweicloud.com
 ```
 
 组织名为 `chenjinxiang`；两个 tag 与 GHCR 同一 manifest digest
-`sha256:763d980465879ed509279d183a1d63be263e4ca95118213f7946e7961e51b8fc`。该仓库为**私有**，必须登录后才能拉取。
+`sha256:763d980465879ed509279d183a1d63be263e4ca95118213f7946e7961e51b8fc`。该仓库为**公开**，无需登录即可匿名拉取（2026-11-05 实测通过）。
 
 `<组织名>` 需在 SWR 控制台预先创建（命名空间与 AK 同名的组织通常已存在）；推送失败先确认
 命名空间存在、帐号有 `swr:repository:push` 权限。
