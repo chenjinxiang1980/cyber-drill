@@ -1,0 +1,39 @@
+# =============================================================================
+# Dockerfile.hotfix —— 离线增量发布（在现有 runtime 镜像上覆盖二进制）
+#
+# 用途：发布机无法访问 Go module / apk 源时，用 Windows 侧交叉编译好的 ELF
+#       覆盖已部署镜像。基础镜像已含 tini / wget / ca-certificates / tzdata
+#       与 drill 用户，因此无需再 apk add，可完全离线构建。
+#
+# 背景（0.5.0 首次发布踩坑）：当时的临时 hotfix 只 COPY drill-server，并把
+# ENTRYPOINT 直接指向服务进程，导致镜像内没有 drill-migrate、入口脚本未参与，
+# 容器重启时迁移被静默跳过，只能靠人工 SQL 兜底。
+# 本文件必须同时打包三个二进制 + 入口脚本，且 ENTRYPOINT 走 tini + entrypoint.sh。
+#
+# 构建（context 目录需含 drill-server / drill-migrate / drill-seed /
+#       docker-entrypoint.sh / migrations/）：
+#   docker build -f deploy/docker-dist/Dockerfile.hotfix -t drill-server:0.5.0 .
+# =============================================================================
+ARG BASE_IMAGE=drill-server:0.5.0
+FROM ${BASE_IMAGE}
+
+USER root
+
+COPY drill-server          /opt/drill/bin/drill-server
+COPY drill-migrate         /opt/drill/bin/drill-migrate
+COPY drill-seed            /opt/drill/bin/drill-seed
+COPY docker-entrypoint.sh  /opt/drill/docker-entrypoint.sh
+COPY migrations/           /opt/drill/migrations/
+
+RUN chown -R drill:drill /opt/drill/bin /opt/drill/migrations /opt/drill/docker-entrypoint.sh \
+ && chmod 755 /opt/drill/bin/drill-server \
+              /opt/drill/bin/drill-migrate \
+              /opt/drill/bin/drill-seed \
+              /opt/drill/docker-entrypoint.sh \
+ && chmod 644 /opt/drill/migrations/*.sql
+
+USER drill:drill
+WORKDIR /opt/drill
+
+ENTRYPOINT ["/sbin/tini", "--", "/opt/drill/docker-entrypoint.sh"]
+CMD ["/opt/drill/bin/drill-server", "-root=/opt/drill"]

@@ -94,8 +94,8 @@ if [ -x "${MIGRATE_BIN}" ]; then
         exit "${rc}"
     fi
 else
-    log_warn "${MIGRATE_BIN} 不存在或不可执行，跳过 migrations"
-    log_warn "（首次部署必须有 migrations，否则应用连上数据库后会因为表不存在而崩溃）"
+    log_warn "迁移器缺失（${MIGRATE_BIN}），跳过迁移"
+    log_warn "若为已有数据库，请确认 schema_migrations 已是最新；首次部署必须先补齐 drill-migrate，否则应用会因表不存在而启动失败"
 fi
 
 # =============================================================================
