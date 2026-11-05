@@ -116,6 +116,7 @@ function guard(pageKey){
 
 /* ---------- Shell 渲染 ---------- */
 function mountShell(pageKey){
+  shellMounted = true;
   var r = curRole()||{name:'未登录'};
   var nav = r.nav||[];
   var B = DRILL.brand()||{};
@@ -379,6 +380,7 @@ function refreshNotifBadge(){
 var notifPoll = null;
 var liveTick = null;
 var shellClockTick = null;
+var shellMounted = false; /* 仅登录后的 Shell 页面启动公共轮询；登录页不启动 */
 /* 顶栏演练计时：按真实起止时刻每秒本地推算 T+HH:MM:SS */
 function renderLiveChip(){
   var live = document.getElementById('topLive');
@@ -418,6 +420,7 @@ function clearShellTimers(){
 }
 window.addEventListener('pagehide', clearShellTimers);
 window.addEventListener('pageshow', function(){
+  if(!shellMounted) return; /* 登录页等非 Shell 页面不启动公共轮询 */
   initNotifChannel();
   startNotifPolling();
   if(!liveTick) liveTick = setInterval(renderLiveChip, 1000);
