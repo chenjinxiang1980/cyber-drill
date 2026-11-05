@@ -72,7 +72,7 @@
 | 源码 | GitHub / Gitee 默认分支 + `v0.5.0` 标签 |
 | Linux ELF | `server/deploy-linux/drill-server`（随离线包或 Release 附件，仓库不入库） |
 | 离线包 | `dist/drill-linux-bundle.tar.gz` + `.sha256` |
-| Docker 镜像 | `drill-server:0.5.0`（48.2 MB / 9 层，linux/amd64），manifest digest `sha256:c7341909fbb9fcd3a6f79f6ffe19a361d9590f84a5a1bef1e02a105db1fc1e42` |
+| Docker 镜像 | `drill-server:0.5.0`（48.2 MB / 9 层，linux/amd64），manifest digest `sha256:763d980465879ed509279d183a1d63be263e4ca95118213f7946e7961e51b8fc` |
 
 镜像构建参数（可复现）：
 
@@ -96,7 +96,7 @@ docker pull ghcr.io/chenjinxiang1980/cyber-drill:0.5.0
 docker pull ghcr.io/chenjinxiang1980/cyber-drill:latest    # 与 0.5.0 同一 digest
 ```
 
-两个 tag 指向同一 manifest：`sha256:c7341909fbb9fcd3a6f79f6ffe19a361d9590f84a5a1bef1e02a105db1fc1e42`。
+两个 tag 指向同一 manifest：`sha256:763d980465879ed509279d183a1d63be263e4ca95118213f7946e7961e51b8fc`。
 该包已设为 **public**，无需登录即可匿名拉取。
 
 包若为私有，先登录（token 只经管道传入，不进 shell 历史）：
@@ -114,7 +114,7 @@ docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:latest
 ```
 
 组织名为 `chenjinxiang`；两个 tag 与 GHCR 同一 manifest digest
-`sha256:c7341909fbb9fcd3a6f79f6ffe19a361d9590f84a5a1bef1e02a105db1fc1e42`。该仓库为**私有**，必须登录后才能拉取。
+`sha256:763d980465879ed509279d183a1d63be263e4ca95118213f7946e7961e51b8fc`。该仓库为**私有**，必须登录后才能拉取。
 
 `<组织名>` 需在 SWR 控制台预先创建（命名空间与 AK 同名的组织通常已存在）；推送失败先确认
 命名空间存在、帐号有 `swr:repository:push` 权限。
