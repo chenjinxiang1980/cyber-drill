@@ -175,7 +175,10 @@ func (cs impactChanges) systems() []string {
 // collectImpactChanges 按表单类型解析要写入的业务系统：
 //   F1 事件初步核实单  → 「受影响系统」多选 → 故障
 //   F3 业务影响评估表  → 「受影响业务系统」多选 → 故障（权威来源）
-//   F7 业务恢复确认单  → 「××系统状态」select → 对应档位（已恢复=正常）
+//   F7 业务恢复确认单  → 「××状态」select → 对应档位（已恢复=正常）
+//
+// 注意：F7 字段名为「HIS收费系统状态」「医护工作站状态」等，不能只匹配
+// 「系统状态」后缀，否则「医护工作站」这类不以「系统」结尾的业务系统永远无法恢复。
 func collectImpactChanges(formID string, data map[string]any) impactChanges {
 	if data == nil {
 		return nil
@@ -191,13 +194,20 @@ func collectImpactChanges(formID string, data map[string]any) impactChanges {
 			}
 		}
 	case "F7":
+		known := make(map[string]bool, len(impactDefaultSystems))
+		for _, s := range impactDefaultSystems {
+			known[s] = true
+		}
 		for k, v := range data {
-			if !strings.HasSuffix(k, "系统状态") {
+			if !strings.HasSuffix(k, "状态") {
 				continue
 			}
 			sys := strings.TrimSuffix(k, "状态")
+			if sys == "" || !known[sys] {
+				continue
+			}
 			state := normalizeImpactState(toPlainString(v))
-			if sys == "" || state == "" {
+			if state == "" {
 				continue
 			}
 			out = append(out, impactChange{sys: sys, state: state, pct: impactPctOf(state), note: "恢复确认单更新"})
