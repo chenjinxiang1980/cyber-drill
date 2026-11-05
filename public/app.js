@@ -198,9 +198,16 @@ var voiceLastText = '';
 var voiceTimer = null;   /* 交互提示播报（表单提示/开关提示）的防抖定时器 */
 var voiceSeq = 0;
 
-/* 站内消息播报：以消息 id 去重，按页面会话生命周期维护（刷新后未读仍会再播一次） */
-var notifSpoken = {};    /* 已入队/已播的消息 id */
-var notifQueue = [];     /* [{id,text}] 串行播报队列 */
+/* 站内消息播报（收敛版）：
+   - 大屏 screen.html：只播当前项目未读消息正文 desc，每条一次（localStorage 持久去重）。
+   - 角色工作台：只提示固定语「您有新消息」，同一条最多 2 次（localStorage 持久计数），不播标题/正文。
+   - 其他登录页：不播报，避免多角色各自播报造成混乱。
+   所有模式共用串行队列 + 跨标签抢占，防止叠音与重复。 */
+var NOTIF_HINT_TEXT = '您有新消息';
+var NOTIF_HINT_MAX = 2;
+var notifSpoken = {};    /* 本页会话已入队的消息键 */
+var notifQueued = {};    /* 队列中的消息键，避免同一条重复入队 */
+var notifQueue = [];     /* [{id,text,mode,pid}] 串行播报队列 */
 var notifSpeaking = false;
 var notifWatchdog = null;
 var notifClaimTimer = null;
@@ -274,6 +281,37 @@ function toggleVoice(){
   if(next) voiceSpeak('语音播报已开启', { force:true });
 }
 /* ---------- 站内消息播报：串行队列 + 消息 id 去重 + 当前项目过滤 ---------- */
+/* 当前页面是否参与站内消息播报：只有角色工作台保留“提示语”播报 */
+function notifPageMode(){
+  var p = '';
+  try{ p = (document.body && document.body.getAttribute('data-page')) || ''; }catch(e){}
+  return p === 'workbench' ? 'prompt' : 'off';
+}
+function notifKey(mode, id, pid){ return mode + ':' + (pid || '') + ':' + id; }
+function notifHintCount(id){
+  try{ return parseInt(localStorage.getItem('pzy_notif_hint_' + id) || '0', 10) || 0; }catch(e){ return 0; }
+}
+function notifHintBump(id){
+  var n = notifHintCount(id) + 1;
+  try{ localStorage.setItem('pzy_notif_hint_' + id, String(n)); }catch(e){}
+  return n;
+}
+/* 大屏已播集合（按项目隔离，localStorage 持久化，刷新后不重复） */
+function notifScreenMark(pid, id){
+  try{
+    var o = JSON.parse(localStorage.getItem('pzy_voice_spoken_' + pid) || '{}');
+    if(!o || typeof o !== 'object') o = {};
+    if(o[id]) return false;
+    o[id] = Date.now();
+    var keys = Object.keys(o);
+    if(keys.length > 400){
+      keys.sort(function(a, b){ return (o[a] || 0) - (o[b] || 0); });
+      for(var i = 0; i < keys.length - 400; i++) delete o[keys[i]];
+    }
+    localStorage.setItem('pzy_voice_spoken_' + pid, JSON.stringify(o));
+    return true;
+  }catch(e){ return true; }
+}
 function initNotifChannel(){
   if(notifChannel || typeof BroadcastChannel !== 'function') return;
   try{
@@ -281,9 +319,10 @@ function initNotifChannel(){
     notifChannel.onmessage = function(ev){
       var d = ev && ev.data;
       if(!d || d.type !== 'spoken' || !d.id) return;
-      var id = String(d.id);
-      notifSpoken[id] = 1;
-      notifQueue = notifQueue.filter(function(q){ return q.id !== id; });
+      var key = notifKey(d.mode || 'prompt', String(d.id), d.pid || '');
+      if(d.mode === 'screen') notifSpoken[key] = 1;
+      delete notifQueued[key];
+      notifQueue = notifQueue.filter(function(q){ return notifKey(q.mode, q.id, q.pid) !== key; });
     };
   }catch(e){ notifChannel = null; }
 }
@@ -298,7 +337,7 @@ function notifTabId(){
     return id;
   }catch(e){ return 'tab-' + Date.now(); }
 }
-/* 抢播占位：同一消息 5 秒内只允许一个标签页发声；同一标签页刷新不受限（仍会再播一次） */
+/* 抢播占位：同一消息 5 秒内只允许一个标签页发声 */
 function notifClaim(id){
   var mine = notifTabId();
   try{
@@ -310,12 +349,16 @@ function notifClaim(id){
 }
 function notifQueueDrain(){
   if(notifSpeaking) return;
-  if(!voiceSupported()){ notifQueue.length = 0; return; }
+  if(!voiceSupported()){ notifQueue.length = 0; notifQueued = {}; return; }
   var item = notifQueue.shift();
   while(item){
-    /* 播报前再核对一次服务端已读状态：已读消息不再播 */
-    var cur = (MOCK.NOTIFS || []).filter(function(x){ return String(x.id) === item.id; })[0];
-    if(cur && cur.read){ item = notifQueue.shift(); continue; }
+    delete notifQueued[notifKey(item.mode, item.id, item.pid)];
+    if(item.mode === 'prompt'){
+      /* 提示语模式：播报前再核对已读状态与次数上限 */
+      var cur = (MOCK.NOTIFS || []).filter(function(x){ return String(x.id) === item.id; })[0];
+      if(cur && cur.read){ item = notifQueue.shift(); continue; }
+      if(notifHintCount(item.id) >= NOTIF_HINT_MAX){ item = notifQueue.shift(); continue; }
+    }
     if(notifClaim(item.id) === 'other'){ item = notifQueue.shift(); continue; }
     break;
   }
@@ -334,6 +377,11 @@ function notifQueueDrain(){
   notifClaimTimer = setTimeout(function(){
     notifClaimTimer = null;
     if(notifClaim(item.id) === 'other'){ notifSpeaking = false; notifQueueDrain(); return; }
+    if(item.mode === 'prompt'){
+      notifHintBump(item.id); /* 工作台：每播一次计数 +1，最多 2 次 */
+    } else {
+      notifSpoken[notifKey(item.mode, item.id, item.pid)] = 1;
+    }
     try{
       var u = buildUtterance(item.text);
       u.onend = done; u.onerror = done;
@@ -343,27 +391,68 @@ function notifQueueDrain(){
     }catch(e){ done(); }
   }, 150);
 }
-function announceNotif(n){
-  var id = String(n.id || '');
-  if(!id || notifSpoken[id]) return;
-  /* 播报文本 = 消息正文（descr）原样：不拼 title、不加序号、不截断、不做空白归一化 */
-  var text = String(n.desc == null ? '' : n.desc);
-  if(!text) return; /* 正文为空（空串/null）不播报，不退化为播标题 */
-  notifSpoken[id] = 1;
-  notifQueue.push({ id:id, text:text });
-  try{ if(notifChannel && notifChannel.postMessage) notifChannel.postMessage({ type:'spoken', id:id }); }catch(e){}
+/* item: {id, text, mode:'prompt'|'screen', pid} */
+function announceNotif(item){
+  var id = String((item && item.id) || '');
+  if(!id || !item.text) return false;
+  var key = notifKey(item.mode, id, item.pid);
+  if(notifSpoken[key] || notifQueued[key]) return false;
+  if(item.mode === 'prompt'){
+    if(notifHintCount(id) >= NOTIF_HINT_MAX) return false;
+  } else if(!notifScreenMark(item.pid, id)){
+    return false; /* 大屏：该消息在本项目已播过 */
+  }
+  var repeat = Math.max(1, parseInt(item.repeat || 1, 10) || 1);
+  notifQueued[key] = 1;
+  for(var i = 0; i < repeat; i++){
+    notifQueue.push({ id:id, text:String(item.text), mode:item.mode, pid:item.pid || '' });
+  }
+  try{
+    if(notifChannel && notifChannel.postMessage){
+      notifChannel.postMessage({ type:'spoken', id:id, mode:item.mode, pid:item.pid || '' });
+    }
+  }catch(e){}
+  return true;
 }
+/* 角色工作台：只提示「有新的消息」，不播标题/正文；同一条最多 2 次 */
 function announceUnreadNotifs(ns){
+  if(notifPageMode() !== 'prompt') return;
   var proj = API.activeProject();
   var pid = proj && proj.id ? String(proj.id) : '';
   if(!pid) return; /* 无当前演练项目：不播报 */
   (ns || []).forEach(function(n){
-    if(!n || n.read) return; /* 已读消息不播报，读状态以服务端返回为准 */
+    if(!n || n.read) return; /* 已读消息不提示，读状态以服务端返回为准 */
     var npid = n.projectId == null ? '' : String(n.projectId);
     if(!npid || npid !== pid) return; /* 跨项目消息 / project_id 为空的全局公告：一律不播 */
-    announceNotif(n);
+    var remain = NOTIF_HINT_MAX - notifHintCount(n.id);
+    if(remain <= 0) return;
+    /* 新消息一次入队两遍（最多 2 次），已播 1 次的只补 1 遍 */
+    announceNotif({ id:n.id, text:NOTIF_HINT_TEXT, mode:'prompt', pid:pid, repeat: Math.min(NOTIF_HINT_MAX, remain) });
   });
   notifQueueDrain();
+}
+/* 大屏：播报当前项目未读消息正文 desc（不播标题），每条只播一次 */
+function announceScreenNotifs(ns, projectId){
+  var pid = projectId == null ? '' : String(projectId);
+  if(!pid) return;
+  (ns || []).forEach(function(n){
+    if(!n || n.read) return;
+    var npid = n.projectId == null ? '' : String(n.projectId);
+    if(!npid || npid !== pid) return;
+    var text = String(n.desc == null ? '' : n.desc); /* 原样正文：不拼 title、不截断、不归一化 */
+    if(!text) return; /* 正文为空不播报，不退化为播标题 */
+    announceNotif({ id:n.id, text:text, mode:'screen', pid:pid });
+  });
+  notifQueueDrain();
+}
+function notifStopVoice(){
+  notifQueue.length = 0;
+  notifQueued = {};
+  notifSpeaking = false;
+  if(notifWatchdog){ clearTimeout(notifWatchdog); notifWatchdog = null; }
+  if(notifClaimTimer){ clearTimeout(notifClaimTimer); notifClaimTimer = null; }
+  try{ if(notifChannel) notifChannel.close(); }catch(e){}
+  notifChannel = null;
 }
 function refreshNotifBadge(){
   if(notifBusy) return; /* 并发刷新只允许一个请求落地，防止同一消息重复入队 */
@@ -411,11 +500,7 @@ function clearShellTimers(){
   if(liveTick){ clearInterval(liveTick); liveTick = null; }
   if(shellClockTick){ clearInterval(shellClockTick); shellClockTick = null; }
   voiceStop();
-  notifQueue.length = 0;
-  notifSpeaking = false;
-  if(notifWatchdog){ clearTimeout(notifWatchdog); notifWatchdog = null; }
-  if(notifClaimTimer){ clearTimeout(notifClaimTimer); notifClaimTimer = null; }
-  if(notifChannel){ try{ notifChannel.close(); }catch(e){} notifChannel = null; }
+  notifStopVoice();
 }
 window.addEventListener('pagehide', clearShellTimers);
 window.addEventListener('pageshow', function(){
@@ -825,5 +910,6 @@ window.App = { boot:boot, icon:icon, ICONS:ICONS, toast:toast, modal:modal, draw
   logout:logout, switchProject:switchProject, showNotifs:showNotifs, openScreen:openScreen, statusTag:statusTag, levelTag:levelTag,
   refreshShell:refreshShell, renderLiveChip:renderLiveChip, toggleVoice:toggleVoice,
   voice:{ speak:voiceSpeak, stop:voiceStop, on:voiceOn, supported:voiceSupported, sync:syncVoiceBtn },
+  notifVoice:{ announceScreen:announceScreenNotifs, start:initNotifChannel, stop:notifStopVoice },
   barChart:barChart, hbar:hbar, donut:donut, curRole:curRole, curUser:curUser, openScript:openScript, esc:function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');} };
 })();
