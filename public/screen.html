@@ -80,6 +80,11 @@ body::before{
 .h-btn{background:rgba(34,211,238,.08);border:1px solid var(--line);color:#8fe1ff;font-size:12px;
   padding:5px 10px;border-radius:3px;cursor:pointer;letter-spacing:1px}
 .h-btn:hover{background:rgba(34,211,238,.2);border-color:var(--cy);box-shadow:0 0 12px rgba(34,211,238,.3)}
+/* 语音播报开关：左侧状态灯，开=绿 / 关=灰 */
+.h-btn.vbtn{display:inline-flex;align-items:center;gap:6px;min-width:74px;justify-content:center}
+.h-btn.vbtn::before{content:'';width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e}
+.h-btn.vbtn.off{color:#7c93a8;border-color:rgba(124,147,168,.35);background:rgba(124,147,168,.06)}
+.h-btn.vbtn.off::before{background:#64748b;box-shadow:none}
 
 /* ---------- 主体 ---------- */
 .s-main{flex:1;display:grid;grid-template-columns:320px minmax(0,1fr) 340px;gap:12px;min-height:0}
@@ -302,6 +307,7 @@ body::before{
       <select class="h-sel" id="projSel"></select>
       <span class="live"><span class="live-dot"></span>LIVE</span>
       <div class="h-clock"><span id="clkTime">--:--:--</span><span id="clkDate">----</span></div>
+      <button class="h-btn vbtn" id="screenVoiceBtn" type="button" aria-pressed="true" title="语音播报">语音开</button>
       <button class="h-btn" id="btnFull">全屏</button>
     </div>
   </header>
@@ -504,11 +510,39 @@ body::before{
   }
   /* ---------- 站内消息语音播报（大屏：只播本项目未读正文，每条一次） ---------- */
   var notifTimer = null, notifFetching = false;
+  function screenVoiceSupported(){
+    return !!(window.App && App.notifVoice && App.voice && App.voice.supported());
+  }
+  function syncScreenVoiceBtn(){
+    var b = $('screenVoiceBtn');
+    if(!b) return;
+    var ok = screenVoiceSupported();
+    var on = !!(window.App && App.notifVoice && App.notifVoice.on());
+    b.textContent = on ? '语音开' : '语音关';
+    b.classList.toggle('off', !on || !ok);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.title = !ok ? '当前浏览器不支持语音合成'
+      : (on ? '语音播报已开启（点击关闭）' : '语音播报已关闭（点击开启）');
+  }
+  function toggleScreenVoice(){
+    if(!screenVoiceSupported()) return;
+    var next = !App.notifVoice.on();
+    App.notifVoice.set(next); /* 只改持久化状态，切换本身不发声 */
+    syncScreenVoiceBtn();
+    if(!next){ stopNotifPolling(); return; } /* 关闭：不再轮询待播内容 */
+    /* 开启：先把当前已有未读记为已处理，从下一条新消息开始播，不补播积压 */
+    if(!projId){ startNotifPolling(); return; }
+    sget('/screen/notifs?projectId='+encodeURIComponent(projId)).then(function(d){
+      App.notifVoice.skip((d && d.notifs) || [], projId);
+      startNotifPolling();
+    }).catch(function(){ startNotifPolling(); });
+  }
   function stopNotifPolling(){
     if(notifTimer){ clearInterval(notifTimer); notifTimer = null; }
   }
   function pollNotifs(){
     if(notifFetching || !projId) return;
+    if(window.App && App.notifVoice && !App.notifVoice.on()) return; /* 关闭时不取数 */
     notifFetching = true;
     sget('/screen/notifs?projectId='+encodeURIComponent(projId)).then(function(d){
       notifFetching = false;
@@ -519,10 +553,14 @@ body::before{
   function startNotifPolling(){
     stopNotifPolling();
     if(!projId) return;
+    if(!(window.App && App.notifVoice && App.notifVoice.on())) return; /* 关闭时不起轮询 */
     if(window.App && App.notifVoice) App.notifVoice.start();
     pollNotifs();
     notifTimer = setInterval(pollNotifs, 15000);
   }
+  syncScreenVoiceBtn();
+  var screenVoiceBtnEl = $('screenVoiceBtn');
+  if(screenVoiceBtnEl) screenVoiceBtnEl.addEventListener('click', toggleScreenVoice);
   /* ---------- 空态：待机模式 ---------- */
   function showStandby(){
     if(timer){ clearInterval(timer); timer = null; }

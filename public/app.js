@@ -213,6 +213,7 @@ var notifWatchdog = null;
 var notifClaimTimer = null;
 var notifBusy = false;   /* 通知刷新请求进行中，避免并发响应重复入队 */
 var notifChannel = null; /* 同浏览器多标签互斥（同一消息只在一个标签播报） */
+var notifCurrent = null; /* 正在播报的队列项，用于开关关闭时立刻打断 */
 function voiceSupported(){
   return typeof window !== 'undefined' && !!window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function';
 }
@@ -279,6 +280,42 @@ function toggleVoice(){
   syncVoiceBtn();
   toast(next ? '语音播报已开启' : '语音播报已关闭', next ? 'ok' : '');
   if(next) voiceSpeak('语音播报已开启', { force:true });
+}
+/* ---------- 大屏语音播报开关（独立于工作台语音开关，刷新后保持） ---------- */
+var SCREEN_VOICE_KEY = 'pzy_screen_voice_on';
+function screenVoiceOn(){
+  try{ return localStorage.getItem(SCREEN_VOICE_KEY) !== '0'; }catch(e){ return true; }
+}
+/* 关闭时立即静音：丢弃队列中的大屏条目，并打断正在播的那一条 */
+function stopScreenVoice(){
+  notifQueue = notifQueue.filter(function(q){ return q.mode !== 'screen'; });
+  Object.keys(notifQueued).forEach(function(k){ if(k.indexOf('screen:') === 0) delete notifQueued[k]; });
+  if(notifCurrent && notifCurrent.mode === 'screen'){
+    if(notifWatchdog){ clearTimeout(notifWatchdog); notifWatchdog = null; }
+    notifCurrent = null;
+    notifSpeaking = false;
+    try{ if(voiceSupported()) window.speechSynthesis.cancel(); }catch(e){}
+  }
+}
+/* 开关只改持久化状态，不发声（切换本身不能触发一次播报） */
+function setScreenVoice(on){
+  on = !!on;
+  try{ localStorage.setItem(SCREEN_VOICE_KEY, on ? '1' : '0'); }catch(e){}
+  if(!on) stopScreenVoice();
+  return on;
+}
+/* 打开开关时的基线：把当前已有的未读消息记为已处理，不补播关闭期间积压的旧消息 */
+function skipScreenNotifs(ns, projectId){
+  var pid = projectId == null ? '' : String(projectId);
+  if(!pid) return 0;
+  var n = 0;
+  (ns || []).forEach(function(x){
+    if(!x || x.read) return;
+    var xpid = x.projectId == null ? '' : String(x.projectId);
+    if(!xpid || xpid !== pid) return;
+    if(notifScreenMark(pid, String(x.id))) n++;
+  });
+  return n;
 }
 /* ---------- 站内消息播报：串行队列 + 消息 id 去重 + 当前项目过滤 ---------- */
 /* 当前页面是否参与站内消息播报：只有角色工作台保留“提示语”播报 */
@@ -353,6 +390,7 @@ function notifQueueDrain(){
   var item = notifQueue.shift();
   while(item){
     delete notifQueued[notifKey(item.mode, item.id, item.pid)];
+    if(item.mode === 'screen' && !screenVoiceOn()){ item = notifQueue.shift(); continue; }
     if(item.mode === 'prompt'){
       /* 提示语模式：播报前再核对已读状态与次数上限 */
       var cur = (MOCK.NOTIFS || []).filter(function(x){ return String(x.id) === item.id; })[0];
@@ -364,11 +402,13 @@ function notifQueueDrain(){
   }
   if(!item) return;
   notifSpeaking = true;
+  notifCurrent = item;
   var synth = window.speechSynthesis;
   var finished = false;
   function done(){
     if(finished) return;
     finished = true;
+    if(notifCurrent === item) notifCurrent = null;
     if(notifWatchdog){ clearTimeout(notifWatchdog); notifWatchdog = null; }
     notifSpeaking = false;
     notifQueueDrain();
@@ -376,7 +416,7 @@ function notifQueueDrain(){
   /* 留出跨标签页写占位的确认窗口：若同帧被另一标签抢占则让出 */
   notifClaimTimer = setTimeout(function(){
     notifClaimTimer = null;
-    if(notifClaim(item.id) === 'other'){ notifSpeaking = false; notifQueueDrain(); return; }
+    if(notifClaim(item.id) === 'other'){ if(notifCurrent === item) notifCurrent = null; notifSpeaking = false; notifQueueDrain(); return; }
     if(item.mode === 'prompt'){
       notifHintBump(item.id); /* 工作台：每播一次计数 +1，最多 2 次 */
     } else {
@@ -433,6 +473,7 @@ function announceUnreadNotifs(ns){
 }
 /* 大屏：播报当前项目未读消息正文 desc（不播标题），每条只播一次 */
 function announceScreenNotifs(ns, projectId){
+  if(!screenVoiceOn()) return; /* 开关关闭：不排队、不发声、不写已播标记 */
   var pid = projectId == null ? '' : String(projectId);
   if(!pid) return;
   (ns || []).forEach(function(n){
@@ -449,6 +490,7 @@ function notifStopVoice(){
   notifQueue.length = 0;
   notifQueued = {};
   notifSpeaking = false;
+  notifCurrent = null;
   if(notifWatchdog){ clearTimeout(notifWatchdog); notifWatchdog = null; }
   if(notifClaimTimer){ clearTimeout(notifClaimTimer); notifClaimTimer = null; }
   try{ if(notifChannel) notifChannel.close(); }catch(e){}
@@ -919,6 +961,7 @@ window.App = { boot:boot, icon:icon, ICONS:ICONS, toast:toast, modal:modal, draw
   logout:logout, switchProject:switchProject, showNotifs:showNotifs, openScreen:openScreen, statusTag:statusTag, levelTag:levelTag,
   refreshShell:refreshShell, renderLiveChip:renderLiveChip, toggleVoice:toggleVoice,
   voice:{ speak:voiceSpeak, stop:voiceStop, on:voiceOn, supported:voiceSupported, sync:syncVoiceBtn },
-  notifVoice:{ announceScreen:announceScreenNotifs, start:initNotifChannel, stop:notifStopVoice },
+  notifVoice:{ announceScreen:announceScreenNotifs, start:initNotifChannel, stop:notifStopVoice,
+    on:screenVoiceOn, set:setScreenVoice, skip:skipScreenNotifs },
   barChart:barChart, hbar:hbar, donut:donut, curRole:curRole, curUser:curUser, openScript:openScript, formDisplayName:formDisplayName, esc:function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');} };
 })();
