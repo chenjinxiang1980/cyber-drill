@@ -13,7 +13,9 @@ import (
 )
 
 // ScreenNotifsHandler GET /api/screen/notifs?projectId=
-// 大屏语音播报专用：只返回当前项目的站内消息，不返回全局公告（project_id 为空）。
+// 大屏语音播报/操作流专用：只返回当前项目的站内消息，不返回全局公告（project_id 为空）。
+// 口径与登录用户的通知中心一致：包含 target='internal' 的内部可见消息（服务端生成的站内消息均为此值），
+// 否则真实演练数据会被全部过滤掉，大屏既无法展示也无法播报。
 // 已登录时按该用户已读状态；未登录（观摩）按“任一用户已读”判定，避免大屏重复播报已被处理的告警。
 // 仅暴露播报展示所需字段，不包含账号、配置、审计、令牌等敏感数据。
 func ScreenNotifsHandler(database *db.DB) gin.HandlerFunc {
@@ -51,7 +53,7 @@ func ScreenNotifsHandler(database *db.DB) gin.HandlerFunc {
 
 		rows, err := database.Query(
 			`SELECT id,time,level,source,title,descr,project_id FROM notifs
-			 WHERE target!='internal' AND project_id=? ORDER BY seq DESC LIMIT 50`, pid)
+			 WHERE project_id=? ORDER BY seq DESC LIMIT 50`, pid)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"serverTime": nowSec(), "projectId": pid, "notifs": []gin.H{}})
 			return

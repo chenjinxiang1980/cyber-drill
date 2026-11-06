@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"drill-system/internal/util"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-sql-driver/mysql"
 )
 
 // ---------- 越权 helper: 与 Node 版 bootstrap.js MANAGED_ROLES 对齐 ----------
@@ -27,9 +29,9 @@ import (
 // 外部单位角色 commander/healthbureau/cac/cyberpolice/medlead/clinical 一律不可动
 var itleadManageable = map[string]bool{
 	auth.RoleITLead:   true,
-	auth.RoleDuty:      true,
-	auth.RoleNetSec:    true,
-	auth.RoleSysAdmin:  true,
+	auth.RoleDuty:     true,
+	auth.RoleNetSec:   true,
+	auth.RoleSysAdmin: true,
 }
 
 func canModifyRole(u *auth.User, targetRoleID string) bool {
@@ -165,9 +167,16 @@ func AdminGetRoles(database *db.DB) gin.HandlerFunc {
 // 直接返回数组，与 Node 版 admin.js 对齐。
 func AdminGetForms(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// code 是展示编号（F001…），排序按它；引用关系仍然用 id。
 		rows, err := database.Query(
-			`SELECT id,name,fields FROM form_templates ORDER BY id`,
+			`SELECT id,COALESCE(code,''),name,fields FROM form_templates ORDER BY code`,
 		)
+		if err != nil {
+			// 老库未执行 0012（没有 code 列）时回退：按 id 排序，编号由 id 推导
+			rows, err = database.Query(
+				`SELECT id,'' AS code,name,fields FROM form_templates ORDER BY id`,
+			)
+		}
 		if err != nil {
 			slog.Warn("AdminGetForms 失败", "err", err)
 			util.Fail(c, 500, "读取表单模板失败")
@@ -176,15 +185,18 @@ func AdminGetForms(database *db.DB) gin.HandlerFunc {
 		defer rows.Close()
 		out := make([]gin.H, 0)
 		for rows.Next() {
-			var id, name sql.NullString
+			var id, code, name sql.NullString
 			var fieldsStr sql.NullString
-			if err := rows.Scan(&id, &name, &fieldsStr); err != nil {
+			if err := rows.Scan(&id, &code, &name, &fieldsStr); err != nil {
 				continue
 			}
 			out = append(out, gin.H{
-				"id":     nullStr(id),
-				"name":   nullStr(name),
-				"fields": util.ParseJSONArr(nullStr(fieldsStr)),
+				"id":   nullStr(id),
+				"code": formCodeOf(nullStr(id), nullStr(code)),
+				"name": nullStr(name),
+				// fields 存的是对象数组（{label,hint,required,type,options}），
+				// 必须用 ParseJSONArrAny；用 []string 版本会把每个元素解析成空串。
+				"fields": util.ParseJSONArrAny(nullStr(fieldsStr)),
 			})
 		}
 		c.JSON(200, out)
@@ -302,7 +314,9 @@ func AdminPostUsers(database *db.DB) gin.HandlerFunc {
 		pwd := body.Password
 		if pwd == "" {
 			pwd = os.Getenv("DRILL_INIT_PWD")
-			if pwd == "" { pwd = "CHANGE_ME" }
+			if pwd == "" {
+				pwd = "CHANGE_ME"
+			}
 		}
 		salt, hash, err := auth.HashPassword(pwd)
 		if err != nil {
@@ -479,7 +493,9 @@ func AdminResetPassword(database *db.DB) gin.HandlerFunc {
 		pwd := body.Password
 		if pwd == "" {
 			pwd = os.Getenv("DRILL_INIT_PWD")
-			if pwd == "" { pwd = "CHANGE_ME" }
+			if pwd == "" {
+				pwd = "CHANGE_ME"
+			}
 		}
 		salt, hash, err := auth.HashPassword(pwd)
 		if err != nil {
@@ -693,56 +709,198 @@ func AdminPatchRolesOrder(database *db.DB) gin.HandlerFunc {
 func AdminPostForms(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
-			Name   string `json:"name"`
-			Fields string `json:"fields"` // JSON 字符串
+			Name   string          `json:"name"`
+			Fields json.RawMessage `json:"fields"` // 对象数组（也兼容字符串数组 / JSON 字符串）
 		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.Name == "" {
+		if err := c.ShouldBindJSON(&body); err != nil {
 			util.BadRequest(c, "参数错误")
 			return
 		}
-		if body.Fields == "" {
-			body.Fields = "[]"
+		name := strings.TrimSpace(body.Name)
+		if name == "" {
+			util.BadRequest(c, "模板名称不能为空")
+			return
 		}
-		var maxNum int
-		database.QueryRow(`SELECT COALESCE(MAX(CAST(SUBSTRING(id,2) AS UNSIGNED)),0) FROM form_templates`).Scan(&maxNum)
-		newID := fmt.Sprintf("F%d", maxNum+1)
-		_, err := database.Exec(`INSERT INTO form_templates (id,name,fields) VALUES (?,?,?)`, newID, body.Name, body.Fields)
+		name = clipStr(name, 40)
+		fields, err := parseFormFields(body.Fields)
 		if err != nil {
+			util.BadRequest(c, "字段格式不正确")
+			return
+		}
+		if len(fields) == 0 {
+			util.BadRequest(c, "字段不能为空")
+			return
+		}
+		if dup := dupFieldLabel(fields); dup != "" {
+			util.BadRequest(c, "字段名称重复："+dup)
+			return
+		}
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			util.Fail(c, 500, "字段序列化失败")
+			return
+		}
+		// id 与展示编号 code 都按当前最大数字 +1 生成（id=F18、code=F018）。
+		// 并发新建时两个请求可能算出同一个编号，靠主键/唯一键冲突检测后重算重试。
+		var newID, newCode string
+		var insertErr error
+		for attempt := 0; attempt < 5; attempt++ {
+			var maxNum int
+			if err := database.QueryRow(
+				`SELECT COALESCE(MAX(CAST(SUBSTRING(id,2) AS UNSIGNED)),0) FROM form_templates`,
+			).Scan(&maxNum); err != nil {
+				slog.Warn("AdminPostForms 读取最大编号失败", "err", err)
+				util.Fail(c, 500, "读取模板编号失败")
+				return
+			}
+			newID = fmt.Sprintf("F%d", maxNum+1)
+			newCode = fmt.Sprintf("F%03d", maxNum+1)
+			// 不显式写 mode：老库可能还没有该列，交由列默认值 fill 兜底
+			_, insertErr = database.Exec(
+				`INSERT INTO form_templates (id,name,fields,code) VALUES (?,?,?,?)`,
+				newID, name, string(raw), newCode)
+			if insertErr == nil || !isDuplicateKeyErr(insertErr) {
+				break
+			}
+		}
+		if insertErr != nil {
+			if isDuplicateKeyErr(insertErr) {
+				slog.Warn("AdminPostForms 编号冲突", "id", newID, "code", newCode, "err", insertErr)
+				util.Fail(c, 409, "模板编号生成冲突，请重试")
+				return
+			}
+			slog.Warn("AdminPostForms 写入失败", "id", newID, "err", insertErr)
 			util.Fail(c, 500, "新增表单模板失败")
 			return
 		}
-		util.OK(c, gin.H{"ok": true, "id": newID})
+		util.OK(c, gin.H{"ok": true, "id": newID, "code": newCode, "name": name, "fields": fields})
 	}
 }
 
 // PUT /api/admin/forms/:id —— 编辑表单模板
+// 语义：name / fields 都是可选字段，只更新请求里出现的部分；
+// 返回体与 Node 版一致（{ok,template:{id,name,fields}}），前端依赖它回填列表。
 func AdminPutForms(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		var body struct {
-			Name   string `json:"name"`
-			Fields string `json:"fields"`
+			Name   *string         `json:"name"`
+			Fields json.RawMessage `json:"fields"`
 		}
-		c.ShouldBindJSON(&body)
-		updates := []string{}
-		args := []any{}
-		if body.Name != "" {
-			updates = append(updates, "name=?")
-			args = append(args, body.Name)
-		}
-		if body.Fields != "" {
-			updates = append(updates, "fields=?")
-			args = append(args, body.Fields)
-		}
-		if len(updates) == 0 {
-			util.OK(c, gin.H{"ok": true})
+		if err := c.ShouldBindJSON(&body); err != nil {
+			util.BadRequest(c, "参数错误")
 			return
 		}
-		args = append(args, id)
-		sql := "UPDATE form_templates SET " + strings.Join(updates, ",") + " WHERE id=?"
-		database.Exec(sql, args...)
-		util.OK(c, gin.H{"ok": true})
+
+		var oldName, oldFields, oldCode sql.NullString
+		if err := database.QueryRow(
+			`SELECT name,fields,COALESCE(code,'') FROM form_templates WHERE id=?`, id,
+		).Scan(&oldName, &oldFields, &oldCode); err != nil {
+			if err == sql.ErrNoRows {
+				util.Fail(c, 404, "表单模板不存在")
+				return
+			}
+			slog.Warn("AdminPutForms 查询失败", "id", id, "err", err)
+			util.Fail(c, 500, "读取表单模板失败")
+			return
+		}
+
+		name := nullStr(oldName)
+		if body.Name != nil {
+			name = strings.TrimSpace(*body.Name)
+			if name == "" {
+				util.BadRequest(c, "模板名称不能为空")
+				return
+			}
+			name = clipStr(name, 40)
+		}
+
+		fields := util.ParseJSONArrAny(nullStr(oldFields))
+		if len(body.Fields) > 0 && strings.TrimSpace(string(body.Fields)) != "null" {
+			nf, err := parseFormFields(body.Fields)
+			if err != nil {
+				util.BadRequest(c, "字段格式不正确")
+				return
+			}
+			if len(nf) == 0 {
+				util.BadRequest(c, "字段不能为空")
+				return
+			}
+			if dup := dupFieldLabel(nf); dup != "" {
+				util.BadRequest(c, "字段名称重复："+dup)
+				return
+			}
+			fields = nf
+		}
+
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			util.Fail(c, 500, "字段序列化失败")
+			return
+		}
+		if _, err := database.Exec(
+			`UPDATE form_templates SET name=?, fields=? WHERE id=?`, name, string(raw), id,
+		); err != nil {
+			slog.Warn("AdminPutForms 更新失败", "id", id, "err", err)
+			util.Fail(c, 500, "保存表单模板失败")
+			return
+		}
+		util.OK(c, gin.H{"ok": true, "template": gin.H{
+			"id": id, "code": formCodeOf(id, nullStr(oldCode)), "name": name, "fields": fields,
+		}})
 	}
+}
+
+// parseFormFields 把请求里的 fields 解析成规范化对象数组。
+// 兼容三种历史载荷：对象数组（当前前端）、字符串数组（旧简化格式）、JSON 字符串（老接口嵌套）。
+func parseFormFields(raw json.RawMessage) ([]any, error) {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return []any{}, nil
+	}
+	// 兼容「字符串里再套一层 JSON」
+	if strings.HasPrefix(s, "\"") {
+		var inner string
+		if err := json.Unmarshal(raw, &inner); err != nil {
+			return nil, err
+		}
+		s = strings.TrimSpace(inner)
+		if s == "" || s == "null" {
+			return []any{}, nil
+		}
+	}
+	var arr []any
+	if err := json.Unmarshal([]byte(s), &arr); err != nil {
+		return nil, err
+	}
+	return normalizeFields(arr), nil
+}
+
+// isDuplicateKeyErr 判断是否为 MySQL 主键/唯一键冲突（1062）。
+// 新建模板时 id 与 code 都由「当前最大编号+1」推导，并发下必然出现冲突，需靠它重试。
+func isDuplicateKeyErr(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && me.Number == 1062
+}
+
+// dupFieldLabel 返回第一个重复的字段名，无重复返回空串
+func dupFieldLabel(fields []any) string {
+	seen := map[string]bool{}
+	for _, f := range fields {
+		m, ok := f.(map[string]any)
+		if !ok {
+			continue
+		}
+		label, _ := m["label"].(string)
+		if label == "" {
+			continue
+		}
+		if seen[label] {
+			return label
+		}
+		seen[label] = true
+	}
+	return ""
 }
 
 // DELETE /api/admin/forms/:id —— 删除表单模板
