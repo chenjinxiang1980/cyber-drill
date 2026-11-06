@@ -6,6 +6,22 @@
 <title>角色工作台 · 示例医院网络安全应急演练系统</title>
 <link rel="icon" type="image/png" href="img/logo.png">
 <link rel="stylesheet" href="styles.css?v=20261104b">
+<style>
+/* 待办任务处置弹窗：左右分栏（左 30% 研判参考 / 右 70% 表单填写提交） */
+.modal.wb-split-modal{width:min(1180px,94vw);height:86vh;max-height:86vh}
+.modal.wb-split-modal .m-body{padding:16px;overflow:hidden;flex:1;min-height:0}
+.modal.wb-split-modal #wbTaskBody{height:100%;min-height:0}
+.wb-split{display:flex;gap:16px;height:100%;min-height:0}
+.wb-split-left{flex:0 0 30%;max-width:30%;min-width:0;overflow-y:auto;min-height:0;padding-right:4px}
+.wb-split-right{flex:1 1 70%;min-width:0;overflow-y:auto;min-height:0;padding-right:4px}
+@media (max-width:900px){
+  .modal.wb-split-modal{width:min(100vw - 24px,560px);height:auto;max-height:86dvh}
+  .modal.wb-split-modal .m-body{overflow-y:auto;padding:14px}
+  .wb-split{flex-direction:column;height:auto}
+  .wb-split-left{flex:none;max-width:100%;width:100%;overflow:visible;padding-right:0}
+  .wb-split-right{flex:none;width:100%;overflow:visible;padding-right:0}
+}
+</style>
 </head>
 <body data-page="workbench">
 <script src="system.js"></script>
@@ -431,30 +447,129 @@ document.addEventListener('app:ready', function(e){
       + '</div>';
   }
 
+  /* 角色中文名：优先用接口下发的剧本责任角色（script_nodes.target 已是中文），
+     英文 role key 回退到后端下发的角色清单（MOCK.ROLES），不在前端硬编码映射表 */
+  function roleDisplayName(v){
+    var s = String(v||'').trim();
+    if(!s) return '';
+    if(/[\u4e00-\u9fa5]/.test(s)) return s;
+    var rs = (window.MOCK && MOCK.ROLES) || [];
+    var hit = rs.filter(function(x){ return String(x.id)===s; })[0];
+    return hit ? (hit.name || hit.short || s) : s;
+  }
+
+  /* 剧本节点（取处置时长与依赖；数据来自 /api/bootstrap 下发的 scriptNodes） */
+  function scriptNodeOf(nodeId){
+    var list = (window.MOCK && MOCK.SCRIPT_NODES) || [];
+    return list.filter(function(n){ return String(n.id)===String(nodeId); })[0] || null;
+  }
+
+  function parseLocalMs(s){
+    var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(s||''));
+    if(!m) return NaN;
+    return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0)).getTime();
+  }
+
+  /* 实际耗时（分钟）：起算点取其前置节点最晚完成时刻，无前置时取演练开始时刻。
+     仅当「剧本设了处置时长 + 存在前置 + 已完成且有真实完成时刻」才返回数值，
+     初始告警节点与未设时限节点一律返回 null（不显示、不判超时）。 */
+  function actualMinutesOf(nodeId, completedAt, timeout, deps){
+    if(!timeout || !deps || !deps.length) return null;
+    var endMs = parseLocalMs(completedAt);
+    if(!isFinite(endMs)) return null;
+    var startMs = NaN;
+    (deps||[]).forEach(function(d){
+      var t = ((MOCK.TASKS||[]).filter(function(x){
+        return x.projectId===proj.id && String(x.nodeId)===String(d);
+      })[0]) || null;
+      if(t && t.completedAt){
+        var ms = parseLocalMs(t.completedAt);
+        if(isFinite(ms) && (!isFinite(startMs) || ms > startMs)) startMs = ms;
+      }
+    });
+    if(!isFinite(startMs)){
+      var st = parseLocalMs(proj.startedAt || '');
+      if(isFinite(st)) startMs = st;
+    }
+    if(!isFinite(startMs) || endMs < startMs) return null;
+    return Math.round((endMs - startMs) / 60000);
+  }
+
+  /* 前置节点状态归一：兼容 tasks.status（已完成/处理中/待处理）与实战版 completed 标记 */
+  function predStatusOf(p){
+    var s = String(p.status||'').trim();
+    if(s==='已完成') return {key:'done', label:'已完成', cls:'green'};
+    if(s==='处理中' || s==='处置中') return {key:'doing', label:'处置中', cls:'yellow'};
+    if(s==='超时') return {key:'done', label:'已完成（超时）', cls:'red'};
+    if(s==='待处理' || s==='待处置' || !s) return p.completed
+      ? {key:'done', label:'已完成', cls:'green'}
+      : {key:'todo', label:'待处置', cls:'gray'};
+    return {key:'done', label:s, cls:'green'};
+  }
+
   /* 填充前置节点处置情况区域 */
   function fillPredecessorSection(wrapId, data){
     var wrap = document.querySelector('[data-pred-body="'+wrapId+'"]');
     var state = document.querySelector('[data-pred-toggle="'+wrapId+'"] [data-pred-state]');
+    var toggle = document.querySelector('[data-pred-toggle="'+wrapId+'"]');
     if(!wrap) return;
+    /* 可折叠 */
+    if(toggle && !toggle.dataset.bound){
+      toggle.dataset.bound = '1';
+      toggle.onclick = function(){
+        wrap.style.display = (wrap.style.display === 'none') ? '' : 'none';
+      };
+    }
+    /* 外部单位仅能查看本院主动上报的材料，不展示院内处置明细 */
+    if(isExternal){
+      wrap.innerHTML = '<div class="tiny dim">外部单位仅可查看本院主动上报的材料，无院内处置明细查看权限。</div>';
+      if(state){ state.textContent='—'; state.className='tag gray'; }
+      return;
+    }
     var preds = (data && data.predecessors) || [];
     if(!preds.length){
       wrap.innerHTML = '<div class="tiny dim">当前节点无前置依赖，按剧本起始节点直接处置即可。</div>';
       if(state) { state.textContent = '无前置节点'; state.className = 'tag gray'; }
       return;
     }
-    var html = preds.map(function(p){
-      return predecessorCardHtml(p, data.mode);
-    }).join('');
-    wrap.innerHTML = html;
-    if(state) state.textContent = (preds.filter(function(p){ return p.status==='已完成'||p.status==='处置中'; }).length) + '/' + preds.length + ' 已处置';
 
-    /* 为附件绑定"打开/下载"交互 */
+    /* 复用现有附件查询接口，取各前置任务的证据附件清单 */
+    var jobs = preds.map(function(p){
+      if(!p.taskId) return Promise.resolve(p);
+      return API.getTaskAttachments(p.taskId).then(function(list){
+        p.attachments = (list||[]).map(function(a){
+          return {name:a.name, url:a.url, by:a.by, size:a.size, time:a.time, auto:a.auto};
+        });
+        return p;
+      }).catch(function(){ return p; });
+    });
+
+    Promise.all(jobs).then(function(list){
+      var statuses = list.map(predStatusOf);
+      var anyDone = statuses.some(function(s){ return s.key!=='todo'; });
+      var html = '';
+      if(!anyDone) html += '<div class="tiny" style="color:#fbbf24;margin-bottom:8px">上一节点尚未处置</div>';
+      html += list.map(function(p, i){ return predecessorCardHtml(p, statuses[i]); }).join('');
+      wrap.innerHTML = html;
+      if(state){
+        var doneN = statuses.filter(function(s){ return s.key!=='todo'; }).length;
+        state.textContent = doneN + '/' + list.length + ' 已处置';
+        state.className = 'tag ' + (doneN===list.length ? 'green' : 'gray');
+      }
+      bindPredAttachments(wrap);
+    }).catch(function(){
+      wrap.innerHTML = '<div class="tiny dim">前置节点处置情况加载失败，请刷新后重试。</div>';
+      if(state){ state.textContent='加载失败'; state.className='tag gray'; }
+    });
+  }
+
+  /* 证据附件：点击查看/下载 */
+  function bindPredAttachments(wrap){
     wrap.querySelectorAll('[data-pred-att]').forEach(function(el){
       el.onclick = function(){
         var url = el.dataset.url;
         var name = el.dataset.name || '附件';
         if(!url) return;
-        /* 图片直接预览，其他下载 */
         if(/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(url)){
           App.modal({ title:'附件预览 · '+App.esc(name), wide:true,
             body:'<img src="'+App.esc(url)+'" style="max-width:100%;display:block;border-radius:6px">',
@@ -469,33 +584,53 @@ document.addEventListener('app:ready', function(e){
     });
   }
 
-  /* 单个前置节点卡片 */
-  function predecessorCardHtml(p, mode){
-    var statusTag;
-    if(p.status==='已完成') statusTag = '<span class="tag green">已完成</span>';
-    else if(p.status==='处置中') statusTag = '<span class="tag yellow">处置中</span>';
-    else if(p.status==='已跳过') statusTag = '<span class="tag gray">已跳过</span>';
-    else if(p.status==='已完成（偏差）') statusTag = '<span class="tag red">已完成（偏差）</span>';
-    else statusTag = '<span class="tag gray">待处置</span>';
+  /* 单个前置节点卡片（只读；实战版仅展示实际提交内容，绝不展示剧本属性） */
+  function predecessorCardHtml(p, st){
+    st = st || predStatusOf(p);
+    var statusTag = '<span class="tag '+st.cls+'">'+st.label+'</span>';
 
-    var timeoutInfo = p.plannedTimeout ? ('剧本配置 '+p.plannedTimeout+' 分钟') : '剧本未设处置时长';
-    var actualInfo;
-    if(p.status==='待处置'){
-      actualInfo = '<span class="tiny dim">尚未处置</span>';
-    } else if(p.actualMinutes===null){
-      actualInfo = '<span class="tiny dim">无法计算（起算时刻缺失）</span>';
-    } else {
-      var cls = (p.ontime===true?'ok':(p.ontime===false?'warn':'dim'));
-      var icon = p.ontime===true?'⏱':'⏰';
-      actualInfo = '<span class="tiny" style="color:var(--'+cls+')">'+icon+' 实际耗时 '+p.actualMinutes+' 分钟（'+(p.ontime===true?'按时完成':'超时完成')+'）</span>';
+    var sn = scriptNodeOf(p.nodeId);
+    var timeout = Number((sn && sn.timeout) || 0) || 0;
+    var deps = (sn && sn.deps) || [];
+    var title = p.title || p.nodeTitle || p.nodeId;
+    var roleName = roleDisplayName(p.target || p.role);
+
+    /* 完成时间统一 YYYY-MM-DD HH:mm */
+    var completedAt = '';
+    if(p.completedAt){
+      completedAt = String(p.completedAt).replace('T',' ').slice(0,16);
+    } else if(p.stepTime){
+      var tm = String(p.stepTime);
+      if(/^\d{2}:\d{2}/.test(tm)){
+        var pDate = String(proj.date||'').slice(0,10) || String(proj.startedAt||'').slice(0,10);
+        completedAt = pDate ? (pDate + ' ' + tm.slice(0,5)) : '';
+      } else {
+        completedAt = tm.replace('T',' ').slice(0,16);
+      }
+    }
+
+    var timeoutInfo = timeout > 0 ? ('剧本配置 '+timeout+' 分钟') : '剧本未设处置时长';
+
+    /* 实际耗时：仅在「剧本设时长 + 有前置 + 已完成且有真实完成时间」时展示 */
+    var actualInfo = '';
+    if(st.key === 'done'){
+      var actual = actualMinutesOf(p.nodeId, completedAt, timeout, deps);
+      if(actual !== null){
+        var ontime = actual <= timeout;
+        actualInfo = '<div class="mt1 tiny" style="color:'+(ontime?'var(--ok,#22c55e)':'#fbbf24')+'">'
+          + (ontime?'⏱ ':'⏰ ')+'实际耗时 '+actual+' 分钟（'+(ontime?'按时完成':'超时完成')+'）</div>';
+      }
     }
 
     /* 表单字段 */
     var formsHtml;
-    if(!p.forms || !p.forms.length){
+    var fList = (p.forms || []).filter(function(f){
+      return (f.fields && f.fields.length) || f.formName;
+    });
+    if(!fList.length){
       formsHtml = '';
     } else {
-      formsHtml = p.forms.map(function(f){
+      formsHtml = fList.map(function(f){
         var label = App.formDisplayName({name: f.label || f.formName || '', mode: f.mode});
         var value;
         if(f.fields){
@@ -514,9 +649,9 @@ document.addEventListener('app:ready', function(e){
       formsHtml = '<div class="mt2">'+formsHtml+'</div>';
     }
 
-    /* 实战版额外的处置情况（measure/result/found 等）——注意绝不暴露剧本属性 */
+    /* 实战版额外展示的实际处置内容（均为参演人员提交内容，绝不含剧本属性/正确答案/提示） */
     var practicalExtra = '';
-    if(mode==='实战版' && p.status!=='待处置'){
+    if(isPractical && st.key !== 'todo'){
       var extraFields = [];
       if(p.found) extraFields.push('<span class="k">发现情况</span><span class="small">'+App.esc(p.found)+'</span>');
       if(p.measure) extraFields.push('<span class="k">处置措施</span><span class="small">'+App.esc(p.measure)+'</span>');
@@ -525,26 +660,7 @@ document.addEventListener('app:ready', function(e){
       if(extraFields.length) practicalExtra = '<div class="kv mt2" style="padding-top:6px;border-top:1px dashed rgba(255,255,255,.08)">'+extraFields.join('')+'</div>';
     }
 
-    /* 实战版：锚定此主流节点的混淆节点跳过记录（与正常处置区分开） */
-    var distractorSkipHtml = '';
-    var skips = (p.distractorSkips && p.distractorSkips.length) ? p.distractorSkips : [];
-    if(mode==='实战版' && skips.length){
-      var skipItems = skips.map(function(s){
-        return '<div style="margin:6px 0;padding:6px 10px;background:rgba(234,179,8,.08);border-left:3px solid rgba(234,179,8,.5);border-radius:0 4px 4px 0;font-size:12px">'
-          + '<span class="mono" style="color:var(--accent2);margin-right:6px">'+App.esc(s.nodeId)+'</span>'
-          + '<span class="small bold" style="color:#fbbf24">跳过混淆流程</span>'
-          + '<span class="tiny dim" style="margin-left:6px">'+App.esc(s.title||'')+'</span>'
-          + '<div class="tiny dim mt1">由 <b>'+App.esc(s.user||'—')+'</b> 于 <span class="mono">'+App.esc(s.skipTime||'—')+'</span> 判定不执行'
-          + (s.reason ? '<div style="margin-top:4px;color:#fcd34d">原因：'+App.esc(s.reason)+'</div>' : '')
-          + '</div></div>';
-      }).join('');
-      distractorSkipHtml = '<div class="mt2" style="padding-top:8px;border-top:1px dashed rgba(234,179,8,.3)">'
-        + '<div class="tiny" style="color:#fbbf24;margin-bottom:4px">⚠ 锚定此节点的混淆流程跳过记录（'+skips.length+' 条）</div>'
-        + skipItems
-        + '</div>';
-    }
-
-    /* 附件（仅基础版有） */
+    /* 证据附件（复用任务附件查询结果） */
     var attHtml;
     if(!p.attachments || !p.attachments.length){
       attHtml = '';
@@ -562,24 +678,23 @@ document.addEventListener('app:ready', function(e){
     }
 
     var notYetHint = '';
-    if(p.status==='待处置'){
-      notYetHint = '<div class="tiny dim mt1">上一节点尚未处置完成，本节点可先开始研判；等待处置中/已完成节点自动刷新。</div>';
+    if(st.key === 'todo'){
+      notYetHint = '<div class="tiny dim mt1">上一节点尚未处置</div>';
     }
 
     return '<div class="card" style="padding:10px 12px;margin-bottom:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)">'
       + '<div class="flex" style="justify-content:space-between;align-items:center;gap:10px">'
-      +   '<div><span class="mono tiny" style="color:var(--accent2)">'+App.esc(p.nodeId)+'</span> · <span class="bold small">'+App.esc(p.nodeTitle)+'</span>'
-      +     (p.role?'<span class="tiny dim"> · 责任角色 '+App.esc(p.role)+'</span>':'')+'</div>'
+      +   '<div><span class="mono tiny" style="color:var(--accent2)">'+App.esc(p.nodeId)+'</span> · <span class="bold small">'+App.esc(title)+'</span>'
+      +     (roleName?'<span class="tiny dim"> · 责任角色 '+App.esc(roleName)+'</span>':'')+'</div>'
       +   statusTag + '</div>'
       + '<div class="kv mt2">'
       +   '<span class="k">处置时长</span><span class="tiny">'+timeoutInfo+'</span>'
-      +   '<span class="k">完成时间</span><span class="mono tiny">'+(p.completedAt?App.esc(p.completedAt):'—')+'</span>'
+      +   '<span class="k">完成时间</span><span class="mono tiny">'+(completedAt?App.esc(completedAt):'—')+'</span>'
       + '</div>'
-      + '<div class="mt1">'+actualInfo+'</div>'
+      + actualInfo
       + notYetHint
       + formsHtml
       + practicalExtra
-      + distractorSkipHtml
       + attHtml
       + '</div>';
   }
@@ -591,29 +706,39 @@ document.addEventListener('app:ready', function(e){
     var guide = node ? node.guide : '';
     var limit = (node && node.timeout) ? node.timeout+' 分钟' : '—';
     var predWrapId = 'wbPred-' + t.id;
-    return predecessorSectionSkel(predWrapId)
-      + '<div class="section-title">'+App.icon('flow')+'当前处置流程 <span class="tiny dim" style="font-weight:400">完成本流程后，满足前置条件的后续流程将并行开放</span></div>'
-      + '<div class="card" style="padding:14px 16px;border-color:rgba(47,129,247,.35)">'
-      +   '<div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px">'
-      +     '<div><div class="small bold">'+App.esc(t.title)+'</div>'
-      +     '<div class="tk-meta mt2"><span class="mono">'+App.esc(t.id)+'</span><span>处置时长 '+limit+'</span>'+App.levelTag(t.level)+'</div></div>'
-      +     App.statusTag(t.status)+'</div>'
-      +   '<div class="kv mt3">'
-      +     '<span class="k">处置动作</span><span class="bold">'+App.esc(action)+'</span>'
-      +     '<span class="k">处置内容</span><span class="small" style="line-height:1.75">'+App.esc(desc)+'</span>'
-      +     (node&&node.receiver?'<span class="k">下一节点接收人</span><span class="bold">'+App.esc(node.receiver)+' <span class="tag gray">剧本预设</span></span>':'')
+    return '<div class="wb-split">'
+      /* 左：研判参考区（当前节点处置内容 + 引导信息 + 上一节点处置情况），独立滚动 */
+      + '<div class="wb-split-left">'
+      +   '<div class="section-title" style="margin-top:0">'+App.icon('flow')+'当前节点处置内容</div>'
+      +   '<div class="card" style="padding:14px 16px;border-color:rgba(47,129,247,.35)">'
+      +     '<div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px">'
+      +       '<div><div class="small bold">'+App.esc(t.title)+'</div>'
+      +       '<div class="tk-meta mt2"><span class="mono">'+App.esc(t.id)+'</span><span>处置时长 '+limit+'</span>'+App.levelTag(t.level)+'</div></div>'
+      +       App.statusTag(t.status)+'</div>'
+      +     '<div class="kv mt3">'
+      +       '<span class="k">处置动作</span><span class="bold">'+App.esc(action)+'</span>'
+      +       '<span class="k">处置内容</span><span class="small" style="line-height:1.75">'+App.esc(desc)+'</span>'
+      +       (node&&node.receiver?'<span class="k">下一节点接收人</span><span class="bold">'+App.esc(node.receiver)+' <span class="tag gray">剧本预设</span></span>':'')
+      +     '</div>'
+      +     (guide?'<div class="tiny mt3" style="color:var(--accent2);line-height:1.8">'+App.icon('flow')+' 引导：'+App.esc(guide)+'</div>':'')
       +   '</div>'
-      +   (guide?'<div class="tiny mt3" style="color:var(--accent2);line-height:1.8">'+App.icon('flow')+' 引导：'+App.esc(guide)+'</div>':'')
-      +   '<div class="section-title mt3">需完成事项</div>'
-      +   '<div class="small" style="line-height:1.95">1. 按引导提示完成本节点处置动作<br>'
-      +     '2. 核对并提交下方表单（已自动填充模拟数据）<br>'
-      +     '3. 上传证据附件（可上传文件或直接屏幕截图）</div>'
-      +   '<div class="section-title mt3">'+App.icon('file')+'证据附件 <button class="btn sm outline" data-att="'+t.id+'">'+App.icon('upload')+'上传 / 截图</button></div>'
-      +   '<div class="flex wrap gap2" id="watt-'+t.id+'">'+(t.atts&&t.atts.length?attHtml(t):'<span class="small dim">暂无附件 · 上传后即时刷新</span>')+'</div>'
-      +   formsHtml(t, node)
-      +   '<div class="divider"></div>'
-      +   '<button class="btn ok" data-finish="'+t.id+'">'+App.icon('check')+'完成本流程</button>'
-      +   '<div class="tiny dim mt2">仅基础版展示正确处置流程；完成本流程后归档，其后续流程在满足前置条件时自动开放。</div>'
+      +   predecessorSectionSkel(predWrapId)
+      + '</div>'
+      /* 右：表单填写与提交区 */
+      + '<div class="wb-split-right">'
+      +   '<div class="card" style="padding:14px 16px;border-color:rgba(47,129,247,.35)">'
+      +     '<div class="section-title" style="margin-top:0">需完成事项 <span class="tiny dim" style="font-weight:400">完成本流程后，满足前置条件的后续流程将并行开放</span></div>'
+      +     '<div class="small" style="line-height:1.95">1. 按引导提示完成本节点处置动作<br>'
+      +       '2. 核对并提交下方表单（已自动填充模拟数据）<br>'
+      +       '3. 上传证据附件（可上传文件或直接屏幕截图）</div>'
+      +     '<div class="section-title mt3">'+App.icon('file')+'证据附件 <button class="btn sm outline" data-att="'+t.id+'">'+App.icon('upload')+'上传 / 截图</button></div>'
+      +     '<div class="flex wrap gap2" id="watt-'+t.id+'">'+(t.atts&&t.atts.length?attHtml(t):'<span class="small dim">暂无附件 · 上传后即时刷新</span>')+'</div>'
+      +     formsHtml(t, node)
+      +     '<div class="divider"></div>'
+      +     '<button class="btn ok" data-finish="'+t.id+'">'+App.icon('check')+'完成本流程</button>'
+      +     '<div class="tiny dim mt2">仅基础版展示正确处置流程；完成本流程后归档，其后续流程在满足前置条件时自动开放。</div>'
+      +   '</div>'
+      + '</div>'
       + '</div>';
   }
 
@@ -693,6 +818,9 @@ document.addEventListener('app:ready', function(e){
         /* 打开处置表单即标记为处置中（导调中心节点操作情况同步展示） */
         var nid = (node&&node.id)||t.nodeId;
         if(nid) API.startNode(nid).catch(function(){});
+        /* 处置弹窗改为左右分栏（左研判参考 / 右表单） */
+        var mEl = ov.querySelector('.modal');
+        if(mEl) mEl.classList.add('wb-split-modal');
         ov.querySelector('#wbTaskClose').onclick = ov.close;
         var box = ov.querySelector('#wbTaskBody');
         box.innerHTML = stepCard(t, node, idx, total);
@@ -1203,13 +1331,25 @@ document.addEventListener('app:ready', function(e){
       /* 关闭方式收敛为两条：右上角 ×（含未提交内容确认）与提交成功后的自动关闭。
        * persist 关闭遮罩点击关闭；全站无 Esc 关闭监听，故 Esc 不会关闭本弹窗。 */
       persist:true,
-      body: predecessorSectionSkel(predWrapId)
-        + '<div class="fm-strip">'+App.icon('alert')+'<span><b>'+App.esc(d.title||'')+'</b><br>'+App.esc(d.desc||'请结合故障通报研判本流程是否属于本岗正确处置动作')+'</span></div>'
-        + '<div class="kv mb3"><span class="k">处置时长</span><span>'+(d.timeout?d.timeout+' 分钟':'未设置')+'</span>'
-        + '<span class="k">责任角色</span><span>'+App.esc(d.target||'—')+'</span></div>'
-        + '<div id="wbFlowBody">'+(sub?flowDoneBody(d):flowForm(d))+'</div>',
+      body: '<div class="wb-split">'
+        /* 左：研判参考区（当前节点处置内容 + 上一节点处置情况）；实战版不展示剧本引导信息 */
+        + '<div class="wb-split-left">'
+        +   '<div class="section-title" style="margin-top:0">'+App.icon('alert')+'当前节点处置内容</div>'
+        +   '<div class="fm-strip">'+App.icon('alert')+'<span><b>'+App.esc(d.title||'')+'</b><br>'+App.esc(d.desc||'请结合故障通报研判本流程是否属于本岗正确处置动作')+'</span></div>'
+        +   '<div class="kv mb3"><span class="k">处置时长</span><span>'+(d.timeout?d.timeout+' 分钟':'未设置')+'</span>'
+        +   '<span class="k">责任角色</span><span>'+App.esc(roleDisplayName(d.role||d.roleId||d.target)||'—')+'</span></div>'
+        +   predecessorSectionSkel(predWrapId)
+        + '</div>'
+        /* 右：处置表单与提交区 */
+        + '<div class="wb-split-right">'
+        +   '<div id="wbFlowBody">'+(sub?flowDoneBody(d):flowForm(d))+'</div>'
+        + '</div>'
+        + '</div>',
       foot: (sub || isExternal) ? '' : '<button class="btn primary" id="wbFlowSubmit">'+App.icon('check')+'提交处置记录</button>',
       onOpen:function(ov){
+        /* 处置弹窗改为左右分栏（左研判参考 / 右表单） */
+        var mEl = ov.querySelector('.modal');
+        if(mEl) mEl.classList.add('wb-split-modal');
         /* 唯一手工关闭入口：右上角 ×（底部「关闭」已移除，避免出现第三条关闭路径） */
         ov.querySelector('.x').onclick = function(){
           if(submitting) return; /* 请求未返回：不允许关闭，避免半提交状态 */
