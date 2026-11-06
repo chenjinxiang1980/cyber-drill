@@ -1,9 +1,9 @@
 # drill-server Linux/amd64 构建签名
-# 构建时间: 2026-11-06 00:56:05 (+08:00)
-# 构建方式: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o deploy-linux/drill-server .
-# 源码状态: 0.5.0 开源发布版（Go 规则下沉 + 计时基准/任务门控/语音播报/态势去重修复）
-# 校验: 本文件末行哈希 = 二进制实测（Get-FileHash 大写）一致（16,661,566 / a2b555f5…）
-# 上一线上版本: 16,447,167 / sha256 6c95a68d507b213640c1395f548bcc1be15f0bb305447f5d193fca6f47f8876a
-# 字节数: 16661566
-# 部署记录: 2026-11-04 23:56 上线，镜像 sha256:1f48197fd15d…；2026-11-05 0.5.0 发布构建（本地 ELF）
-a2b555f5b2c8bebb6901c91dd0fb9edbd08d373dea2a8d82a00b885c2baa3fb2  drill-server
+# 构建时间: 2026-11-07 00:00:17 (+08:00)（VM 内 Dockerfile 多阶段构建）
+# 构建方式: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X drill-system/internal/version.Version=0.6.0 -X ...BuildTime=... -X ...GitCommit=f125fd8"
+# 源码状态: 0.6.0 开源发布版（节点级文字质量规则与匹配容错 + 表单模板编号三位化及保存修复 + 大屏/工作台交互修正）
+# 校验: 本文件末行哈希 = 镜像 drill-server:0.6.0 内 /opt/drill/bin/drill-server 实测（11,587,744 / f0f605fa…）
+# 上一线上版本: 11583648 / sha256 66ebd5b15fe0b1a14f651f7c4182706b9c264b13d6d37c49701d31be2cce502b
+# 字节数: 11587744
+# 部署记录: 2026-11-07 0.6.0 发布构建，镜像 digest sha256:6ade7adcb14b…；仅签名，现网容器尚未替换
+f0f605faa08a434f802465d7af735628cc4c387811ba8c2df5ee8a2ba1bd0c59  drill-server
