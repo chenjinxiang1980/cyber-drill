@@ -12,9 +12,9 @@
 #
 # 构建（context 目录需含 drill-server / drill-migrate / drill-seed /
 #       docker-entrypoint.sh / migrations/）：
-#   docker build -f deploy/docker-dist/Dockerfile.hotfix -t drill-server:0.5.1 .
+#   docker build -f deploy/docker-dist/Dockerfile.hotfix -t drill-server:0.6.0 .
 # =============================================================================
-ARG BASE_IMAGE=drill-server:0.5.1
+ARG BASE_IMAGE=drill-server:0.6.0
 FROM ${BASE_IMAGE}
 
 USER root

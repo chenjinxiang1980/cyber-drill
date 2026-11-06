@@ -83,8 +83,8 @@ services:
       context: ../..
       dockerfile: deploy/linux/Dockerfile
       args:
-        VERSION: ${VERSION:-0.5.1}
-    image: drill-server:${VERSION:-0.5.1}
+        VERSION: ${VERSION:-0.6.0}
+    image: drill-server:${VERSION:-0.6.0}
     container_name: drill-bootstrap
     env_file:
       - .env
@@ -105,8 +105,8 @@ services:
       context: ../..
       dockerfile: deploy/linux/Dockerfile
       args:
-        VERSION: ${VERSION:-0.5.1}
-    image: drill-server:${VERSION:-0.5.1}
+        VERSION: ${VERSION:-0.6.0}
+    image: drill-server:${VERSION:-0.6.0}
     container_name: drill-app
     restart: unless-stopped
     env_file:

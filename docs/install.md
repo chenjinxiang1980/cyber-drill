@@ -1,4 +1,4 @@
-# 安装指南（0.5.1）
+# 安装指南（0.6.0）
 
 本文面向 **首次部署** 的运维人员，按推荐顺序覆盖以下路径：
 
@@ -8,7 +8,7 @@
 4. **镜像仓库对照**：GHCR 与华为 SWR 的公开状态、登录方式与实测结果；
 5. **从源码自主编译安装**：Linux 交叉编译优先，含签名校验、systemd 安装与 Docker 最小构建命令。
 
-> 版本固定为 **0.5.1**，镜像 tag 与 git 标签 `v0.5.1` 均不随安装器变化。
+> 版本固定为 **0.6.0**，镜像 tag 与 git 标签 `v0.6.0` 均不随安装器变化。
 
 > **为什么推荐 Linux 部署**：Linux 是本项目的原生目标形态（ELF 二进制或 Linux 容器镜像），运行稳定、无终端安全软件干扰。
 > Windows 原生编译产物（`.exe`）容易被杀毒软件与安全管控终端（如 360 等）判定为可疑文件并拦截、隔离甚至删除，导致服务无法稳定运行，升级后也可能再次被拦截。这不是“Windows 不能用”，而是原生二进制在企业终端上的误报与运维成本较高。
@@ -124,7 +124,7 @@ bash install/install-linux.sh --dry-run --source gitee --registry ghcr
 | Docker 检测 | `docker` 命令 + `docker info`；区分“未安装 / 已安装未启动 / 无权限” |
 | Docker 安装 | 按 `/etc/os-release` 识别：Debian/Ubuntu 走官方脚本，RHEL/CentOS/UOS/Kylin 走 `dnf/yum install docker`；**先展示命令，确认后执行** |
 | Compose 检测 | `docker compose version`；缺失时提示安装 `docker-compose-plugin` |
-| 源码 | `git clone --depth 1 --branch main`（版本仍为 0.5.1；可用 `DRILL_REF` 覆盖分支/标签）；无 git 时回退归档下载 |
+| 源码 | `git clone --depth 1 --branch main`（版本仍为 0.6.0；可用 `DRILL_REF` 覆盖分支/标签）；无 git 时回退归档下载 |
 | 镜像 | GHCR 与 SWR 均公开匿名可拉；SWR 先做匿名 token 协商，失败再提示 AK |
 | 配置 | 从 `.env.example` 生成 `drill.env`，缺失密钥随机生成（见 1.5） |
 | 启动 | `docker compose -p <project> -f deploy/docker-dist/docker-compose.yml --env-file drill.env up -d` |
@@ -134,7 +134,7 @@ bash install/install-linux.sh --dry-run --source gitee --registry ghcr
 
 ```bash
 curl http://127.0.0.1:8090/api/health
-# {"ok":true,"service":"cyber-drill-system","version":"0.5.1",...}
+# {"ok":true,"service":"cyber-drill-system","version":"0.6.0",...}
 
 # 停止（保留数据卷）
 docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file deploy/docker-dist/drill.env down
@@ -207,7 +207,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install\install-windows.ps
 
 ```
 [成功] 服务已启动。
-  健康检查：{"ok":true,"service":"cyber-drill-system","version":"0.5.1",...}
+  健康检查：{"ok":true,"service":"cyber-drill-system","version":"0.6.0",...}
   访问地址：http://localhost:8090
   管理员账号：admin
   管理员初始密码（只显示这一次，请立即保存）：<随机值>
@@ -312,11 +312,11 @@ bash install/install-linux.sh --source local --bundle ./drill-linux-bundle.tar.g
 
 ```bash
 # 有网机器导出
-docker save drill-server:0.5.1 | gzip > drill-server-0.5.1.tar.gz
+docker save drill-server:0.6.0 | gzip > drill-server-0.6.0.tar.gz
 
 # 离线机器导入并安装
 bash install/install-linux.sh --source local --registry local \
-  --image-tar ./drill-server-0.5.1.tar.gz --dir /opt/cyber-drill --yes
+  --image-tar ./drill-server-0.6.0.tar.gz --dir /opt/cyber-drill --yes
 ```
 
 ---
@@ -325,9 +325,9 @@ bash install/install-linux.sh --source local --registry local \
 
 | 仓库 | 地址 | 可见性 | 登录 | 适用网络 |
 |------|------|--------|------|----------|
-| GHCR | `ghcr.io/chenjinxiang1980/cyber-drill:0.5.1` | **公开，匿名可拉** | 不需要 | 境外 / 有代理 |
-| SWR 华为云 | `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:0.5.1` | **公开，匿名可拉**（2026-11-05 实测） | 不需要；仅在匿名失败时才需 AK | 国内 |
-| 本地 | `drill-server:0.5.1` | 本机镜像 | 不需要 | 离线 |
+| GHCR | `ghcr.io/chenjinxiang1980/cyber-drill:0.6.0` | **公开，匿名可拉** | 不需要 | 境外 / 有代理 |
+| SWR 华为云 | `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:0.6.0` | **公开，匿名可拉**（2026-11-05 实测） | 不需要；仅在匿名失败时才需 AK | 国内 |
+| 本地 | `drill-server:0.6.0` | 本机镜像 | 不需要 | 离线 |
 
 **实测记录（2026-11-05，VM 内标准通道）**
 
@@ -350,7 +350,7 @@ printf '%s' "$SWR_PASS" | docker login swr.cn-east-3.myhuaweicloud.com \
 |------|------|------|
 | 连接超时 / DNS 失败 | 网络不通 | 检查代理、安全组、DNS |
 | 401 / 403 且换不到匿名 token | 未公开或需鉴权 | 输入 AK 登录，或等仓库公开 |
-| HTTP 404 | tag 不存在 | 核对 tag（应为 `0.5.1`） |
+| HTTP 404 | tag 不存在 | 核对 tag（应为 `0.6.0`） |
 
 ---
 
@@ -418,7 +418,7 @@ docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file depl
 ```bash
 cd server
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-  -ldflags "-s -w -X drill-system/internal/version.Version=0.5.1" \
+  -ldflags "-s -w -X drill-system/internal/version.Version=0.6.0" \
   -o deploy-linux/drill-server .
 ```
 
@@ -487,8 +487,8 @@ curl http://127.0.0.1:8090/api/health
 ```bash
 DOCKER_BUILDKIT=1 docker build \
   -f deploy/docker-dist/Dockerfile \
-  --build-arg VERSION=0.5.1 \
-  -t drill-server:0.5.1 .
+  --build-arg VERSION=0.6.0 \
+  -t drill-server:0.6.0 .
 ```
 
 如需构建代理：
@@ -498,19 +498,19 @@ DOCKER_BUILDKIT=1 docker build \
   -f deploy/docker-dist/Dockerfile \
   --build-arg HTTP_PROXY=http://<proxy>:<port> \
   --build-arg HTTPS_PROXY=http://<proxy>:<port> \
-  --build-arg VERSION=0.5.1 \
-  -t drill-server:0.5.1 .
+  --build-arg VERSION=0.6.0 \
+  -t drill-server:0.6.0 .
 ```
 
 ### 4.6 构建后自检清单
 
 ```bash
 # 1) 版本注入
-docker run --rm drill-server:0.5.1 /opt/drill/bin/drill-server --version || true
-curl http://127.0.0.1:8090/api/health   # version 应为 0.5.1
+docker run --rm drill-server:0.6.0 /opt/drill/bin/drill-server --version || true
+curl http://127.0.0.1:8090/api/health   # version 应为 0.6.0
 
 # 2) 入口脚本可执行（容器内）
-docker run --rm --entrypoint /bin/sh drill-server:0.5.1 -c \
+docker run --rm --entrypoint /bin/sh drill-server:0.6.0 -c \
   'ls -l /opt/drill/docker-entrypoint.sh; head -1 /opt/drill/docker-entrypoint.sh | od -c'
 # 首行必须是 #!/bin/sh\n，不能出现 \r
 ```
@@ -518,12 +518,12 @@ docker run --rm --entrypoint /bin/sh drill-server:0.5.1 -c \
 ### 4.7 镜像分发
 
 ```bash
-docker tag drill-server:0.5.1 <registry>/<org>/cyber-drill:0.5.1
+docker tag drill-server:0.6.0 <registry>/<org>/cyber-drill:0.6.0
 printf '%s' "$REGISTRY_PASS" | docker login <registry> -u <user> --password-stdin
-docker push <registry>/<org>/cyber-drill:0.5.1
+docker push <registry>/<org>/cyber-drill:0.6.0
 ```
 
-> 不要覆盖已发布的 `0.5.1` 标签，除非明确要替换该版本；常规发版请用新 tag。
+> 不要覆盖已发布的 `0.6.0` 标签，除非明确要替换该版本；常规发版请用新 tag。
 
 ---
 
@@ -533,5 +533,6 @@ docker push <registry>/<org>/cyber-drill:0.5.1
 - [Linux 部署](linux-deployment.md)
 - [VMware 虚拟机部署](vmware-vm-deployment.md)
 - [安全部署指南](security-guide.md)
+- [0.6.0 发版说明](release-0.6.0.md)
 - [0.5.1 发版说明](release-0.5.1.md)
 - [0.5.0 发版说明](release-0.5.0.md)

@@ -2,7 +2,7 @@
 
 面向医院 / 企事业单位内网的 **桌面推演 + 实战演练** 指挥调度平台。内置 8 类高频安全事件剧本（勒索病毒、横向渗透、DDoS、钓鱼邮件、存储故障等），支持值班员、指挥员、管理员等多角色协同、剧本时序控制、处置步骤记录、1920×1080 监视大屏、自动考评与复盘报告。
 
-> 当前版本：**0.5.1**（Go 版）
+> 当前版本：**0.6.0**（Go 版）
 > 许可证：MIT © 2026 陈金祥
 
 ---
@@ -97,7 +97,7 @@ Emergency/
 │   │   ├── middleware/      # 安全头 / CORS / 限流 / BodyLimit
 │   │   ├── router/          # 路由组装与安全静态文件服务
 │   │   ├── util/
-│   │   └── version/         # 版本号（0.5.1）
+│   │   └── version/         # 版本号（0.6.0）
 │   ├── cmd/                 # bootstrap / migrate / verify_* 工具
 │   ├── winres/              # Windows 资源清单
 │   └── deploy-linux/        # Linux 构建产物与签名文本（二进制不入库）
@@ -277,7 +277,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install\install-windows.ps
 
 ```bash
 curl http://localhost:8090/api/health
-# 期望：{"ok":true,"service":"cyber-drill-system","version":"0.5.1",...}
+# 期望：{"ok":true,"service":"cyber-drill-system","version":"0.6.0",...}
 ```
 
 Windows PowerShell 可用：
@@ -325,7 +325,7 @@ docker compose -p drill -f deploy/docker-dist/docker-compose.yml \
 ### 5.5 离线包
 
 - Linux 离线包：`dist/drill-linux-bundle.tar.gz`，SHA256 `BB448855A4BB9F3F00ACD7803F4A0364C7D9091B936349BE8BB0D16FBA459B71`（systemd 安装，步骤见 [docs/install.md](docs/install.md)）。
-- 离线镜像：`docker save drill-server:0.5.1` 后用 `install/install-linux.sh --registry local --image-tar <tar>`。
+- 离线镜像：`docker save drill-server:0.6.0` 后用 `install/install-linux.sh --registry local --image-tar <tar>`。
 
 ### 5.6 从源码自主编译安装（Linux 交叉编译优先）
 
@@ -378,7 +378,24 @@ docker compose -p drill -f deploy/docker-dist/docker-compose.yml \
 
 ---
 
-## 八、版本与更新日志（0.5.1）
+## 八、版本与更新日志（0.6.0）
+
+### 0.6.0（2026-11-06）
+
+**新增 / 增强**
+
+- 处置文字质量规则下沉到节点级（migration 0011）：`quality_rules` 支持必含/加分关键词、最小字数、要素要求、敷衍词与扣分比例；关键词只匹配文本类字段，表单填写值不再参与匹配。
+- 匹配容错：全半角、空白、大小写与数字体系统一归一化；必含关键词同义词组；敷衍短文本在提交接口直接 400。
+- 证据要求为 `[]` 或空串的节点不再无条件扣 20%；老节点无 `quality_rules` 时按默认口径评分。
+- 表单模板展示编号三位补零（migration 0012，`F001…`），修复系统设置模板列表与「关联表单」下拉排序错乱；模板保存改为兼容后端仅返回 `{ok:true}`，不再因读 `r.template.id` 崩溃。
+- 大屏：语音播报开关、匿名观摩接口收敛；工作台处置弹窗左右分栏并修正前置节点展示；剧本编排与管理页交互修正。
+
+**构建与发布**
+
+- 版本、品牌默认版本（系统设置显示 `v0.6.0`）与安装器统一为 `0.6.0`。
+- 镜像 `0.6.0` 与 `latest` 同步发布到 GHCR 与华为云 SWR，公开匿名可拉。
+
+完整说明见 [docs/release-0.6.0.md](docs/release-0.6.0.md)。
 
 ### 0.5.1（2026-11-06）
 

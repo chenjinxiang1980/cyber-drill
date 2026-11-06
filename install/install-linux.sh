@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Cyber-Drill（应急演练指挥系统）0.5.1 —— Linux 一键安装脚本
+# Cyber-Drill（应急演练指挥系统）0.6.0 —— Linux 一键安装脚本
 #
 # 功能：
 #   1) 检测 Docker / Docker Compose v2；未装则按发行版给出安装命令（需确认）
@@ -33,9 +33,9 @@
 # =============================================================================
 set -u
 
-VERSION="0.5.1"
-# 安装器随 main 分支发布（v0.5.1 标签与安装器同源），
-# 源码版本固定为 0.5.1；可用 DRILL_REF 覆盖分支/标签。
+VERSION="0.6.0"
+# 安装器随 main 分支发布（v0.6.0 标签与安装器同源），
+# 源码版本固定为 0.6.0；可用 DRILL_REF 覆盖分支/标签。
 REF="${DRILL_REF:-main}"
 GITHUB_REPO="https://github.com/chenjinxiang1980/cyber-drill.git"
 GITEE_REPO="https://gitee.com/habeas/cyber-drill.git"
@@ -76,7 +76,7 @@ step()  { printf '\n=== %s ===\n' "$*"; }
 
 usage() {
     cat <<'EOF'
-Cyber-Drill 0.5.1 Linux 一键安装
+Cyber-Drill 0.6.0 Linux 一键安装
 
 用法：
   bash install-linux.sh [参数]

@@ -45,7 +45,7 @@ services:
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
-    image: drill-server:0.5.1-smoke
+    image: drill-server:0.6.0-smoke
     container_name: s99-dockerdist-app
     restart: unless-stopped
     environment:

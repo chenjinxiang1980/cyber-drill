@@ -1,5 +1,5 @@
 ﻿# =============================================================================
-# Cyber-Drill（应急演练指挥系统）0.5.1 —— Windows 一键安装脚本
+# Cyber-Drill（应急演练指挥系统）0.6.0 —— Windows 一键安装脚本
 #
 # 功能：
 #   1) 检测 Docker Desktop（区分"没装"与"装了没启动"），未装则给出 winget /
@@ -32,9 +32,9 @@
 # 这里用 Continue，并显式检查 $LASTEXITCODE。
 $ErrorActionPreference = 'Continue'
 
-$Version      = '0.5.1'
-# 安装器随 main 分支发布（v0.5.1 标签与安装器同源），
-# 源码版本固定为 0.5.1；可用环境变量 DRILL_REF 覆盖分支/标签。
+$Version      = '0.6.0'
+# 安装器随 main 分支发布（v0.6.0 标签与安装器同源），
+# 源码版本固定为 0.6.0；可用环境变量 DRILL_REF 覆盖分支/标签。
 $Ref          = if ($env:DRILL_REF) { $env:DRILL_REF } else { 'main' }
 $GithubRepo   = 'https://github.com/chenjinxiang1980/cyber-drill.git'
 $GiteeRepo    = 'https://gitee.com/habeas/cyber-drill.git'
@@ -67,7 +67,7 @@ function Write-Step([string]$msg) { Write-Host "`n=== $msg ===" -ForegroundColor
 
 function Show-Usage {
     Write-Host @'
-Cyber-Drill 0.5.1 Windows 一键安装
+Cyber-Drill 0.6.0 Windows 一键安装
 
 用法：
   powershell -NoProfile -ExecutionPolicy Bypass -File install-windows.ps1 [参数]
