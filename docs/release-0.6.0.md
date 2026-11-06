@@ -62,9 +62,15 @@ sha256:6ade7adcb14b3e1390203710e6f6da1465f36b5179c77c59b5828d5dc20b4bd3
 ```
 
 容器内 `/opt/drill/bin/drill-server`：11,587,744 B，SHA-256
-`f0f605faa08a434f802465d7af735628cc4c387811ba8c2df5ee8a2ba1bd0c59`
-（已写入 `server/deploy-linux/drill-server.sha256.txt`）。
+`f0f605faa08a434f802465d7af735628cc4c387811ba8c2df5ee8a2ba1bd0c59`。
+`server/deploy-linux/drill-server.sha256.txt` 已按 0.6.0 重签（头信息记录构建时间、
+构建命令、构建提交 `f125fd8` 与镜像 digest，末行为上述实测哈希）。
 镜像内 `schema_migrations` 共 12 条，最新 `0012_form_template_code`。
+
+**镜像内文件权限**：构建时统一收口，不依赖构建机 umask——静态资源
+（`public/` 下 HTML/JS/CSS、`public/img/`、`migrations/*.sql`）为 `644`；
+目录、二进制与入口脚本（`drill-server`、`drill-migrate`、`docker-entrypoint.sh`）为 `755`，
+运行时用户 `uid 10001(drill)` 可读可执行、不可写。
 
 **可复现构建**
 
