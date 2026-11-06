@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -394,7 +395,7 @@ func queryScenarios(database *db.DB) []gin.H {
 func queryScriptNodes(database *db.DB) []gin.H {
 	rows, err := database.Query(`SELECT id,scenario_id,type,title,short_title,target,time,timeout,form,att,descr,
 		branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,receiver,deps,
-		pos_x,pos_y,anchor_id,release_timing,parallel_desc FROM script_nodes ORDER BY scenario_id,seq`)
+		pos_x,pos_y,anchor_id,release_timing,parallel_desc,quality_rules FROM script_nodes ORDER BY scenario_id,seq`)
 	if err != nil {
 		slog.Warn("queryScriptNodes 失败", "err", err)
 		return []gin.H{}
@@ -415,9 +416,10 @@ func queryScriptNodes(database *db.DB) []gin.H {
 		var depsStr sql.NullString
 		var posX, posY sql.NullInt64
 		var anchorID, releaseTiming, parallelDesc sql.NullString
+		var qualityRules sql.NullString
 		if err := rows.Scan(&id, &scenarioID, &typ, &title, &shortTitle, &target, &tm, &timeout, &form, &att, &descr,
 			&branchesStr, &seq, &guide, &keywords, &action, &wrongStr, &evidenceReqStr, &required, &flowType, &score, &receiver, &depsStr,
-			&posX, &posY, &anchorID, &releaseTiming, &parallelDesc); err != nil {
+			&posX, &posY, &anchorID, &releaseTiming, &parallelDesc, &qualityRules); err != nil {
 			continue
 		}
 		// flowType
@@ -468,6 +470,10 @@ func queryScriptNodes(database *db.DB) []gin.H {
 			"anchorId":      util.ScanNullableString(anchorID),
 			"releaseTiming": util.ScanNullableString(releaseTiming),
 			"shortTitle":    util.ScanNullableString(shortTitle),
+		}
+		// 文字质量规则：库内没有（老节点）时返回 null，前端按默认口径展示
+		if qr := util.ParseJSONObj(util.ScanNullableString(qualityRules)); qr != nil {
+			node["qualityRules"] = qr
 		}
 		if f := util.ScanNullableString(form); f != "" {
 			node["form"] = f
@@ -722,7 +728,12 @@ func queryTasks(database *db.DB, u *auth.User) []gin.H {
 // --- form templates ---
 
 func queryFormTemplates(database *db.DB) []gin.H {
-	rows, err := database.Query(`SELECT id,name,fields FROM form_templates ORDER BY id`)
+	// code 是展示编号（F001…），排序按它；引用关系仍然用 id。
+	rows, err := database.Query(`SELECT id,COALESCE(code,''),name,fields FROM form_templates ORDER BY code`)
+	if err != nil {
+		// 老库未执行 0012（没有 code 列）时回退：按 id 排序，编号由 id 推导
+		rows, err = database.Query(`SELECT id,'' AS code,name,fields FROM form_templates ORDER BY id`)
+	}
 	if err != nil {
 		slog.Warn("queryFormTemplates 失败", "err", err)
 		return []gin.H{}
@@ -741,9 +752,9 @@ func queryFormTemplates(database *db.DB) []gin.H {
 	}
 	out := make([]gin.H, 0)
 	for rows.Next() {
-		var id, name sql.NullString
+		var id, code, name sql.NullString
 		var fieldsStr sql.NullString
-		if err := rows.Scan(&id, &name, &fieldsStr); err != nil {
+		if err := rows.Scan(&id, &code, &name, &fieldsStr); err != nil {
 			continue
 		}
 		fid := util.ScanNullableString(id)
@@ -754,12 +765,26 @@ func queryFormTemplates(database *db.DB) []gin.H {
 		}
 		out = append(out, gin.H{
 			"id":     fid,
+			"code":   formCodeOf(fid, util.ScanNullableString(code)),
 			"name":   util.ScanNullableString(name),
 			"fields": fields,
 			"mode":   mode,
 		})
 	}
 	return out
+}
+
+// formCodeOf 返回模板展示编号：库内 code 优先；老库未迁移时按 id 数字补零兜底。
+// 调用方只能把返回值用于展示/排序，任何引用关系仍必须使用 id。
+func formCodeOf(id, code string) string {
+	if code != "" {
+		return code
+	}
+	n := 0
+	if _, err := fmt.Sscanf(id, "F%d", &n); err != nil || n <= 0 {
+		return id
+	}
+	return fmt.Sprintf("F%03d", n)
 }
 
 // normalizeFields — 与 Node src/forms.js normalizeFields 严格对齐
@@ -855,11 +880,15 @@ var formTypeWhitelist = map[string]bool{
 	"datetime":    true,
 }
 
+// clipStr 按「字符」截断（不是字节）。
+// 原实现用 s[:n] 按字节切，中文会被切成半个字导致乱码；
+// label(40) / hint(200) 都是前端按字符数限长的，这里必须对齐。
 func clipStr(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
+	r := []rune(s)
+	if len(r) <= n {
+		return s
 	}
-	return s
+	return string(r[:n])
 }
 
 // parseOptions 与 Node parseOptions 对齐：

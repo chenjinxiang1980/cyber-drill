@@ -36,6 +36,7 @@ type scriptNodeIn struct {
 	Branches      any    `json:"branches"`
 	Guide         string `json:"guide"`
 	Keywords      string `json:"keywords"`
+	QualityRules  any    `json:"qualityRules"`
 	Action        string `json:"action"`
 	Wrong         any    `json:"wrong"`
 	EvidenceReq   any    `json:"evidenceReq"`
@@ -88,6 +89,7 @@ func (n *scriptNodeIn) UnmarshalJSON(data []byte) error {
 	n.Desc = textOf(raw, "desc", "descr")
 	n.Guide = textOf(raw, "guide")
 	n.Keywords = textOf(raw, "keywords") // 前端提交数组 → 以逗号拼接
+	n.QualityRules = anyOf(raw, "qualityRules", "quality_rules")
 	n.Action = textOf(raw, "action")
 	n.Receiver = textOf(raw, "receiver")
 	n.ParallelDesc = textOf(raw, "parallel_desc", "parallelDesc")
@@ -119,6 +121,7 @@ func (n *scriptNodeIn) UnmarshalJSON(data []byte) error {
 	markPresent(raw, n.present, "branches", "branches")
 	markPresent(raw, n.present, "guide", "guide")
 	markPresent(raw, n.present, "keywords", "keywords")
+	markPresent(raw, n.present, "qualityRules", "qualityRules", "quality_rules")
 	markPresent(raw, n.present, "action", "action")
 	markPresent(raw, n.present, "wrong", "wrong")
 	markPresent(raw, n.present, "evidenceReq", "evidenceReq", "evidence_req")
@@ -829,6 +832,14 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 			depsJSON, _ := json.Marshal(depsForNode)
 			branchesJSON, _ := json.Marshal(nilSafeJSON(n.Branches))
 
+			// quality_rules：仅在请求显式携带时写入；空对象/缺省落 NULL，读取时按默认口径走
+			var qualityRulesVal any
+			if n.has("qualityRules") {
+				if qr := qualityRulesJSON(n.QualityRules); qr != "" {
+					qualityRulesVal = qr
+				}
+			}
+
 			scoreVal := 0
 			if s, err := strconv.Atoi(anyToString(n.Score)); err == nil {
 				scoreVal = s
@@ -894,16 +905,17 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 			if !exOK {
 				if _, err := tx.Exec(`INSERT INTO script_nodes
 					(id,scenario_id,type,title,short_title,target,time,timeout,form,att,
-					`+"`descr`"+`,branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,
+					`+"`descr`"+`,branches,seq,guide,keywords,quality_rules,action,wrong,evidence_req,required,flow_type,
 					score,receiver,deps,pos_x,pos_y,parallel_desc,anchor_id,release_timing)
-					VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+					VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 					id, scenarioID,
 					strings.TrimSpace(n.Type), strings.TrimSpace(n.Title), strings.TrimSpace(n.ShortTitle),
 					strings.TrimSpace(n.Target), "",
 					timeoutVal,
 					strings.TrimSpace(n.Form), strings.TrimSpace(n.Att), strings.TrimSpace(n.Desc),
 					string(branchesJSON), seqVal,
-					strings.TrimSpace(n.Guide), strings.TrimSpace(n.Keywords), strings.TrimSpace(n.Action),
+					strings.TrimSpace(n.Guide), strings.TrimSpace(n.Keywords), qualityRulesVal,
+					strings.TrimSpace(n.Action),
 					string(wrongJSON), evReqJSON, requiredVal,
 					flowType, scoreVal, receiver,
 					string(depsJSON), posX, posY,
@@ -948,6 +960,9 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 			}
 			if n.has("keywords") {
 				set("keywords", strings.TrimSpace(n.Keywords))
+			}
+			if n.has("qualityRules") {
+				set("quality_rules", qualityRulesVal)
 			}
 			if n.has("action") {
 				set("action", strings.TrimSpace(n.Action))

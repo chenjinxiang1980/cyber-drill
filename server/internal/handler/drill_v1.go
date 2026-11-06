@@ -46,6 +46,7 @@ type drillV1Node struct {
 	Desc          string
 	Keywords      []string
 	EvidenceReq   string
+	QualityRules  string
 	Required      bool
 }
 
@@ -77,7 +78,7 @@ func drillV1NodesOf(database *db.DB, scenarioID string) []drillV1Node {
 		`SELECT id,type,title,COALESCE(target,''),COALESCE(timeout,0),COALESCE(form,''),
 			COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(receiver,''),COALESCE(deps,'[]'),
 			COALESCE(anchor_id,''),COALESCE(release_timing,'before'),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),
-			COALESCE(keywords,''),COALESCE(evidence_req,''),COALESCE(required,1)
+			COALESCE(keywords,''),COALESCE(evidence_req,''),COALESCE(quality_rules,''),COALESCE(required,1)
 		 FROM script_nodes WHERE scenario_id=? ORDER BY seq`, scenarioID)
 	if err != nil {
 		return nil
@@ -91,7 +92,7 @@ func drillV1NodesOf(database *db.DB, scenarioID string) []drillV1Node {
 		var required int
 		if err := rows.Scan(&n.ID, &n.Type, &n.Title, &n.Target, &n.Timeout, &n.Form,
 			&n.FlowType, &n.Score, &n.Receiver, &depsStr, &n.AnchorID, &n.ReleaseTiming,
-			&n.Action, &n.Desc, &keywords, &n.EvidenceReq, &required); err != nil {
+			&n.Action, &n.Desc, &keywords, &n.EvidenceReq, &n.QualityRules, &required); err != nil {
 			continue
 		}
 		for _, kw := range strings.Split(keywords, ",") {
@@ -454,15 +455,6 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
-		if len([]rune(measure)) < 6 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请填写不少于 6 字的实际处置措施"})
-			return
-		}
-		if result == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请填写处置结果"})
-			return
-		}
-
 		// 表单必填服务端强校验：按该节点绑定模板的必填项校验，缺失或空串一律 400
 		formsJSON := "{}"
 		if formsRaw, ok := body["forms"]; ok {
@@ -472,6 +464,15 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		reqFields := loadFormRequiredFields(database, node.Form)
 		if missing := missingRequiredFields(formsJSON, reqFields); len(missing) > 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "表单必填项缺失：" + joinFieldDisplays(missing)})
+			return
+		}
+
+		// 提交硬门槛：只拦「不写就说明没做这件事」（未填措施 / 有效字数过低 / 敷衍短文本）。
+		// 节点配置的最少字数与必备要素转为扣分项（correctNodeDeduction 内的 evaluateTextQuality），
+		// 正常作答不再因细节词被 400 挡住。
+		rules := parseQualityRules(node.QualityRules)
+		if reasons := evaluateHardGate(submissionQuality{Measure: measure, Result: result, Found: found}, rules, node.FlowType); len(reasons) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "处置文本无效：" + strings.Join(reasons, "；")})
 			return
 		}
 
@@ -503,7 +504,7 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		nowS := timeNowSec()
 		ontime := !isLateV1(p, node)
 
-		// delta（与 Score() 同一口径：超时 20% / 接收人 30% / 关键词命中不足 30% / 证据未提交或未命中 20%）
+		// delta（与 Score() 同一口径：超时 20% / 接收人 30% / 关键词分级扣分 / 文字质量 20% / 证据未提交或未命中 20%）
 		var delta float64
 		var parts []scoreDeductPart
 		if !isCorrect {
@@ -511,8 +512,13 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		} else {
 			q := submissionQuality{
 				Late: !ontime, RecvBad: receiverOk == 0, HasSubmission: true,
-				Text: strings.Join([]string{measure, result, found, evidence, formValuesText(formsJSON)}, "\n"),
+				// 关键词/证据只匹配处置文本，表单填写值不参与（避免塞关键词刷分）
+				Text:         strings.Join([]string{measure, result, found, evidence}, "\n"),
+				Measure:      measure,
+				Result:       result,
+				Found:        found,
 				EvidenceText: evidence, Keywords: node.Keywords, EvidenceReq: node.EvidenceReq,
+				Rules: rules,
 			}
 			deduct, ps := correctNodeDeduction(node.Score, q)
 			parts = ps

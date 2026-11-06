@@ -86,6 +86,7 @@ type ScriptNodeForScore struct {
 	ReleaseTiming string
 	Keywords     []string
 	EvidenceReq  string
+	QualityRules string
 	Action       string
 	Desc         string
 	Guide        string
@@ -154,7 +155,7 @@ func loadNodesForScore(database *db.DB, scenarioID string) []ScriptNodeForScore 
 	rows, err := database.Query(`SELECT id,type,title,COALESCE(target,''),COALESCE(timeout,0),COALESCE(form,''),
 		COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(receiver,''),COALESCE(deps,'[]'),
 		COALESCE(anchor_id,''),COALESCE(release_timing,'before'),
-		COALESCE(keywords,''),COALESCE(evidence_req,''),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),COALESCE(guide,''),
+		COALESCE(keywords,''),COALESCE(evidence_req,''),COALESCE(quality_rules,''),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),COALESCE(guide,''),
 		COALESCE(wrong,'[]'),COALESCE(required,1)
 		FROM script_nodes WHERE scenario_id=? ORDER BY seq`, scenarioID)
 	if err != nil {
@@ -169,7 +170,7 @@ func loadNodesForScore(database *db.DB, scenarioID string) []ScriptNodeForScore 
 		var required int
 		if err := rows.Scan(&n.ID, &n.Type, &n.Title, &n.Target, &n.Timeout, &n.Form,
 			&n.FlowType, &n.Score, &n.Receiver, &depsStr, &n.AnchorID, &n.ReleaseTiming,
-			&keywords, &n.EvidenceReq, &n.Action, &n.Desc, &n.Guide, &wrongStr, &required); err != nil {
+			&keywords, &n.EvidenceReq, &n.QualityRules, &n.Action, &n.Desc, &n.Guide, &wrongStr, &required); err != nil {
 			continue
 		}
 		if strings.EqualFold(n.FlowType, "distractor") {
@@ -573,6 +574,7 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	skippedDistract := 0
 	keywordMissCnt := 0
 	evidenceMissCnt := 0
+	textQualityCnt := 0
 
 	// 正确流程节点
 	for _, n := range correct {
@@ -613,13 +615,17 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 		if hasHit {
 			var recvBad bool
 			lateHit, _ := hit["late"].(bool)
-			q := submissionQuality{Late: lateHit, Keywords: n.Keywords, EvidenceReq: n.EvidenceReq}
+			q := submissionQuality{Late: lateHit, Keywords: n.Keywords, EvidenceReq: n.EvidenceReq, Rules: parseQualityRules(n.QualityRules)}
 			if step, ok := hit["step"].(DrillStepForScore); ok {
 				recvBad = step.ReceiverOK == 0
 				q.HasSubmission = true
 				q.RecvBad = recvBad
 				q.EvidenceText = step.Evidence
-				q.Text = strings.Join([]string{step.Measure, step.Result, step.Found, step.Evidence, formValuesText(step.Forms)}, "\n")
+				q.Measure = step.Measure
+				q.Result = step.Result
+				q.Found = step.Found
+				// 关键词/证据只匹配处置文本，不再拼入表单填写值
+				q.Text = strings.Join([]string{step.Measure, step.Result, step.Found, step.Evidence}, "\n")
 			}
 			// 超时 20% / 接收人错误 30% / 关键词命中不足 30% / 证据未提交或未命中 20%，单节点合计上限 80%
 			deduct, parts := correctNodeDeduction(sc, q)
@@ -628,8 +634,11 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 					NodeID: n.ID, Title: n.Title,
 					Type: p.Type, Point: -p.Point,
 				})
-				if strings.HasPrefix(p.Type, "处置关键词命中不足") {
+				if strings.HasPrefix(p.Type, "处置关键词") {
 					keywordMissCnt++
+				}
+				if strings.HasPrefix(p.Type, "处置文本质量") {
+					textQualityCnt++
 				}
 				if strings.HasPrefix(p.Type, "证据材料未提交") {
 					evidenceMissCnt++
@@ -830,7 +839,10 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 		formula += fmt.Sprintf("，执行混淆流程 %d 项", wrongCnt)
 	}
 	if keywordMissCnt > 0 {
-		formula += fmt.Sprintf("，处置关键词命中不足 %d 项（每项扣本节点 30%%）", keywordMissCnt)
+		formula += fmt.Sprintf("，处置关键词必含项缺失 %d 项（按缺失比例扣本节点分值）", keywordMissCnt)
+	}
+	if textQualityCnt > 0 {
+		formula += fmt.Sprintf("，处置文本质量不达标 %d 项（每项扣本节点 20%%）", textQualityCnt)
 	}
 	if evidenceMissCnt > 0 {
 		formula += fmt.Sprintf("，证据材料未提交或未命中 %d 项（每项扣本节点 20%%）", evidenceMissCnt)
