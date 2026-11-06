@@ -21,6 +21,13 @@
   .wb-split-left{flex:none;max-width:100%;width:100%;overflow:visible;padding-right:0}
   .wb-split-right{flex:none;width:100%;overflow:visible;padding-right:0}
 }
+/* 上一节点处置详情：只读弹窗（长文本内部滚动，不撑破布局） */
+.modal.pred-detail-modal{width:min(880px,94vw);max-width:94vw}
+.pred-detail-text{white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;line-height:1.75}
+.pred-detail-val{white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto}
+@media (max-width:900px){
+  .modal.pred-detail-modal{width:min(100vw - 24px,560px);max-height:86dvh}
+}
 </style>
 </head>
 <body data-page="workbench">
@@ -157,7 +164,7 @@ document.addEventListener('app:ready', function(e){
     +   '</div>'
     +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色待办任务<span class="more">'+(isPractical?'已发现故障 · 自主处置':'按剧本流程逐步执行')+'</span></div>'
     +     '<div id="wbTasks"><div class="small dim">加载中…</div></div></div>'
-    +   '<div class="card"><div class="card-title">'+App.icon('score')+'演练评分<span class="more">'+(isPractical?'偏离/超时扣分':'处置时长达成率')+'</span></div><div id="wbScore" class="small dim">正在汇总…</div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('score')+'演练评分<span class="more">'+(isPractical?'偏离/超时扣分':'标准处置时长达成率')+'</span></div><div id="wbScore" class="small dim">正在汇总…</div></div>'
     +   '<div class="card"><div class="card-title">'+App.icon('eye')+'本角色关注态势</div><div id="wbFeed"><div class="small dim">加载中…</div></div></div>'
     + '</div>';
 
@@ -428,7 +435,7 @@ document.addEventListener('app:ready', function(e){
     return '<div class="section-title mt3">'+App.icon('edit')+'需提交表单 <span class="tiny dim" style="font-weight:400">已按场景【'+App.esc(SCEN?SCEN.name:'通用')+'】生成模拟数据，请按字段说明逐项核对</span></div>'
       + forms.map(function(f, fi){
           var key = 'b-'+t.id+'-'+f.id;
-          return '<div class="card mb3" style="padding:12px 14px"><div class="small bold mb2">'+App.esc(App.formDisplayName(f))+' <span class="tag gray">'+f.id+'</span></div>'
+          return '<div class="card mb3" style="padding:12px 14px"><div class="small bold mb2">'+App.esc(App.formDisplayName(f))+' <span class="tag gray">'+App.esc(f.code || f.id)+'</span></div>'
             + '<div class="wz-host" data-wz="'+App.esc(key)+'" data-wzfid="'+App.esc(f.id)+'"></div>'
             + '<div class="flex gap3 mt3" style="align-items:center;flex-wrap:wrap"><button class="btn primary sm" data-form="'+t.id+'|'+fi+'">'+App.icon('upload')+'提交表单（模拟）</button>'
             + '<span class="tiny dim">点击「下一步」逐字段填写并核对，完成全部字段后可提交</span></div></div>';
@@ -470,29 +477,89 @@ document.addEventListener('app:ready', function(e){
     return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0)).getTime();
   }
 
-  /* 实际耗时（分钟）：起算点取其前置节点最晚完成时刻，无前置时取演练开始时刻。
-     仅当「剧本设了处置时长 + 存在前置 + 已完成且有真实完成时刻」才返回数值，
-     初始告警节点与未设时限节点一律返回 null（不显示、不判超时）。 */
-  function actualMinutesOf(nodeId, completedAt, timeout, deps){
-    if(!timeout || !deps || !deps.length) return null;
-    var endMs = parseLocalMs(completedAt);
-    if(!isFinite(endMs)) return null;
-    var startMs = NaN;
-    (deps||[]).forEach(function(d){
-      var t = ((MOCK.TASKS||[]).filter(function(x){
-        return x.projectId===proj.id && String(x.nodeId)===String(d);
-      })[0]) || null;
-      if(t && t.completedAt){
-        var ms = parseLocalMs(t.completedAt);
-        if(isFinite(ms) && (!isFinite(startMs) || ms > startMs)) startMs = ms;
-      }
-    });
-    if(!isFinite(startMs)){
-      var st = parseLocalMs(proj.startedAt || '');
-      if(isFinite(st)) startMs = st;
+  function fmtDateTime(ms){
+    var d = new Date(ms);
+    var p2 = function(n){ return n < 10 ? '0'+n : ''+n; };
+    return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())
+      + ' '+p2(d.getHours())+':'+p2(d.getMinutes());
+  }
+
+  /* 实战版 stepTime 只有 HH:mm：以演练开始时刻所在日期补全，早于开始时刻则视为跨天 */
+  function msFromStepTime(tm){
+    var m = /^(\d{2}):(\d{2})/.exec(String(tm||''));
+    if(!m) return NaN;
+    var baseDate = String(proj.startedAt||'').slice(0,10) || String(proj.date||'').slice(0,10);
+    if(!baseDate) return NaN;
+    var ms = parseLocalMs(baseDate + ' ' + m[1] + ':' + m[2] + ':00');
+    if(!isFinite(ms)) return NaN;
+    var base = parseLocalMs(proj.startedAt||'');
+    if(isFinite(base) && ms < base) ms += 86400000;
+    return ms;
+  }
+
+  /* 节点完成时刻（毫秒）：基础版取 tasks.completed_at；实战版优先取 drill_steps.created_at（含秒），退化到 stepTime */
+  function nodeCompletedMsOf(nodeId, p, steps){
+    if(p && p.completedAt){
+      var ms = parseLocalMs(p.completedAt);
+      if(isFinite(ms)) return ms;
     }
-    if(!isFinite(startMs) || endMs < startMs) return null;
-    return Math.round((endMs - startMs) / 60000);
+    var s = steps && steps[String(nodeId)];
+    if(s && s.created_at){
+      var ms2 = parseLocalMs(s.created_at);
+      if(isFinite(ms2)) return ms2;
+    }
+    if(p && p.stepTime) return msFromStepTime(p.stepTime);
+    return NaN;
+  }
+
+  /* 起算点 = 全部前置节点完成时刻中的最晚值。
+     前置数据来源：基础版取 /drill/predecessor 下发的 completedAt（不受当前角色任务过滤影响），
+     实战版取 /drill/workbench 的 drill_steps.created_at。任一前置未完成则不计算。 */
+  var predStartCache = {};
+  function loadPredStart(nodeId){
+    nodeId = String(nodeId);
+    if(predStartCache[nodeId]) return predStartCache[nodeId];
+    var sn = scriptNodeOf(nodeId);
+    var deps = (sn && sn.deps) || [];
+    if(!deps.length){
+      predStartCache[nodeId] = Promise.resolve({deps: deps.slice()});
+      return predStartCache[nodeId];
+    }
+    var jobSteps = loadPredSteps();
+    var jobApi = (isPractical || !API.getPredecessor)
+      ? Promise.resolve(null)
+      : API.getPredecessor(nodeId, proj.id).catch(function(){ return null; });
+    predStartCache[nodeId] = Promise.all([jobSteps, jobApi]).then(function(r){
+      var steps = r[0] || {}, api = r[1] || null;
+      var apiMap = {};
+      ((api && api.predecessors) || []).forEach(function(x){ apiMap[String(x.nodeId)] = x; });
+      var times = [], missing = [];
+      deps.forEach(function(d){
+        var ms = NaN, ap = apiMap[String(d)], stp = steps[String(d)];
+        if(ap && ap.completedAt) ms = parseLocalMs(ap.completedAt);
+        if(!isFinite(ms) && stp && stp.created_at) ms = parseLocalMs(stp.created_at);
+        if(!isFinite(ms) && ap && ap.stepTime) ms = msFromStepTime(ap.stepTime);
+        if(!isFinite(ms) && stp && stp.step_time) ms = msFromStepTime(stp.step_time);
+        if(!isFinite(ms)) missing.push(String(d));
+        else times.push({nodeId:String(d), ms:ms, at:fmtDateTime(ms)});
+      });
+      var latest = null;
+      times.forEach(function(x){ if(!latest || x.ms > latest.ms) latest = x; });
+      return {deps: deps.slice(), times: times, latest: latest,
+        startMs: latest ? latest.ms : NaN, missing: missing};
+    });
+    return predStartCache[nodeId];
+  }
+
+  /* 实际耗时（分钟）：起点为前置节点最晚完成时刻，终点为本节点完成时刻。
+     仅当「剧本设了处置时长 + 存在前置 + 已完成 + 全部前置已完成且有真实完成时刻」才返回数值；
+     初始告警节点、未设时限节点、任一前置未完成一律返回 null（不显示、不判超时）。 */
+  function actualMinutesOf(startInfo, endMs, timeout, deps){
+    if(!timeout || !deps || !deps.length || !startInfo) return null;
+    if((startInfo.missing||[]).length) return null;
+    if(!isFinite(startInfo.startMs) || !isFinite(endMs)) return null;
+    if(endMs < startInfo.startMs) return null;
+    return Math.round((endMs - startInfo.startMs) / 60000);
   }
 
   /* 前置节点状态归一：兼容 tasks.status（已完成/处理中/待处理）与实战版 completed 标记 */
@@ -546,17 +613,24 @@ document.addEventListener('app:ready', function(e){
 
     Promise.all(jobs).then(function(list){
       var statuses = list.map(predStatusOf);
-      var anyDone = statuses.some(function(s){ return s.key!=='todo'; });
-      var html = '';
-      if(!anyDone) html += '<div class="tiny" style="color:#fbbf24;margin-bottom:8px">上一节点尚未处置</div>';
-      html += list.map(function(p, i){ return predecessorCardHtml(p, statuses[i]); }).join('');
-      wrap.innerHTML = html;
-      if(state){
-        var doneN = statuses.filter(function(s){ return s.key!=='todo'; }).length;
-        state.textContent = doneN + '/' + list.length + ' 已处置';
-        state.className = 'tag ' + (doneN===list.length ? 'green' : 'gray');
-      }
-      bindPredAttachments(wrap);
+      var startJobs = list.map(function(p, i){
+        return statuses[i].key === 'todo' ? Promise.resolve(null) : loadPredStart(p.nodeId);
+      });
+      return Promise.all([Promise.all(startJobs), loadPredSteps()]).then(function(ctx){
+        var startInfos = ctx[0], stepsMap = ctx[1] || {};
+        var anyDone = statuses.some(function(s){ return s.key!=='todo'; });
+        var html = '';
+        if(!anyDone) html += '<div class="tiny" style="color:#fbbf24;margin-bottom:8px">上一节点尚未处置</div>';
+        html += list.map(function(p, i){ return predecessorCardHtml(p, statuses[i], startInfos[i], stepsMap); }).join('');
+        wrap.innerHTML = html;
+        if(state){
+          var doneN = statuses.filter(function(s){ return s.key!=='todo'; }).length;
+          state.textContent = doneN + '/' + list.length + ' 已处置';
+          state.className = 'tag ' + (doneN===list.length ? 'green' : 'gray');
+        }
+        bindPredAttachments(wrap);
+        bindPredDetailButtons(wrap, list);
+      });
     }).catch(function(){
       wrap.innerHTML = '<div class="tiny dim">前置节点处置情况加载失败，请刷新后重试。</div>';
       if(state){ state.textContent='加载失败'; state.className='tag gray'; }
@@ -584,8 +658,171 @@ document.addEventListener('app:ready', function(e){
     });
   }
 
+  /* 完成时间统一 YYYY-MM-DD HH:mm（基础版 completedAt / 实战版 stepTime）
+     实战版 stepTime 无日期：以演练开始日期补全，早于开始时刻按跨天 +1 处理，避免负数/错日 */
+  function predCompletedAtOf(p){
+    if(p.completedAt) return String(p.completedAt).replace('T',' ').slice(0,16);
+    if(p.stepTime){
+      var tm = String(p.stepTime);
+      if(/^\d{2}:\d{2}/.test(tm)){
+        var ms = msFromStepTime(tm);
+        if(isFinite(ms)) return fmtDateTime(ms);
+        var pDate = String(proj.startedAt||'').slice(0,10) || String(proj.date||'').slice(0,10);
+        return pDate ? (pDate + ' ' + tm.slice(0,5)) : '';
+      }
+      return tm.replace('T',' ').slice(0,16);
+    }
+    return '';
+  }
+
+  /* 实战版完整处置记录：found / skipped / skip_reason 仅在 workbench.steps 中下发。
+     每个节点取最早一条，与 predecessor 接口 ORDER BY id LIMIT 1 保持一致；失败静默降级。 */
+  var predStepsPromise = null;
+  function loadPredSteps(){
+    if(predStepsPromise) return predStepsPromise;
+    predStepsPromise = (proj && proj.id && API.getDrillWorkbench)
+      ? API.getDrillWorkbench(proj.id).then(function(wb){
+          var map = {};
+          ((wb && wb.steps) || []).forEach(function(s){
+            var nid = String(s.matched_node || s.matchedNode || '');
+            if(!nid) return;
+            if(!map[nid] || (Number(s.id)||0) < (Number(map[nid].id)||0)) map[nid] = s;
+          });
+          return map;
+        }).catch(function(){ return {}; })
+      : Promise.resolve({});
+    return predStepsPromise;
+  }
+
+  /* 只读详情弹窗：只渲染传入的这一个前置节点，弹窗内无任何可编辑控件 */
+  function openPredDetail(p){
+    if(!p) return;
+    var st = predStatusOf(p);
+    var title = p.title || p.nodeTitle || p.nodeId;
+    App.modal({
+      title:'上一节点处置详情 · '+App.esc(title),
+      wide:true,
+      body:'<div id="predDetailBody"><div class="small dim">正在加载处置记录…</div></div>',
+      foot:'<button class="btn" id="predDetailClose">关闭</button>',
+      onOpen:function(ov){
+        var mEl = ov.querySelector('.modal');
+        if(mEl) mEl.classList.add('pred-detail-modal');
+        ov.querySelector('#predDetailClose').onclick = ov.close;
+        loadPredStart(p.nodeId).then(function(startInfo){
+          return loadPredSteps().then(function(steps){
+            var host = ov.querySelector('#predDetailBody');
+            if(!host) return;
+            host.innerHTML = predDetailHtml(p, st, (steps||{})[String(p.nodeId)] || null, startInfo, steps||{});
+            bindPredAttachments(host);
+          });
+        });
+      }
+    });
+  }
+
+  /* 详情正文：元信息 + 自由文本原文 + 提交表单 + 证据附件 */
+  function predDetailHtml(p, st, step, startInfo, steps){
+    var sn = scriptNodeOf(p.nodeId);
+    var timeout = Number((sn && sn.timeout) || 0) || 0;
+    var deps = (sn && sn.deps) || [];
+    var title = p.title || p.nodeTitle || p.nodeId;
+    var roleName = roleDisplayName(p.target || p.role || (step && step.role_id)) || '—';
+    var completedAt = predCompletedAtOf(p);
+    var skipped = !!(step && Number(step.skipped) === 1);
+    var statusLabel = skipped ? '已跳过' : st.label;
+    var statusCls = skipped ? 'yellow' : st.cls;
+
+    var meta = '<div class="kv">'
+      + '<span class="k">节点</span><span class="small"><span class="mono">'+App.esc(p.nodeId)+'</span> · '+App.esc(title)+'</span>'
+      + '<span class="k">状态</span><span><span class="tag '+statusCls+'">'+App.esc(statusLabel)+'</span></span>'
+      + '<span class="k">责任角色</span><span class="small">'+App.esc(roleName)+'</span>'
+      + '<span class="k">完成时间</span><span class="mono small">'+(completedAt?App.esc(completedAt):'—')+'</span>';
+    if(timeout > 0 && deps.length && st.key === 'done' && !skipped){
+      var actual = actualMinutesOf(startInfo, nodeCompletedMsOf(p.nodeId, p, steps), timeout, deps);
+      if(actual !== null){
+        var ontime = actual <= timeout;
+        meta += '<span class="k">标准处置时长</span><span class="small">剧本 '+timeout+' 分钟 · 实际 '+actual+' 分钟'
+          + '<span class="tag '+(ontime?'green':'red')+'" style="margin-left:6px">'+(ontime?'按时':'超时')+'</span></span>';
+      }
+    }
+    if(skipped){
+      meta += '<span class="k">跳过原因</span><span class="small pred-detail-text">'+App.esc(String(step.skip_reason||'').trim()||'未填写')+'</span>';
+    }
+    meta += '</div>';
+
+    var texts = [];
+    function addText(label, val){
+      var s = (val===null || val===undefined) ? '' : String(val).replace(/\r\n/g,'\n').trim();
+      if(!s) return;
+      texts.push('<div class="mt2"><div class="tiny" style="color:var(--accent2)">'+label+'</div>'
+        + '<div class="small pred-detail-text">'+App.esc(s)+'</div></div>');
+    }
+    addText('发现过程', (step && step.found) || p.found);
+    addText('处置措施', (step && step.measure) || p.measure);
+    addText('处置结果', (step && step.result) || p.result);
+    var textHtml = texts.length ? texts.join('')
+      : '<div class="small dim mt2">该节点未填写自由文本处置内容，具体处置以提交的表单记录为准。</div>';
+
+    var fList = (p.forms || []).filter(function(f){
+      return (f.fields || []).some(function(x){
+        return String(x.value===null||x.value===undefined?'':x.value).trim() !== '';
+      });
+    });
+    fList.sort(function(a,b){ return String(a.time||'').localeCompare(String(b.time||'')); });
+    var formsHtml;
+    if(!fList.length){
+      formsHtml = '<div class="small dim mt2">该节点未提交表单</div>';
+    } else {
+      formsHtml = fList.map(function(f){
+        var fname = App.formDisplayName({name: f.formName || f.label || '', mode: f.mode});
+        var rows = (f.fields||[]).map(function(x){
+          var v = String(x.value===null||x.value===undefined?'':x.value);
+          return '<span class="k">'+App.esc(x.label)+'</span><span class="small pred-detail-val">'+(v?App.esc(v):'—')+'</span>';
+        }).join('');
+        return '<div class="card" style="padding:10px 12px;margin-top:10px;background:rgba(255,255,255,.03)">'
+          + '<div class="flex wrap" style="justify-content:space-between;gap:8px;align-items:center">'
+          +   '<div class="small bold">'+App.esc(fname)+'</div>'
+          +   '<div class="tiny dim">'+(f.submitter?App.esc(f.submitter)+' · ':'')+(f.time?App.esc(f.time):'')+'</div>'
+          + '</div><div class="kv mt2">'+rows+'</div></div>';
+      }).join('');
+    }
+
+    var attList = p.attachments || [];
+    var attHtml;
+    if(attList.length){
+      attHtml = '<div class="flex wrap gap2">' + attList.map(function(a){
+        var nm = a.name || '附件';
+        var img = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(a.url||''));
+        var sub = (a.time?App.esc(a.time)+' · ':'')+(a.size?App.esc(a.size):'');
+        var content = img
+          ? '<img src="'+App.esc(a.url)+'" alt="" style="width:40px;height:32px;object-fit:cover;border-radius:4px;display:block;flex:none">'
+          : App.icon('file');
+        return '<span class="file-chip" style="cursor:pointer" data-pred-att data-url="'+App.esc(a.url)+'" data-name="'+App.esc(nm)+'" title="点击查看/下载">'+content+App.esc(nm)+'<span class="fc-size">'+sub+'</span></span>';
+      }).join('') + '</div>';
+    } else if(step && String(step.evidence||'').trim()){
+      attHtml = '<div class="small pred-detail-text">'+App.esc(String(step.evidence).trim())+'</div>';
+    } else {
+      attHtml = '<div class="small dim">无附件记录</div>';
+    }
+
+    return '<div class="tiny dim">只读视图 · 不可修改或提交</div>'
+      + '<div class="mt2">'+meta+'</div>'
+      + '<div class="section-title mt3">具体处置内容</div>'+textHtml
+      + '<div class="section-title mt3">提交的表单</div>'+formsHtml
+      + '<div class="section-title mt3">证据附件</div>'+attHtml;
+  }
+
+  /* 为每张已处置卡片绑定「查看处置详情」，多前置互不影响 */
+  function bindPredDetailButtons(wrap, list){
+    var byId = {};
+    (list||[]).forEach(function(p){ byId[String(p.nodeId)] = p; });
+    wrap.querySelectorAll('[data-pred-detail]').forEach(function(btn){
+      btn.onclick = function(){ openPredDetail(byId[String(btn.dataset.predDetail)]); };
+    });
+  }
+
   /* 单个前置节点卡片（只读；实战版仅展示实际提交内容，绝不展示剧本属性） */
-  function predecessorCardHtml(p, st){
+  function predecessorCardHtml(p, st, startInfo, steps){
     st = st || predStatusOf(p);
     var statusTag = '<span class="tag '+st.cls+'">'+st.label+'</span>';
 
@@ -596,25 +833,14 @@ document.addEventListener('app:ready', function(e){
     var roleName = roleDisplayName(p.target || p.role);
 
     /* 完成时间统一 YYYY-MM-DD HH:mm */
-    var completedAt = '';
-    if(p.completedAt){
-      completedAt = String(p.completedAt).replace('T',' ').slice(0,16);
-    } else if(p.stepTime){
-      var tm = String(p.stepTime);
-      if(/^\d{2}:\d{2}/.test(tm)){
-        var pDate = String(proj.date||'').slice(0,10) || String(proj.startedAt||'').slice(0,10);
-        completedAt = pDate ? (pDate + ' ' + tm.slice(0,5)) : '';
-      } else {
-        completedAt = tm.replace('T',' ').slice(0,16);
-      }
-    }
+    var completedAt = predCompletedAtOf(p);
 
-    var timeoutInfo = timeout > 0 ? ('剧本配置 '+timeout+' 分钟') : '剧本未设处置时长';
+    var timeoutInfo = timeout > 0 ? ('剧本配置 '+timeout+' 分钟') : '未设置标准处置时长';
 
-    /* 实际耗时：仅在「剧本设时长 + 有前置 + 已完成且有真实完成时间」时展示 */
+    /* 实际耗时：仅在「剧本设时长 + 有前置 + 已完成 + 全部前置已完成且有真实完成时间」时展示 */
     var actualInfo = '';
     if(st.key === 'done'){
-      var actual = actualMinutesOf(p.nodeId, completedAt, timeout, deps);
+      var actual = actualMinutesOf(startInfo, nodeCompletedMsOf(p.nodeId, p, steps), timeout, deps);
       if(actual !== null){
         var ontime = actual <= timeout;
         actualInfo = '<div class="mt1 tiny" style="color:'+(ontime?'var(--ok,#22c55e)':'#fbbf24')+'">'
@@ -622,80 +848,30 @@ document.addEventListener('app:ready', function(e){
       }
     }
 
-    /* 表单字段 */
-    var formsHtml;
-    var fList = (p.forms || []).filter(function(f){
-      return (f.fields && f.fields.length) || f.formName;
-    });
-    if(!fList.length){
-      formsHtml = '';
-    } else {
-      formsHtml = fList.map(function(f){
-        var label = App.formDisplayName({name: f.label || f.formName || '', mode: f.mode});
-        var value;
-        if(f.fields){
-          value = f.fields.map(function(x){
-            var v = App.esc(x.value||'—');
-            return '<span class="k">'+App.esc(x.label)+'</span><span class="small">'+v+'</span>';
-          }).join('');
-          return '<div class="kv" style="margin:6px 0 0 0">'
-            + '<div class="tiny" style="color:var(--accent2);margin-bottom:2px">▸ '+App.esc(label)+(f.submitter?' <span class="dim">· '+App.esc(f.submitter)+'</span>':'')+(f.time?' <span class="dim">· '+App.esc(f.time)+'</span>':'')+'</div>'
-            + value + '</div>';
-        } else {
-          var v = App.esc(f.value||'—');
-          return '<div class="kv" style="margin:4px 0 0 0"><span class="k">'+App.esc(label)+'</span><span class="small">'+v+'</span></div>';
-        }
-      }).join('');
-      formsHtml = '<div class="mt2">'+formsHtml+'</div>';
-    }
-
-    /* 实战版额外展示的实际处置内容（均为参演人员提交内容，绝不含剧本属性/正确答案/提示） */
-    var practicalExtra = '';
-    if(isPractical && st.key !== 'todo'){
-      var extraFields = [];
-      if(p.found) extraFields.push('<span class="k">发现情况</span><span class="small">'+App.esc(p.found)+'</span>');
-      if(p.measure) extraFields.push('<span class="k">处置措施</span><span class="small">'+App.esc(p.measure)+'</span>');
-      if(p.result) extraFields.push('<span class="k">处置结果</span><span class="small">'+App.esc(p.result)+'</span>');
-      if(p.evidence) extraFields.push('<span class="k">证据说明</span><span class="small">'+App.esc(p.evidence)+'</span>');
-      if(extraFields.length) practicalExtra = '<div class="kv mt2" style="padding-top:6px;border-top:1px dashed rgba(255,255,255,.08)">'+extraFields.join('')+'</div>';
-    }
-
-    /* 证据附件（复用任务附件查询结果） */
-    var attHtml;
-    if(!p.attachments || !p.attachments.length){
-      attHtml = '';
-    } else {
-      attHtml = p.attachments.map(function(a){
-        var nm = App.esc(a.name||'附件');
-        var meta = (a.by?App.esc(a.by)+' · ':'')+(a.size?App.esc(a.size):'')+(a.auto?' ⚙':'');
-        var img = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(a.url||''));
-        var content = img
-          ? '<img src="'+App.esc(a.url)+'" alt="" style="width:40px;height:32px;object-fit:cover;border-radius:4px;display:block;flex:none">'
-          : App.icon('file');
-        return '<span class="file-chip" style="cursor:pointer" data-pred-att data-url="'+App.esc(a.url)+'" data-name="'+nm+'" title="点击查看/下载">'+content+nm+'<span class="fc-size">'+meta+'</span></span>';
-      }).join('');
-      attHtml = '<div class="mt2"><span class="tiny dim">证据附件：</span><span class="flex wrap gap2 mt1">'+attHtml+'</span></div>';
-    }
-
     var notYetHint = '';
     if(st.key === 'todo'){
       notYetHint = '<div class="tiny dim mt1">上一节点尚未处置</div>';
     }
 
+    /* 已处置节点才提供详情入口；未处置不渲染按钮，避免空弹窗 */
+    var detailBtn = '';
+    if(st.key !== 'todo' && p.completed !== false){
+      detailBtn = '<div class="mt2" style="text-align:right">'
+        + '<button class="btn sm outline" data-pred-detail="'+App.esc(p.nodeId)+'">'+App.icon('eye')+'查看处置详情</button></div>';
+    }
+
     return '<div class="card" style="padding:10px 12px;margin-bottom:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)">'
       + '<div class="flex" style="justify-content:space-between;align-items:center;gap:10px">'
-      +   '<div><span class="mono tiny" style="color:var(--accent2)">'+App.esc(p.nodeId)+'</span> · <span class="bold small">'+App.esc(title)+'</span>'
-      +     (roleName?'<span class="tiny dim"> · 责任角色 '+App.esc(roleName)+'</span>':'')+'</div>'
+      +   '<div><span class="mono tiny" style="color:var(--accent2)">'+App.esc(p.nodeId)+'</span> · <span class="bold small">'+App.esc(title)+'</span></div>'
       +   statusTag + '</div>'
       + '<div class="kv mt2">'
-      +   '<span class="k">处置时长</span><span class="tiny">'+timeoutInfo+'</span>'
+      +   '<span class="k">责任角色</span><span class="small">'+(roleName?App.esc(roleName):'—')+'</span>'
+      +   '<span class="k">标准处置时长</span><span class="tiny">'+timeoutInfo+'</span>'
       +   '<span class="k">完成时间</span><span class="mono tiny">'+(completedAt?App.esc(completedAt):'—')+'</span>'
       + '</div>'
       + actualInfo
       + notYetHint
-      + formsHtml
-      + practicalExtra
-      + attHtml
+      + detailBtn
       + '</div>';
   }
 
@@ -713,7 +889,7 @@ document.addEventListener('app:ready', function(e){
       +   '<div class="card" style="padding:14px 16px;border-color:rgba(47,129,247,.35)">'
       +     '<div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px">'
       +       '<div><div class="small bold">'+App.esc(t.title)+'</div>'
-      +       '<div class="tk-meta mt2"><span class="mono">'+App.esc(t.id)+'</span><span>处置时长 '+limit+'</span>'+App.levelTag(t.level)+'</div></div>'
+      +       '<div class="tk-meta mt2"><span class="mono">'+App.esc(t.id)+'</span><span>标准处置时长 '+limit+'</span>'+App.levelTag(t.level)+'</div></div>'
       +       App.statusTag(t.status)+'</div>'
       +     '<div class="kv mt3">'
       +       '<span class="k">处置动作</span><span class="bold">'+App.esc(action)+'</span>'
@@ -747,7 +923,7 @@ document.addEventListener('app:ready', function(e){
     var done = state === 'done', locked = state === 'locked';
     var limit = (node && node.timeout) ? node.timeout+' 分钟' : '—';
     var meta = '<span class="mono">'+App.esc(t.id)+'</span>'
-      + '<span>处置时长 '+limit+'</span>'
+      + '<span>标准处置时长 '+limit+'</span>'
       + (node&&node.action?'<span>'+App.esc(node.action)+'</span>':'');
     var blocked = (t.blockedBy||[]).map(function(x){ return x.title||x.id; });
     if(locked && blocked.length) meta += '<span style="color:var(--warn)">待完成：'+App.esc(blocked.join('、'))+'</span>';
@@ -781,7 +957,7 @@ document.addEventListener('app:ready', function(e){
       host.innerHTML = head + '<div class="task-nav">'+rows+'</div>'
         + (avail.length ? '<div class="tiny dim mt2">当前有 '+avail.length+' 项流程可并行处置：需点开弹窗核对处置动作、提交表单与附件；完成后满足前置条件的后续流程自动开放。</div>'
           : (locked.length ? '<div class="tiny dim mt2">当前暂无可处置流程，等待前置流程完成后自动开放（置灰项为前置未完成）。</div>'
-            : '<div class="empty mt3">'+App.icon('check')+'<div>本角色负责的流程已全部完成</div><div class="tiny dim mt2">可前往复盘评估查看处置时长达成情况</div></div>'));
+            : '<div class="empty mt3">'+App.icon('check')+'<div>本角色负责的流程已全部完成</div><div class="tiny dim mt2">可前往复盘评估查看标准处置时长达成情况</div></div>'));
       host.querySelectorAll('[data-open]').forEach(function(row){
         row.onclick = function(){
           var t = mine.filter(function(x){ return String(x.id)===String(row.dataset.open); })[0];
@@ -850,7 +1026,7 @@ document.addEventListener('app:ready', function(e){
         + '<span class="k">任务编号</span><span class="mono">'+App.esc(t.id)+'</span>'
         + '<span class="k">处置动作</span><span class="bold">'+App.esc((node&&node.action)||'应急处置')+'</span>'
         + '<span class="k">处置内容</span><span class="small" style="line-height:1.75">'+App.esc((node&&node.desc)||t.desc||'—')+'</span>'
-        + '<span class="k">处置时长</span><span>'+(node&&node.timeout?node.timeout+' 分钟':'未设置')+'</span>'
+        + '<span class="k">标准处置时长</span><span>'+(node&&node.timeout?node.timeout+' 分钟':'未设置')+'</span>'
         + '<span class="k">当前状态</span><span>'+App.statusTag(t.status)+'</span>'
         + '</div>'
         + '<div class="sim-banner mt3">'+App.icon('check')+'<span>本步骤已完成并归档（接单 → 提交处置 → 完成），列表行仅供查看，不可重复提交。</span></div>',
@@ -1222,7 +1398,7 @@ document.addEventListener('app:ready', function(e){
       : (sub
         ? '<span class="tag '+(sub.correct?'green':'red')+'">已提交</span>'
         : (locked ? '<span class="tag gray">前置未完成</span>' : '<span class="tag red">待处置</span>'));
-    var meta = '<span>处置时长 '+(d.timeout?d.timeout+' 分钟':'—')+'</span>'
+    var meta = '<span>标准处置时长 '+(d.timeout?d.timeout+' 分钟':'—')+'</span>'
       + (d.action?'<span>'+App.esc(d.action)+'</span>':'')
       + (d.formName?'<span>表单：'+App.esc(App.formDisplayName({name:d.formName, mode:d.formMode}))+'</span>':'')
       + (locked && (d.blockedBy||[]).length ? '<span style="color:var(--warn)">待完成：'+App.esc(d.blockedBy.map(function(x){ return x.title||x.id; }).join('、'))+'</span>' : '');
@@ -1279,7 +1455,7 @@ document.addEventListener('app:ready', function(e){
       + '<span class="k">处置时刻</span><span class="mono">'+App.esc(sub.stepTime||'—')+'</span>'
       + '<span class="k">处置人</span><span>'+App.esc(sub.user||'—')+'</span>'
       + '<span class="k">判定结果</span><span>'+(sub.correct
-          ? '<span class="tag green">正确流程 · 得分 +'+sub.delta+'</span>'+(sub.ontime?'':' <span class="tag yellow">超出处置时长</span>')
+          ? '<span class="tag green">正确流程 · 得分 +'+sub.delta+'</span>'+(sub.ontime?'':' <span class="tag yellow">超出标准处置时长</span>')
           : '<span class="tag red">混淆流程 · 扣分 '+Math.abs(sub.delta)+'</span>')+'</span>'
       + '<span class="k">下一节点接收人</span><span>'+(sub.receiver?App.esc(sub.receiver):'—')
         +(sub.correct?(sub.receiverOk?'':' <span class="tag red">选择错误 · 扣本流程30%</span>'):'')+'</span>'
@@ -1336,7 +1512,7 @@ document.addEventListener('app:ready', function(e){
         + '<div class="wb-split-left">'
         +   '<div class="section-title" style="margin-top:0">'+App.icon('alert')+'当前节点处置内容</div>'
         +   '<div class="fm-strip">'+App.icon('alert')+'<span><b>'+App.esc(d.title||'')+'</b><br>'+App.esc(d.desc||'请结合故障通报研判本流程是否属于本岗正确处置动作')+'</span></div>'
-        +   '<div class="kv mb3"><span class="k">处置时长</span><span>'+(d.timeout?d.timeout+' 分钟':'未设置')+'</span>'
+        +   '<div class="kv mb3"><span class="k">标准处置时长</span><span>'+(d.timeout?d.timeout+' 分钟':'未设置')+'</span>'
         +   '<span class="k">责任角色</span><span>'+App.esc(roleDisplayName(d.role||d.roleId||d.target)||'—')+'</span></div>'
         +   predecessorSectionSkel(predWrapId)
         + '</div>'
@@ -1426,7 +1602,7 @@ document.addEventListener('app:ready', function(e){
           }).then(function(r){
             var recvTip = r.correct && r.receiverOk===0 ? '（接收人选择错误，扣本流程30%）' : '';
             App.toast(r.correct
-              ? '处置记录已提交：正确流程，得分 +'+r.delta+(r.ontime?'':';超出处置时长')+recvTip
+              ? '处置记录已提交：正确流程，得分 +'+r.delta+(r.ontime?'':';超出标准处置时长')+recvTip
               : '处置记录已提交：混淆流程，扣分 '+Math.abs(r.delta),
               r.correct && r.receiverOk!==0 ? 'ok':'warn');
             ov.close();

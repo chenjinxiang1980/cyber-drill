@@ -458,17 +458,20 @@ window.API = (function () {
   function adminForms() { return DRILL.get('/admin/forms'); }
   function addFormTemplate(t) {
     return DRILL.post('/admin/forms', t).then(function (r) {
-      (MOCK.FORM_TEMPLATES = MOCK.FORM_TEMPLATES || []).push({ id: r.id, name: r.name, fields: r.fields, mode: r.mode });
-      return r;
+      var item = { id: r.id, code: r.code || '', name: r.name || (t && t.name), fields: r.fields || (t && t.fields) || [], mode: r.mode || 'fill' };
+      (MOCK.FORM_TEMPLATES = MOCK.FORM_TEMPLATES || []).push(item);
+      return { ok: true, id: item.id, code: item.code, name: item.name, fields: item.fields, mode: item.mode };
     });
   }
   function updateFormTemplate(id, payload) {
     return DRILL.api('/admin/forms/' + encodeURIComponent(id), { method: 'PUT', body: payload }).then(function (r) {
+      /* 兼容后端只回 {ok:true} 的情况：用请求载荷兜底，避免读 r.template.id 崩溃 */
+      var tpl = (r && r.template) || { id: id, name: (payload || {}).name, fields: (payload || {}).fields || [] };
       var list = MOCK.FORM_TEMPLATES || [];
       (list || []).forEach(function (x, i) {
-        if (x.id === r.template.id) list[i] = r.template;
+        if (x.id === tpl.id) list[i] = { id: tpl.id, code: tpl.code || x.code || '', name: tpl.name, fields: tpl.fields, mode: x.mode };
       });
-      return r;
+      return { ok: true, template: tpl };
     });
   }
   function backupData() { return DRILL.post('/admin/backup', {}); }

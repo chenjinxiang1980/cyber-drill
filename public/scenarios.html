@@ -251,6 +251,30 @@ document.addEventListener('app:ready', function(e){
 
   function clone(x){ return JSON.parse(JSON.stringify(x)); }
   function kwText(n){ var k = n.keywords; return Array.isArray(k) ? k.join(',') : (k||''); }
+  /* ---------- 处置文字质量规则（与后端 score_config.go 默认口径保持一致） ---------- */
+  var QUALITY_ALL_ELEMENTS = ['对象','动作','时间','结论'];
+  var QUALITY_DEFAULT_FILLERS = ['无','已处理','正常','已知悉','已阅','收到','已解决','已确认','按要求处理','处理完毕','同上','无异常','ok','OK'];
+  function qualityOf(n){
+    var q = n.qualityRules || {};
+    return {
+      requiredKeywords: Array.isArray(q.requiredKeywords) ? q.requiredKeywords : [],
+      bonusKeywords: Array.isArray(q.bonusKeywords) ? q.bonusKeywords : [],
+      minMeasureLen: (q.minMeasureLen===null || q.minMeasureLen===undefined) ? 15 : Number(q.minMeasureLen),
+      minResultLen: (q.minResultLen===null || q.minResultLen===undefined) ? 10 : Number(q.minResultLen),
+      requiredElements: Array.isArray(q.requiredElements) ? q.requiredElements : ['对象','动作','结论'],
+      fillerWords: Array.isArray(q.fillerWords) ? q.fillerWords : QUALITY_DEFAULT_FILLERS.slice(),
+      fillerMaxLen: (q.fillerMaxLen===null || q.fillerMaxLen===undefined) ? 8 : Number(q.fillerMaxLen),
+      textQualityRatio: (q.textQualityRatio===null || q.textQualityRatio===undefined) ? 0.2 : Number(q.textQualityRatio),
+      keywordPenaltyRatio: (q.keywordPenaltyRatio===null || q.keywordPenaltyRatio===undefined) ? 0.3 : Number(q.keywordPenaltyRatio)
+    };
+  }
+  function qrText(list){ return Array.isArray(list) ? list.join(',') : ''; }
+  function qrSplit(s){ return String(s||'').split(/[,，、;；\s]+/).filter(function(x){ return !!x; }); }
+  function qrElementChecks(qr){
+    return QUALITY_ALL_ELEMENTS.map(function(name){
+      return '<label class="check"><input type="checkbox" name="ndQualityElement" value="'+name+'"'+(qr.requiredElements.indexOf(name)>=0?' checked':'')+'>'+name+'</label>';
+    }).join('');
+  }
   function evText(n){
     return (Array.isArray(n.evidenceReq) ? n.evidenceReq : []).map(function(x){
       return [x.type||'处置记录', x.name||'', x.note||''].join('|');
@@ -402,7 +426,7 @@ document.addEventListener('app:ready', function(e){
 
     var root = ov.querySelector('.m-body');
 
-    function formName(fid){ var t = MOCK.FORM_TEMPLATES.filter(function(x){ return x.id===fid; })[0]; return t?App.formDisplayName(t):''; }
+    function formName(fid){ var t = MOCK.FORM_TEMPLATES.filter(function(x){ return x.id===fid; })[0]; return t?((t.code?t.code+' ':'')+App.formDisplayName(t)):''; }
     function roleNames(){
       var list = (MOCK.ROLES || []).map(function(r){ return r.name; });
       ['院应急指挥部', '信息科负责人', '信息科值班员', '网络安全管理员', '系统管理员', '医务科主任', '临床科室'].forEach(function(x){
@@ -1153,6 +1177,7 @@ document.addEventListener('app:ready', function(e){
     function openDrawer(i){
       var n = nodes[i];
       var t = TYPES[n.type]||TYPES.task;
+      var qr = qualityOf(n);
       var targetOpts = MOCK.ROLES.map(function(r){ return '<option value="'+App.esc(r.name)+'"'+(n.target===r.name?' selected':'')+'>'+r.name+'</option>'; }).join('');
       if(MOCK.ROLES.map(function(r){ return r.name; }).indexOf(n.target)<0){
         targetOpts = '<option value="'+App.esc(n.target||'')+'" selected>'+App.esc(n.target||'（未指定）')+'</option>' + targetOpts;
@@ -1164,7 +1189,7 @@ document.addEventListener('app:ready', function(e){
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">节点类型</label><select class="select" id="ndType">'+Object.keys(TYPES).map(function(k){ return '<option value="'+k+'"'+(n.type===k?' selected':'')+'>'+TYPES[k].label+'节点</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">接收角色</label><select class="select" id="ndTarget">'+targetOpts+'</select></div>'
-        + '<div class="form-row"><label class="f-label">关联表单</label><select class="select" id="ndForm"><option value="">— 无 —</option>'+MOCK.FORM_TEMPLATES.map(function(ft){ return '<option value="'+ft.id+'"'+(n.form===ft.id?' selected':'')+'>'+App.formDisplayName(ft)+'</option>'; }).join('')+'</select></div>'
+        + '<div class="form-row"><label class="f-label">关联表单</label><select class="select" id="ndForm"><option value="">— 无 —</option>'+MOCK.FORM_TEMPLATES.map(function(ft){ return '<option value="'+ft.id+'"'+(n.form===ft.id?' selected':'')+'>'+App.esc((ft.code?ft.code+' ':'')+App.formDisplayName(ft))+'</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">处置时长（分钟）</label><input class="input" id="ndTimeout" type="number" min="1" value="'+((n.type==='end')?(n.timeout||''):(n.timeout||15))+'" placeholder="终节点可留空"><div class="tiny dim" style="margin-top:4px">超时判定自上一节点完成时按真实时间起算；无前置节点时自演练开始计时。</div></div>'
         + '</div>'
         + '<div class="form-row"><label class="f-label">消息内容 / 处置说明</label><textarea class="textarea" id="ndDesc">'+App.esc(n.desc||'')+'</textarea></div>'
@@ -1205,12 +1230,33 @@ document.addEventListener('app:ready', function(e){
         + '<div class="form-row"><label class="f-label">后继节点 <span class="tiny dim">（由依赖关系自动推导，无需手工填写）</span></label>'
         +   '<div class="tiny dim">'+(succOf(n.id).map(function(x){ return App.esc(x.title); }).join('、') || '无（本流程为末端流程）')+'</div></div>'
         + '</div>'
-        + '<div id="ndScoreTip" class="tiny dim mb2">扣分制总分 100 起。正确流程按时完成无扣分，超时完成扣本节点分值的 20%，接收人选择错误扣 30%，绑定表单节点另有 20% 处置质量分按必填齐全度结算；混淆流程被选中按严重程度扣分（高 −8 / 中 −5 / 低 −3），不计入 100 分总分。</div>'
+        + '<div id="ndScoreTip" class="tiny dim mb2">扣分制总分 100 起。正确流程按时完成无扣分；超时完成扣本节点 20%，接收人选择错误扣 30%，处置关键词必含项缺失按缺项比例扣（默认上限 30%，理由会列出缺的词），处置文本敷衍 / 过短 / 要素缺失扣 20%（单节点合计不超过 80%）；节点未配置取证要求（evidence_req 为空或 []）时不扣取证分。混淆流程被选中按严重程度扣分（高 −8 / 中 −5 / 低 −3），不计入 100 分总分。</div>'
         + '<div class="form-grid">'
         + '<div class="form-row"><label class="f-label">动作类型</label><select class="select" id="ndAction"><option value="">— 未分类 —</option>'+ACTION_TYPES.map(function(a){ return '<option value="'+a+'"'+(n.action===a?' selected':'')+'>'+a+'</option>'; }).join('')+'</select></div>'
         + '<div class="form-row"><label class="f-label">必经步骤</label><div class="flex gap2" style="align-items:center;min-height:34px"><label class="check"><input type="checkbox" id="ndRequired"'+(n.required===false?'':' checked')+'>实战版遗漏判定必查</label></div></div>'
         + '</div>'
-        + '<div class="form-row"><label class="f-label">判定关键词（逗号分隔，实战版匹配用）</label><input class="input" id="ndKeywords" value="'+App.esc(kwText(n))+'" placeholder="如：隔离,断网,封堵"></div>'
+        + '<div class="form-row"><label class="f-label">判定关键词（逗号分隔，实战版匹配用；旧口径兜底）</label><input class="input" id="ndKeywords" value="'+App.esc(kwText(n))+'" placeholder="如：隔离,断网,封堵"><div class="tiny dim" style="margin-top:4px">未在下方配置「必含关键词」时沿用本项：命中 ≥2 个即通过。建议改用下方可分级维护的必含/加分关键词。</div></div>'
+        + '<div id="ndQualityBlock" style="'+(n.flowType==='distractor'?'display:none':'')+'">'
+        + '<div class="divider"></div><div class="section-title">处置文字质量规则（实战版自动评分）</div>'
+        + '<div class="tiny dim mb2">只影响正确流程的实战版提交评分。各项可留空/置 0 表示不限制；未配置时按默认口径判定，不会因此额外扣老节点的分。</div>'
+        + '<div class="form-grid">'
+        + '<div class="form-row"><label class="f-label">必含关键词 <span class="tiny dim">（缺一项按比例扣分）</span></label><input class="input" id="ndQualityRequired" value="'+App.esc(qrText(qr.requiredKeywords))+'" placeholder="如：隔离,断网|断链,事件等级"><div class="tiny dim" style="margin-top:4px">逗号或空格分隔「项」，每项都必须命中。同一项可用 <b>|</b> 表示同义写法（任一命中即算该项），如「回切|回退|切回」。留空则沿用上方「判定关键词」的旧口径（命中 ≥2 即通过）。<br>匹配前自动归一化：全角→半角、忽略空白、英文小写、罗马/中文/阿拉伯数字统一（Ⅱ级＝II级＝2级），因此 <b>U盘＝U 盘</b>、<b>RPO＝RPO 值</b> 视为同一写法。</div></div>'
+        + '<div class="form-row"><label class="f-label">加分关键词 <span class="tiny dim">（可抵扣必含缺项）</span></label><input class="input" id="ndQualityBonus" value="'+App.esc(qrText(qr.bonusKeywords))+'" placeholder="如：上报,归档"><div class="tiny dim" style="margin-top:4px">每命中 1 个，可抵扣 1 个必含缺失项的比例；不额外加分。</div></div>'
+        + '</div>'
+        + '<div class="form-grid">'
+        + '<div class="form-row"><label class="f-label">处置措施最少字数</label><input class="input" id="ndQualityMinMeasure" type="number" min="0" max="500" value="'+qr.minMeasureLen+'"><div class="tiny dim" style="margin-top:4px">低于该字数视为无效文本并扣分（0＝不校验），默认 15 字。</div></div>'
+        + '<div class="form-row"><label class="f-label">处置结果最少字数</label><input class="input" id="ndQualityMinResult" type="number" min="0" max="500" value="'+qr.minResultLen+'"><div class="tiny dim" style="margin-top:4px">默认 10 字（0＝不校验）。</div></div>'
+        + '</div>'
+        + '<div class="form-row"><label class="f-label">必须包含的要素 <span class="tiny dim">（不勾选＝不校验）</span></label><div class="flex gap2" style="flex-wrap:wrap">'+qrElementChecks(qr)+'</div><div class="tiny dim" style="margin-top:4px">对象＝终端/主机/IP/账号等具体客体；动作＝隔离/断网/清除/核实等处置动作；时间＝“立即/当日/14:30”等时间点；结论＝完成/恢复/确认/无异常等结果结论。默认要求对象+动作+结论。</div></div>'
+        + '<div class="form-grid">'
+        + '<div class="form-row"><label class="f-label">敷衍词黑名单</label><input class="input" id="ndQualityFiller" value="'+App.esc(qrText(qr.fillerWords))+'" placeholder="无,已处理,正常,已知悉"><div class="tiny dim" style="margin-top:4px">整段文本去掉标点后不超过下方字数、且全部由这些词拼成时，视为未实质填写（按未填写处理）。</div></div>'
+        + '<div class="form-row"><label class="f-label">敷衍判定字数上限</label><input class="input" id="ndQualityFillerMax" type="number" min="0" max="100" value="'+qr.fillerMaxLen+'"><div class="tiny dim" style="margin-top:4px">默认 8 字（0＝关闭敷衍词判定）。</div></div>'
+        + '</div>'
+        + '<div class="form-grid">'
+        + '<div class="form-row"><label class="f-label">必含缺失扣分比例（%）</label><input class="input" id="ndQualityKeywordRatio" type="number" min="0" max="80" step="1" value="'+Math.round(qr.keywordPenaltyRatio*100)+'"><div class="tiny dim" style="margin-top:4px">占本节点分值；缺 1/4 项就扣该比例的四分之一。默认 30%。</div></div>'
+        + '<div class="form-row"><label class="f-label">文字质量不达标扣分比例（%）</label><input class="input" id="ndQualityTextRatio" type="number" min="0" max="80" step="1" value="'+Math.round(qr.textQualityRatio*100)+'"><div class="tiny dim" style="margin-top:4px">敷衍/过短/要素缺失时扣，默认 20%；单节点合计扣分不超过 80%。</div></div>'
+        + '</div>'
+        + '</div>'
         + '<div class="form-row"><label class="f-label">引导提示（基础版在工作台展示的正确流程）</label><textarea class="textarea" id="ndGuide" placeholder="如：隔离前记录主机IP与MAC，隔离后确认无新增加密告警。">'+App.esc(n.guide||'')+'</textarea></div>'
         + '<div class="divider"></div><div class="section-title">需取证材料（每行一项，格式：类型|材料名称|取证说明）</div>'
         + '<div class="tiny dim mb2">演练时会在「取证与材料归档」中逐项提醒参演人员取证；点击「按剧本自动生成」可根据本节点动作自动生成相符的模拟取证材料，参演人员可一键导入后再核对修改。</div>'
@@ -1256,6 +1302,8 @@ document.addEventListener('app:ready', function(e){
           dv.querySelector('#ndDistractorBlocks').style.display = isDis ? '' : 'none';
           dv.querySelector('#ndScoreRow').style.display = isDis ? 'none' : '';
           dv.querySelector('#ndSeverityRow').style.display = isDis ? '' : 'none';
+          var qBlock = dv.querySelector('#ndQualityBlock');
+          if(qBlock) qBlock.style.display = isDis ? 'none' : '';
         }
         /* 实时统计：正确流程统计总分，混淆流程按严重程度提示扣分值 */
         function refreshScoreTip(){
@@ -1282,6 +1330,7 @@ document.addEventListener('app:ready', function(e){
         dv.querySelector('#ndFlow').onchange = function(){ syncFlowBlocks(); refreshScoreTip(); };
         dv.querySelector('#ndScore').oninput = refreshScoreTip;
         dv.querySelector('#ndSeverity').onchange = refreshScoreTip;
+        syncFlowBlocks();
         refreshScoreTip();
         dv.querySelector('#ndEvAuto').onclick = function(){
           var draft = {
@@ -1348,6 +1397,23 @@ document.addEventListener('app:ready', function(e){
           }
           n.evidenceReq = parseEvText(dv.querySelector('#ndEv').value);
           n.keywords = dv.querySelector('#ndKeywords').value.split(/[,，、;；\s]+/).filter(function(x){ return !!x; });
+          /* 处置文字质量规则：全部落到节点级配置，随剧本保存 */
+          var qElemBox = dv.querySelectorAll('input[name="ndQualityElement"]:checked');
+          var qNum = function(sel){
+            var v = parseInt(dv.querySelector(sel).value,10);
+            return isNaN(v) ? 0 : Math.max(0, Math.min(100, v));
+          };
+          n.qualityRules = {
+            requiredKeywords: qrSplit(dv.querySelector('#ndQualityRequired').value),
+            bonusKeywords: qrSplit(dv.querySelector('#ndQualityBonus').value),
+            minMeasureLen: Math.max(0, parseInt(dv.querySelector('#ndQualityMinMeasure').value,10) || 0),
+            minResultLen: Math.max(0, parseInt(dv.querySelector('#ndQualityMinResult').value,10) || 0),
+            requiredElements: Array.prototype.map.call(qElemBox, function(x){ return x.value; }),
+            fillerWords: qrSplit(dv.querySelector('#ndQualityFiller').value),
+            fillerMaxLen: Math.max(0, Math.min(100, parseInt(dv.querySelector('#ndQualityFillerMax').value,10) || 0)),
+            textQualityRatio: qNum('#ndQualityTextRatio')/100,
+            keywordPenaltyRatio: qNum('#ndQualityKeywordRatio')/100
+          };
           if(ty==='parallel'){ var pv = dv.querySelector('#ndPD').value.trim(); n.parallelDesc = pv; n.parallel_desc = pv; delete n.branches; }
           else { delete n.parallelDesc; delete n.parallel_desc; delete n.branches; }
           /* 若节点编号变更，更新所有节点 deps 中的引用 */
