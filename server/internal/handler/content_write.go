@@ -215,7 +215,7 @@ func PatchScenario(database *db.DB) gin.HandlerFunc {
 			}
 			args = append(args, id)
 			if _, err := database.Exec(
-				`UPDATE scenarios SET ` + strings.Join(sets, ",") + ` WHERE id=?`,
+				`UPDATE scenarios SET `+strings.Join(sets, ",")+` WHERE id=?`,
 				args...,
 			); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新剧本失败：" + err.Error()})

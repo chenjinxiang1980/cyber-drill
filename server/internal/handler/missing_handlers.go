@@ -7,15 +7,26 @@
 package handler
 
 import (
+	"bytes"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
+	"math"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"drill-system/internal/auth"
 	"drill-system/internal/db"
@@ -143,8 +154,7 @@ func PostNotifsRead(database *db.DB) gin.HandlerFunc {
 func PostSnapshots(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := auth.CurrentUser(c)
-		if u == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		if !ensureBoardWrite(c, u) {
 			return
 		}
 		var body struct {
@@ -170,9 +180,7 @@ func PostSnapshots(database *db.DB) gin.HandlerFunc {
 // PostSeqFlow POST /api/content/seqflow —— 保存时序流程
 func PostSeqFlow(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		u := auth.CurrentUser(c)
-		if u == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		if !ensureBoardWrite(c, auth.CurrentUser(c)) {
 			return
 		}
 		var body struct {
@@ -208,48 +216,74 @@ func PostSeqFlow(database *db.DB) gin.HandlerFunc {
 func PatchImpact(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := auth.CurrentUser(c)
-		if u == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		if !ensureBoardWrite(c, u) {
 			return
 		}
 		sys := c.Param("sys")
 		var body struct {
-			State string  `json:"state"`
-			Pct   float64 `json:"pct"`
+			State string   `json:"state"`
+			Pct   *float64 `json:"pct"`
 		}
-		_ = c.ShouldBindJSON(&body)
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误"})
+			return
+		}
+		if body.State == "" && body.Pct == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无更新字段"})
+			return
+		}
+		if body.Pct != nil && (*body.Pct < 0 || *body.Pct > 100) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "影响比例需在 0-100 之间"})
+			return
+		}
 		activeID := activeProjectID(database)
+		if activeID == "" {
+			c.JSON(http.StatusConflict, gin.H{"error": "当前没有进行中的演练项目"})
+			return
+		}
+		var status string
+		if err := database.QueryRow(`SELECT COALESCE(status,'') FROM projects WHERE id=?`, activeID).Scan(&status); err != nil || status == "已归档" {
+			c.JSON(http.StatusConflict, gin.H{"error": "当前演练项目已归档，不可修改影响面"})
+			return
+		}
+		var exists int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM impact WHERE sys=? AND project_id=?`, sys, activeID).Scan(&exists); err != nil || exists == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "系统不存在或未被当前演练项目引用"})
+			return
+		}
 		if body.State != "" {
-			_, _ = database.Exec(`UPDATE impact SET state=? WHERE sys=? AND project_id=?`, body.State, sys, activeID)
+			if _, err := database.Exec(`UPDATE impact SET state=? WHERE sys=? AND project_id=?`, body.State, sys, activeID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新影响面失败"})
+				return
+			}
 		}
-		if body.Pct != 0 {
-			_, _ = database.Exec(`UPDATE impact SET pct=? WHERE sys=? AND project_id=?`, body.Pct, sys, activeID)
+		if body.Pct != nil {
+			if _, err := database.Exec(`UPDATE impact SET pct=? WHERE sys=? AND project_id=?`, *body.Pct, sys, activeID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新影响面失败"})
+				return
+			}
 		}
+		writeAudit(database, u, c, "更新影响面："+sys)
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 
-// PostAudit POST /api/content/audit —— 写入审计日志
+// PostAudit POST /api/content/audit —— 兼容旧前端：接口保留但不再写入任何客户端字段。
+// 真正的审计由服务端 AuditWrites 中间件与各业务 handler 生成；客户端提交的
+// action 自由文本一律丢弃，避免伪造/污染审计结构化字段。
 func PostAudit(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		u := auth.CurrentUser(c)
-		var body struct {
-			Action string `json:"action"`
-		}
-		_ = c.ShouldBindJSON(&body)
-		if u != nil {
-			_, _ = database.Exec(
-				`INSERT INTO audit_logs (time,user,role_id,action,ip) VALUES (?,?,?,?,?)`,
-				util.Now(), u.Name, u.Role.ID, body.Action, c.ClientIP(),
-			)
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+		c.JSON(http.StatusOK, gin.H{"ok": true, "ignored": true})
 	}
 }
 
 // PostOpinion POST /api/content/opinion —— 新增舆情
 func PostOpinion(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if !ensureBoardWrite(c, u) {
+			return
+		}
 		var body struct {
 			Channel string `json:"channel"`
 			Title   string `json:"title"`
@@ -258,6 +292,10 @@ func PostOpinion(database *db.DB) gin.HandlerFunc {
 			Source  string `json:"source"`
 		}
 		_ = c.ShouldBindJSON(&body)
+		if strings.TrimSpace(body.Title) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "舆情标题不能为空"})
+			return
+		}
 		res, _ := database.Exec(
 			`INSERT INTO opinion (time,channel,title,heat,risk,status,source) VALUES (?,?,?,?,?,?,?)`,
 			util.NowSec(), body.Channel, body.Title, body.Heat, body.Risk, "新发布", body.Source,
@@ -273,6 +311,10 @@ func PostOpinion(database *db.DB) gin.HandlerFunc {
 // PatchOpinion PATCH /api/content/opinion/:id —— 更新舆情状态
 func PatchOpinion(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if !ensureBoardWrite(c, u) {
+			return
+		}
 		id := c.Param("id")
 		var body struct {
 			Heat   *int   `json:"heat"`
@@ -299,7 +341,20 @@ func PatchOpinion(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		args = append(args, id)
-		_, _ = database.Exec(fmt.Sprintf("UPDATE opinion SET %s WHERE id=?", strings.Join(fields, ",")))
+		res, err := database.Exec(fmt.Sprintf("UPDATE opinion SET %s WHERE id=?", strings.Join(fields, ",")), args...)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新舆情失败"})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			// MySQL 默认返回“实际变更行数”，相同值更新也会是 0；这里用查询确认存在性
+			var exists int
+			if database.QueryRow(`SELECT COUNT(*) FROM opinion WHERE id=?`, id).Scan(&exists); exists == 0 {
+				c.JSON(http.StatusNotFound, gin.H{"error": "舆情记录不存在"})
+				return
+			}
+		}
+		writeAudit(database, u, c, "更新舆情："+id)
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
@@ -435,13 +490,27 @@ func DeleteProject(database *db.DB, uploadDir string) gin.HandlerFunc {
 // PatchProjectMembers PATCH /api/content/projects/:id/members —— 更新项目成员
 func PatchProjectMembers(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if !ensureBoardWrite(c, u) {
+			return
+		}
 		id := c.Param("id")
+		var status string
+		if err := database.QueryRow(`SELECT COALESCE(status,'') FROM projects WHERE id=?`, id).Scan(&status); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+			return
+		}
+		if status == "已归档" {
+			c.JSON(http.StatusConflict, gin.H{"error": "已归档项目不可修改成员"})
+			return
+		}
 		var body struct {
 			Members []any `json:"members"`
 		}
 		_ = c.ShouldBindJSON(&body)
 		membersJSON := util.ToJSON(body.Members)
 		_, _ = database.Exec("UPDATE projects SET members=? WHERE id=?", membersJSON, id)
+		writeAudit(database, u, c, "更新演练项目成员："+id)
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
@@ -529,22 +598,173 @@ func GetProjectNotifyExport(database *db.DB) gin.HandlerFunc {
 }
 
 // GetDrillProgress GET /api/content/drill-progress
+// 导调中心「节点操作情况」：按当前激活项目关联 scenario 剧本节点、处置记录与节点打开状态，
+// 返回处置中 / 已完成 / 决策偏离的节点。口径与大屏 computeMonitorNodes 保持一致：
+// 实战版以 drill_steps 为准，基础版回退到 tasks 状态；end 与 distractor 节点不进入盘面。
 func GetDrillProgress(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channel := c.DefaultQuery("channel", "inner")
-		var activeNull sql.NullString
-		_ = database.QueryRow(`SELECT value FROM settings WHERE key='active_project'`).Scan(&activeNull)
-		activeID := activeNull.String
+		activeID := activeProjectID(database)
 		if activeID == "" {
 			c.JSON(http.StatusOK, gin.H{"project": nil, "mode": "", "nodes": []gin.H{}, "channel": channel})
 			return
 		}
 		var pName, pMode, pStatus, pDate, scenarioID string
-		_ = database.QueryRow(`SELECT name,COALESCE(mode,'基础版'),status,COALESCE(date,''),COALESCE(scenario_id,'') FROM projects WHERE id=?`, activeID).Scan(&pName, &pMode, &pStatus, &pDate, &scenarioID)
+		if err := database.QueryRow(
+			`SELECT COALESCE(name,''),COALESCE(mode,'基础版'),COALESCE(status,''),COALESCE(date,''),COALESCE(scenario_id,'') FROM projects WHERE id=?`, activeID,
+		).Scan(&pName, &pMode, &pStatus, &pDate, &scenarioID); err != nil {
+			c.JSON(http.StatusOK, gin.H{"project": nil, "mode": "", "nodes": []gin.H{}, "channel": channel})
+			return
+		}
+
+		type roleLite struct {
+			id, name, short string
+			external        bool
+		}
+		roles := map[string]roleLite{}
+		if rows, err := database.Query(`SELECT id,COALESCE(name,''),COALESCE(short,''),COALESCE(` + "`external`" + `,0) FROM roles`); err == nil {
+			for rows.Next() {
+				var r roleLite
+				var ext int
+				if rows.Scan(&r.id, &r.name, &r.short, &ext) == nil {
+					r.external = ext == 1
+					roles[r.id] = r
+				}
+			}
+			rows.Close()
+		}
+		roleByTarget := map[string]roleLite{}
+		for _, r := range roles {
+			if strings.TrimSpace(r.name) != "" {
+				roleByTarget[strings.TrimSpace(r.name)] = r
+			}
+			if strings.TrimSpace(r.short) != "" {
+				roleByTarget[strings.TrimSpace(r.short)] = r
+			}
+		}
+
+		type stepLite struct {
+			stepTime, user string
+			correct, skip  int
+		}
+		steps := map[string]stepLite{}
+		if rows, err := database.Query(
+			`SELECT COALESCE(matched_node,''),COALESCE(correct,1),COALESCE(skipped,0),COALESCE(step_time,''),COALESCE(user,'')
+			 FROM drill_steps WHERE project_id=? ORDER BY step_time,id`, activeID,
+		); err == nil {
+			for rows.Next() {
+				var nid string
+				var s stepLite
+				if rows.Scan(&nid, &s.correct, &s.skip, &s.stepTime, &s.user) == nil && nid != "" {
+					if _, ok := steps[nid]; !ok {
+						steps[nid] = s
+					}
+				}
+			}
+			rows.Close()
+		}
+		type stateLite struct{ user, startedAt string }
+		states := map[string]stateLite{}
+		if rows, err := database.Query(`SELECT COALESCE(node_id,''),COALESCE(user,''),COALESCE(started_at,'') FROM drill_node_state WHERE project_id=?`, activeID); err == nil {
+			for rows.Next() {
+				var nid string
+				var s stateLite
+				if rows.Scan(&nid, &s.user, &s.startedAt) == nil && nid != "" {
+					states[nid] = s
+				}
+			}
+			rows.Close()
+		}
+		type taskLite struct{ status, acceptedAt, completedAt, roleID string }
+		tasks := map[string]taskLite{}
+		if rows, err := database.Query(
+			`SELECT COALESCE(node_id,''),COALESCE(status,''),COALESCE(accepted_at,''),COALESCE(completed_at,''),COALESCE(role_id,'')
+			 FROM tasks WHERE project_id=?`, activeID,
+		); err == nil {
+			for rows.Next() {
+				var nid string
+				var t taskLite
+				if rows.Scan(&nid, &t.status, &t.acceptedAt, &t.completedAt, &t.roleID) == nil && nid != "" {
+					tasks[nid] = t
+				}
+			}
+			rows.Close()
+		}
+
+		type scriptNode struct {
+			id, title, shortTitle, target, flowType string
+			seq, timeout                            int
+		}
+		scriptNodes := []scriptNode{}
+		if rows, err := database.Query(
+			`SELECT id,COALESCE(title,''),COALESCE(short_title,''),COALESCE(target,''),COALESCE(flow_type,'correct'),COALESCE(seq,0),COALESCE(timeout,0)
+			 FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL AND COALESCE(type,'task')!='end' ORDER BY seq`, scenarioID,
+		); err == nil {
+			for rows.Next() {
+				var n scriptNode
+				if rows.Scan(&n.id, &n.title, &n.shortTitle, &n.target, &n.flowType, &n.seq, &n.timeout) == nil {
+					scriptNodes = append(scriptNodes, n)
+				}
+			}
+			rows.Close()
+		}
+
+		nodes := []gin.H{}
+		for _, n := range scriptNodes {
+			if strings.EqualFold(strings.TrimSpace(n.flowType), "distractor") {
+				continue
+			}
+			targetRole := roleByTarget[strings.TrimSpace(n.target)]
+			if channel == "external" && !targetRole.external {
+				continue
+			}
+			status, opTime, actor := "", "", ""
+			if s, ok := steps[n.id]; ok {
+				status = "done"
+				if s.correct == 0 {
+					status = "wrong"
+				}
+				opTime, actor = s.stepTime, s.user
+			} else if s, ok := states[n.id]; ok {
+				status, opTime, actor = "doing", s.startedAt, s.user
+			} else if t, ok := tasks[n.id]; ok {
+				switch strings.TrimSpace(t.status) {
+				case "已完成", "超时":
+					status, opTime = "done", t.completedAt
+				case "处理中":
+					status, opTime = "doing", t.acceptedAt
+				}
+				if actor == "" {
+					if r, ok := roles[t.roleID]; ok {
+						actor = r.name
+					}
+				}
+			}
+			if status == "" {
+				continue // 未处置节点不进入操作盘面
+			}
+			title := strings.TrimSpace(n.title)
+			if title == "" {
+				title = strings.TrimSpace(n.shortTitle)
+			}
+			if title == "" {
+				title = strings.TrimSpace(n.target)
+			}
+			scope := "inner"
+			if targetRole.external {
+				scope = "external"
+			}
+			nodes = append(nodes, gin.H{
+				"nodeId": n.id, "id": n.id, "seq": n.seq, "title": title,
+				"target": n.target, "targetRole": targetRole.name,
+				"status": status, "actor": actor, "opTime": opTime,
+				"duration": n.timeout, "scope": scope,
+			})
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"project":   gin.H{"id": activeID, "name": pName, "mode": pMode, "status": pStatus, "date": pDate, "scenarioId": scenarioID},
 			"mode":      pMode,
-			"nodes":     []gin.H{},
+			"nodes":     nodes,
 			"updatedAt": util.Now(),
 			"channel":   channel,
 		})
@@ -804,17 +1024,26 @@ func PostChatUpload(database *db.DB) gin.HandlerFunc {
 // PostProjectActivate POST /api/projects/:id/activate
 func PostProjectActivate(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if !ensureBoardWrite(c, u) {
+			return
+		}
 		id := c.Param("id")
-		var exists int
-		_ = database.QueryRow(`SELECT COUNT(*) FROM projects WHERE id=?`, id).Scan(&exists)
-		if exists == 0 {
+		var name, status string
+		err := database.QueryRow(`SELECT COALESCE(name,''),COALESCE(status,'') FROM projects WHERE id=?`, id).Scan(&name, &status)
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+			return
+		}
+		if status == "已归档" {
+			c.JSON(http.StatusConflict, gin.H{"error": "已归档项目不可设为当前演练项目"})
 			return
 		}
 		_, _ = database.Exec(
 			`INSERT INTO settings (key,value) VALUES ('active_project',?) ON DUPLICATE KEY UPDATE value=VALUES(value)`,
 			id,
 		)
+		writeAudit(database, u, c, "设为当前演练项目："+name)
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
@@ -822,9 +1051,16 @@ func PostProjectActivate(database *db.DB) gin.HandlerFunc {
 // PatchProjectStatus PATCH /api/projects/:id/status
 func PatchProjectStatus(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if !ensureBoardWrite(c, u) {
+			return
+		}
 		id := c.Param("id")
 		var body struct {
-			Status string `json:"status"`
+			Status    string         `json:"status"`
+			Exception map[string]any `json:"exception"`
+			Force     bool           `json:"force"`
+			Reason    string         `json:"reason"`
 		}
 		_ = c.ShouldBindJSON(&body)
 		allow := map[string]bool{"未开始": true, "演练中": true, "暂停": true, "已结束": true, "已归档": true}
@@ -840,6 +1076,40 @@ func PatchProjectStatus(database *db.DB) gin.HandlerFunc {
 			 started_at,paused_at,paused_sec,ended_at FROM projects WHERE id=?`, id,
 		).Scan(&prev, &name, &level, &mode, &startedAt, &pausedAt, &pausedSec, &endedAt); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+			return
+		}
+		if !canProjectStatusTransit(prev, body.Status) {
+			c.JSON(http.StatusConflict, gin.H{"error": "不允许从「" + prev + "」变更为「" + body.Status + "」"})
+			return
+		}
+		/* 结束演练必须走封存流程：复用 /api/drill/finish 的核对清单、缺项说明与快照写入，
+		 * 避免状态接口绕过封存（历史 P2026-001 即由本接口收口，无快照、timeline 缺结束记录）。
+		 *   - 证据齐全：直接结束并封存；
+		 *   - 核心证据缺项：返回 400/needsException，携带 exception（原因/责任人/时限/批准人）重试；
+		 *   - 运维例外：force=true 且 reason 必填，快照标记「异常封存 / 异常结束」并落审计。 */
+		if body.Status == "已结束" && prev != "已结束" {
+			p := drillV1ProjectOf(database, id)
+			if p == nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+				return
+			}
+			finishBody := map[string]any{
+				"projectId": id,
+				"force":     body.Force,
+				"reason":    strings.TrimSpace(body.Reason),
+			}
+			if body.Exception != nil {
+				finishBody["exception"] = body.Exception
+			}
+			code, payload := executeDrillFinish(database, u, p, finishBody)
+			if code != http.StatusOK {
+				payload["finishUrl"] = "/api/drill/finish"
+				payload["hint"] = "结束演练需走结束流程：可携带 exception 说明缺项，或由管理员 force + reason 强制结束"
+				c.JSON(code, payload)
+				return
+			}
+			payload["project"] = projectJSONByID(database, id)
+			c.JSON(http.StatusOK, payload)
 			return
 		}
 		/* 真实计时（逐行对齐 Node src/routes/bootstrap.js:306-329）：
@@ -908,6 +1178,7 @@ func PatchProjectStatus(database *db.DB) gin.HandlerFunc {
 		}
 		/* 与 Node bootstrap.js:352 一致：回传最新项目对象（含 startedAt/pausedAt/pausedSec/endedAt），
 		 * 前端 API.updateProjectStatus 用它刷新本地缓存，避免"开始演练"后计时仍停留在旧值 */
+		writeAudit(database, u, c, fmt.Sprintf("项目状态变更：%s %s→%s", name, prev, body.Status))
 		c.JSON(http.StatusOK, gin.H{"ok": true, "project": projectJSONByID(database, id)})
 	}
 }
@@ -980,6 +1251,85 @@ func projectJSONByID(database *db.DB, id string) gin.H {
 // /api/tasks/*  —— 旧版任务路径
 // =========================================================================
 
+// ensureBoardWrite 写接口的 handler 层二次校验：
+// 外部单位一律 403；非“平台管理员/指挥部/信息科负责人”403。
+// 路由层已挂对应中间件，这里是防漏挂的第二道闸。
+func ensureBoardWrite(c *gin.Context, u *auth.User) bool {
+	if u == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return false
+	}
+	if u.Role.External {
+		c.JSON(http.StatusForbidden, gin.H{"error": "外部单位仅可查看医院上报材料（分级权限隔离）"})
+		return false
+	}
+	if !auth.IsPlatformBoard(u.Role.ID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "仅平台管理员/指挥部/信息科负责人可操作"})
+		return false
+	}
+	return true
+}
+
+type taskWriteTarget struct {
+	User          *auth.User
+	Title         string
+	ProjectID     string
+	ProjectStatus string
+	RoleID        string
+	Status        string
+}
+
+// guardTaskWrite 任务写操作统一守门：登录、非外部、任务存在、项目未归档、
+// 当前角色可处置该任务。
+func guardTaskWrite(database *db.DB, c *gin.Context) (*taskWriteTarget, bool) {
+	u := auth.CurrentUser(c)
+	if u == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return nil, false
+	}
+	if u.Role.External {
+		c.JSON(http.StatusForbidden, gin.H{"error": "外部单位仅可查看医院上报材料（分级权限隔离）"})
+		return nil, false
+	}
+	taskID := c.Param("id")
+	t := &taskWriteTarget{User: u}
+	if err := database.QueryRow(
+		`SELECT COALESCE(t.title,''),COALESCE(t.project_id,''),COALESCE(p.status,''),COALESCE(t.role_id,''),COALESCE(t.status,'')
+		 FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?`, taskID,
+	).Scan(&t.Title, &t.ProjectID, &t.ProjectStatus, &t.RoleID, &t.Status); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+		return nil, false
+	}
+	if t.ProjectStatus == "已归档" {
+		c.JSON(http.StatusConflict, gin.H{"error": "已归档项目的任务不可再修改"})
+		return nil, false
+	}
+	if !canManageTask(database, u, t.RoleID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权限操作该任务"})
+		return nil, false
+	}
+	return t, true
+}
+
+// canProjectStatusTransit 项目状态白名单：未开始→演练中→暂停/已结束→已归档。
+// 同状态视为幂等；禁止已归档回退、已结束重新开始等任意跳转。
+func canProjectStatusTransit(from, to string) bool {
+	if from == "" || from == to {
+		return true
+	}
+	switch from {
+	case "未开始":
+		return to == "演练中"
+	case "演练中":
+		return to == "暂停" || to == "已结束"
+	case "暂停":
+		return to == "演练中" || to == "已结束"
+	case "已结束":
+		return to == "已归档"
+	}
+	return false
+}
+
 // GetTasksLegacy GET /api/tasks
 func GetTasksLegacy(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) { c.JSON(http.StatusOK, queryTasks(database, auth.CurrentUser(c))) }
@@ -988,6 +1338,14 @@ func GetTasksLegacy(database *db.DB) gin.HandlerFunc {
 // PostTaskAccept POST /api/tasks/:id/accept
 func PostTaskAccept(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		t, ok := guardTaskWrite(database, c)
+		if !ok {
+			return
+		}
+		if t.Status == "已完成" {
+			c.JSON(http.StatusConflict, gin.H{"error": "已完成任务不可重新接单"})
+			return
+		}
 		id := c.Param("id")
 		_, _ = database.Exec(`UPDATE tasks SET status='处理中', accepted_at=COALESCE(accepted_at,?) WHERE id=?`, util.HHMM(), id)
 		c.JSON(http.StatusOK, gin.H{"ok": true, "status": "处理中"})
@@ -997,15 +1355,21 @@ func PostTaskAccept(database *db.DB) gin.HandlerFunc {
 // PostTaskSubmit POST /api/tasks/:id/submit
 func PostTaskSubmit(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		t, ok := guardTaskWrite(database, c)
+		if !ok {
+			return
+		}
+		if t.Status == "已完成" {
+			c.JSON(http.StatusConflict, gin.H{"error": "已完成任务不可重复提交处置记录"})
+			return
+		}
 		id := c.Param("id")
-		u := auth.CurrentUser(c)
+		u := t.User
 		eid := fmt.Sprintf("E%d", time.Now().UnixMilli())
-		var pid int64
-		_ = database.QueryRow(`SELECT project_id FROM tasks WHERE id=?`, id).Scan(&pid)
 		_, _ = database.Exec(
 			`INSERT INTO evidence (id,type,name,size,time,role_id,uploader,user_id,auto,task_id,project_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 			eid, "处置记录", fmt.Sprintf("任务处置记录-%s(模拟)", id), "9 KB", util.HHMM(),
-			u.Role.ID, u.Name, u.ID, 0, id, pid, util.Now(),
+			u.Role.ID, u.Name, u.ID, 0, id, t.ProjectID, util.Now(),
 		)
 		c.JSON(http.StatusOK, gin.H{"ok": true, "evidenceId": eid})
 	}
@@ -1014,6 +1378,9 @@ func PostTaskSubmit(database *db.DB) gin.HandlerFunc {
 // PostTaskComplete POST /api/tasks/:id/complete
 func PostTaskComplete(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if _, ok := guardTaskWrite(database, c); !ok {
+			return
+		}
 		id := c.Param("id")
 		u := auth.CurrentUser(c)
 		var title, projectID, taskStatus string
@@ -1049,20 +1416,50 @@ func PostTaskComplete(database *db.DB) gin.HandlerFunc {
 // DeleteTaskLegacy DELETE /api/tasks/:id
 func DeleteTaskLegacy(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		t, ok := guardTaskWrite(database, c)
+		if !ok {
+			return
+		}
 		id := c.Param("id")
 		_, _ = database.Exec(`DELETE FROM task_attachments WHERE task_id=?`, id)
 		_, _ = database.Exec(`DELETE FROM form_submissions WHERE task_id=?`, id)
 		_, _ = database.Exec(`DELETE FROM evidence WHERE task_id=?`, id)
 		_, _ = database.Exec(`DELETE FROM tasks WHERE id=?`, id)
+		writeAudit(database, t.User, c, "删除任务："+t.Title)
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 
 // PostTaskResetAll POST /api/tasks/reset-all
+// 仅 platformadmin / commander；已归档项目的任务不参与重置。
 func PostTaskResetAll(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		_, _ = database.Exec(`UPDATE tasks SET status='待处理' WHERE status='已完成'`)
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.External {
+			c.JSON(http.StatusForbidden, gin.H{"error": "外部单位仅可查看医院上报材料（分级权限隔离）"})
+			return
+		}
+		switch u.Role.ID {
+		case auth.RolePlatformAdmin, auth.RoleCommander:
+		default:
+			c.JSON(http.StatusForbidden, gin.H{"error": "仅平台管理员/指挥部可重置任务状态"})
+			return
+		}
+		res, err := database.Exec(
+			`UPDATE tasks t JOIN projects p ON p.id=t.project_id
+			 SET t.status='待处理'
+			 WHERE t.status='已完成' AND COALESCE(p.status,'')<>'已归档'`)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "重置任务失败"})
+			return
+		}
+		n, _ := res.RowsAffected()
+		writeAudit(database, u, c, fmt.Sprintf("重置全部任务状态（影响 %d 条）", n))
+		c.JSON(http.StatusOK, gin.H{"ok": true, "affected": n})
 	}
 }
 
@@ -1086,45 +1483,386 @@ func GetTaskAttachments(database *db.DB) gin.HandlerFunc {
 	}
 }
 
-// PostTaskAttachments POST /api/tasks/:id/attachments
-func PostTaskAttachments(database *db.DB) gin.HandlerFunc {
+// =========================================================================
+// 任务附件：真实落盘 + 落库 + 权限校验
+// =========================================================================
+
+// dangerousAttExts 可执行/脚本类扩展名黑名单，上传前整体拦截。
+var dangerousAttExts = map[string]bool{
+	".exe": true, ".bat": true, ".cmd": true, ".com": true, ".scr": true,
+	".pif": true, ".msi": true, ".ps1": true, ".vbs": true, ".vbe": true,
+	".js": true, ".jse": true, ".wsf": true, ".wsh": true, ".hta": true,
+	".dll": true, ".cpl": true, ".jar": true, ".sh": true, ".bash": true,
+	".py": true, ".php": true, ".asp": true, ".aspx": true, ".jsp": true,
+	".reg": true, ".lnk": true, ".apk": true, ".bin": true, ".so": true,
+	".dylib": true, ".elf": true,
+}
+
+// guessAttType 对齐前端 guessType / Node evidence.js 的材料分类。
+func guessAttType(name string) string {
+	n := strings.ToLower(name)
+	switch strings.ToLower(filepath.Ext(n)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg":
+		return "截图"
+	case ".pcap", ".cap", ".pcapng":
+		return "流量包摘要"
+	case ".log", ".txt", ".csv":
+		return "日志片段"
+	case ".cfg", ".conf", ".ini", ".yaml", ".yml", ".json":
+		return "配置备份"
+	}
+	return "文档"
+}
+
+// sanitizeFileName 保留原始展示名，去掉路径与非法字符，按 rune 截断。
+func sanitizeFileName(name string) string {
+	base := filepath.Base(strings.TrimSpace(name))
+	base = strings.Map(func(r rune) rune {
+		if strings.ContainsRune(`\/:*?"<>|`, r) {
+			return '_'
+		}
+		return r
+	}, base)
+	rs := []rune(base)
+	if len(rs) > 120 {
+		base = string(rs[:120])
+	}
+	if base == "" || base == "." {
+		base = "未命名附件"
+	}
+	return base
+}
+
+// saveUploadedFile 写入 uploads/<sub>/<YYYYMM>/，返回相对路径与绝对路径。
+func saveUploadedFile(uploadDir, sub, orig string, fh *multipart.FileHeader) (string, string, error) {
+	subDir := filepath.Join(sub, time.Now().Format("200601"))
+	targetDir := filepath.Join(uploadDir, subDir)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return "", "", err
+	}
+	storedName := fmt.Sprintf("%d-%s-%s", time.Now().UnixMilli(), randHex(4), sanitizeFileName(orig))
+	full := filepath.Join(targetDir, storedName)
+	src, err := fh.Open()
+	if err != nil {
+		return "", "", err
+	}
+	defer src.Close()
+	dst, err := os.Create(full)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		os.Remove(full)
+		return "", "", err
+	}
+	if err := dst.Close(); err != nil {
+		os.Remove(full)
+		return "", "", err
+	}
+	return filepath.ToSlash(filepath.Join(subDir, storedName)), full, nil
+}
+
+func randHex(n int) string {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano()%1000000)
+	}
+	return hex.EncodeToString(buf)
+}
+
+// removeUploadFile 删除 uploads 下的相对路径文件，拒绝目录逃逸。
+func removeUploadFile(uploadDir, rel string) {
+	if strings.TrimSpace(rel) == "" {
+		return
+	}
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return
+	}
+	full := filepath.Join(uploadDir, clean)
+	if check, err := filepath.Rel(uploadDir, full); err != nil || strings.HasPrefix(check, "..") {
+		return
+	}
+	_ = os.Remove(full)
+}
+
+// canManageTask 非管理角色只能操作本角色负责的任务。
+func canManageTask(database *db.DB, u *auth.User, roleID string) bool {
+	switch u.Role.ID {
+	case "platformadmin", "commander", "itlead":
+		return true
+	}
+	return roleID == "" || roleID == u.Role.ID
+}
+
+// PostTaskAttachments POST /api/tasks/:id/attachments（multipart，字段 files，兼容 file）
+func PostTaskAttachments(database *db.DB, uploadDir string, maxMB int) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		_, err := c.FormFile("file")
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.External {
+			c.JSON(http.StatusForbidden, gin.H{"error": "外部单位不可上传任务附件"})
+			return
+		}
+		taskID := c.Param("id")
+		var projectID, roleID, projectStatus, nodeID string
+		if err := database.QueryRow(
+			`SELECT COALESCE(t.project_id,''),COALESCE(t.role_id,''),COALESCE(p.status,''),COALESCE(t.node_id,'')
+			 FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?`, taskID,
+		).Scan(&projectID, &roleID, &projectStatus, &nodeID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+			return
+		}
+		if projectStatus == "已归档" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "已归档项目的任务不可再上传附件"})
+			return
+		}
+		if !canManageTask(database, u, roleID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "该任务由「" + roleID + "」负责，当前角色不可代为上传附件"})
+			return
+		}
+
+		form, err := c.MultipartForm()
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "未接收到文件"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+		files := form.File["files"]
+		if len(files) == 0 {
+			files = form.File["file"]
+		}
+		if len(files) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "未接收到文件"})
+			return
+		}
+		if len(files) > 10 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "单次最多上传 10 个文件"})
+			return
+		}
+		maxBytes := int64(maxMB) * 1024 * 1024
+		for _, fh := range files {
+			if fh.Size <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "文件内容为空：" + fh.Filename})
+				return
+			}
+			if maxBytes > 0 && fh.Size > maxBytes {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("文件「%s」超过 %dMB 限制", sanitizeFileName(fh.Filename), maxMB)})
+				return
+			}
+			if dangerousAttExts[strings.ToLower(filepath.Ext(fh.Filename))] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "不允许上传可执行程序或脚本：" + sanitizeFileName(fh.Filename)})
+				return
+			}
+		}
+
+		type savedFile struct {
+			rel, full, name, typ, size string
+			id                         int64
+		}
+		saved := make([]savedFile, 0, len(files))
+		cleanup := func() {
+			for _, s := range saved {
+				_ = os.Remove(s.full)
+			}
+		}
+		for _, fh := range files {
+			rel, full, err := saveUploadedFile(uploadDir, "tasks", fh.Filename, fh)
+			if err != nil {
+				cleanup()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "文件保存失败：" + err.Error()})
+				return
+			}
+			saved = append(saved, savedFile{
+				rel: rel, full: full,
+				name: sanitizeFileName(fh.Filename), typ: guessAttType(fh.Filename), size: fmtSizeGo(fh.Size),
+			})
+		}
+
+		tx, err := database.Begin()
+		if err != nil {
+			cleanup()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库事务开启失败"})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+		out := make([]gin.H, 0, len(saved))
+		nowTime := util.HHMM()
+		for i := range saved {
+			res, err := tx.Exec(
+				`INSERT INTO task_attachments (task_id,name,type,size,url,file_path,uploader,uploader_id,time,auto)
+				 VALUES (?,?,?,?,?,?,?,?,?,0)`,
+				taskID, saved[i].name, saved[i].typ, saved[i].size, "/uploads/"+saved[i].rel, saved[i].rel,
+				u.Name, u.ID, nowTime,
+			)
+			if err != nil {
+				cleanup()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "附件记录保存失败"})
+				return
+			}
+			attID, _ := res.LastInsertId()
+			saved[i].id = attID
+			// 镜像一条取证材料，保证取证模块与前置详情都能看到同一份文件
+			evID := fmt.Sprintf("E%d_%d", time.Now().UnixMilli(), attID)
+			_, _ = tx.Exec(
+				`INSERT INTO evidence (id,type,name,size,time,role_id,uploader,user_id,auto,task_id,project_id,url,file_path,node_id,created_at)
+				 VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?,?)`,
+				evID, saved[i].typ, saved[i].name+"（任务"+taskID+"）", saved[i].size, nowTime,
+				u.Role.ID, u.Name, u.ID, taskID, projectID, "/uploads/"+saved[i].rel, saved[i].rel,
+				nullableText(nodeID), util.Now(),
+			)
+			out = append(out, gin.H{
+				"id": attID, "name": saved[i].name, "type": saved[i].typ, "size": saved[i].size,
+				"url": "/uploads/" + saved[i].rel, "by": u.Name, "time": nowTime, "auto": false,
+			})
+		}
+		if err := tx.Commit(); err != nil {
+			cleanup()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "附件提交失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "attachments": out})
 	}
 }
 
 // DeleteTaskAttachment DELETE /api/tasks/:id/attachments/:attId
-func DeleteTaskAttachment(database *db.DB) gin.HandlerFunc {
+func DeleteTaskAttachment(database *db.DB, uploadDir string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		attID := c.Param("attId")
-		_, _ = database.Exec(`DELETE FROM task_attachments WHERE id=?`, attID)
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		taskID, attID := c.Param("id"), c.Param("attId")
+		var filePath, name string
+		var uploaderID int64
+		if err := database.QueryRow(
+			`SELECT COALESCE(file_path,''),COALESCE(uploader_id,0),COALESCE(name,'') FROM task_attachments WHERE id=? AND task_id=?`,
+			attID, taskID,
+		).Scan(&filePath, &uploaderID, &name); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "附件不存在"})
+			return
+		}
+		allowed := false
+		switch u.Role.ID {
+		case "platformadmin", "commander", "itlead":
+			allowed = true
+		default:
+			allowed = uploaderID == u.ID
+		}
+		if !allowed {
+			c.JSON(http.StatusForbidden, gin.H{"error": "仅上传者本人或指挥部/信息科负责人/平台管理员可删除附件"})
+			return
+		}
+		removeUploadFile(uploadDir, filePath)
+		if _, err := database.Exec(`DELETE FROM task_attachments WHERE id=? AND task_id=?`, attID, taskID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "附件删除失败"})
+			return
+		}
+		if filePath != "" {
+			_, _ = database.Exec(`DELETE FROM evidence WHERE task_id=? AND file_path=?`, taskID, filePath)
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "id": attID, "name": name})
 	}
+}
+
+// validateReportAssessment 校验 F19《报案必要性评估单》的跨字段一致性：
+//   - 评估结论为“达到”报案标准时，处置决定必须是“立即报案”（否则属于该报不报）；
+//   - 决定“暂不报案/继续观察”时，必须写明理由、后续措施与复核时间。
+//
+// 返回空串表示通过。该检查在基础版与实战版都硬拦截，避免“不评估直接不报案”
+// 或“该报不报”仍被记为正确完成；被拦截的节点按未完成处理，结束时扣该节点分值。
+func validateReportAssessment(formID string, data map[string]any) string {
+	if strings.TrimSpace(formID) != "F19" {
+		return ""
+	}
+	standard := formValueString(data["是否达到报案标准"])
+	decision := formValueString(data["处置决定"])
+	if standard == "达到" && decision != "立即报案" {
+		return "评估认定已达到报案标准时，处置决定必须选择「立即报案」"
+	}
+	if decision == "暂不报案" || decision == "继续观察" {
+		if formValueString(data["暂不报案理由与后续措施"]) == "" {
+			return "选择「暂不报案」或「继续观察」时，必须填写暂不报案理由与后续措施"
+		}
+		if formValueString(data["后续复核时间"]) == "" {
+			return "选择「暂不报案」或「继续观察」时，必须填写后续复核时间"
+		}
+	}
+	return ""
 }
 
 // PostTaskForms POST /api/tasks/:id/forms
 func PostTaskForms(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		t, ok := guardTaskWrite(database, c)
+		if !ok {
+			return
+		}
 		id := c.Param("id")
-		u := auth.CurrentUser(c)
+		u := t.User
+		// 先取原始字节做 UTF-8 合法性校验：非法字节（如 GBK 页面/异常客户端直传）
+		// 写入库会变成 U+FFFD，无法还原，这里直接 400 拒绝。
+		raw, err := c.GetRawData()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "读取请求体失败"})
+			return
+		}
+		if !utf8.Valid(raw) {
+			userName := ""
+			if u != nil {
+				userName = u.Name
+			}
+			slog.Warn("表单提交请求体非法 UTF-8，已拒绝", "task", id, "user", userName, "bytes", len(raw))
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体不是合法的 UTF-8 编码，请检查提交内容后重试"})
+			return
+		}
 		var body struct {
 			FormID string         `json:"formId"`
 			Data   map[string]any `json:"data"`
 		}
-		_ = c.ShouldBindJSON(&body)
-		var formName string
-		if database.QueryRow(`SELECT name FROM form_templates WHERE id=?`, body.FormID).Scan(&formName) != nil {
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &body); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "请求体 JSON 解析失败"})
+				return
+			}
+		}
+		var formName, fieldsJSON string
+		if database.QueryRow(`SELECT name,COALESCE(fields,'') FROM form_templates WHERE id=?`, body.FormID).Scan(&formName, &fieldsJSON) != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "表单模板不存在"})
+			return
+		}
+		// 下拉类字段必须落在模板 options 内（空值、未配置选项的历史模板、多选数组均兼容）
+		if err := validateSelectOptions(fieldsJSON, body.Data); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// F19 报案必要性评估单：跨字段一致性硬校验（基础版同样拦截）
+		if msg := validateReportAssessment(body.FormID, body.Data); msg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
 		pid := id
 		nodeID := ""
 		_ = database.QueryRow(`SELECT COALESCE(project_id,''),COALESCE(node_id,'') FROM tasks WHERE id=?`, id).Scan(&pid, &nodeID)
+
+		// 表单校验：必填项 + 节点文字质量规则。
+		// 基础版（诱导演练）只提示不阻断：照常落库，问题通过 warnings 返回；
+		// 正式版（实战版）保持 400 + reasons 硬拦截。
+		mode := ""
+		_ = database.QueryRow(`SELECT COALESCE(mode,'') FROM projects WHERE id=?`, pid).Scan(&mode)
+		isBase := strings.TrimSpace(mode) == "基础版"
+		warnings, reasons := validateFormSubmission(database, nodeID, fieldsJSON, body.Data)
+		if len(reasons) > 0 && !isBase {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "表单校验未通过：" + strings.Join(reasons, "；"),
+				"reasons": reasons,
+			})
+			return
+		}
 
 		// 表单落库与业务影响联动放在同一事务：任一失败整体回滚，
 		// 避免出现「表单已提交但大屏/看板状态没变」的假成功。
@@ -1164,8 +1902,186 @@ func PostTaskForms(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "表单提交失败"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "submissionId": sid, "impactUpdated": len(changed) > 0, "systems": changed})
+		if warnings == nil {
+			warnings = []formWarning{}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"ok": true, "submissionId": sid,
+			"impactUpdated": len(changed) > 0, "systems": changed,
+			// 基础版只提示不阻断：这些问题不影响本次提交，前端以提示条展示
+			"warnings": warnings,
+		})
 	}
+}
+
+// validateSelectOptions 校验下拉类字段的提交值必须命中模板 options。
+// 兼容：空值放行；模板里不存在该字段（历史模板）放行；非 select/multiselect 放行；
+// 未配置 options 的历史模板放行；multiselect 允许「、，,;；」分隔的字符串或 JSON 数组。
+// 只做提交校验，不参与历史数据的只读回显（GetTaskForms 不受影响）。
+func validateSelectOptions(fieldsJSON string, data map[string]any) error {
+	if strings.TrimSpace(fieldsJSON) == "" || len(data) == 0 {
+		return nil
+	}
+	var raw []any
+	if err := json.Unmarshal([]byte(fieldsJSON), &raw); err != nil {
+		// 模板结构异常时不阻断业务提交，交由后台模板编辑器修正
+		return nil
+	}
+	order := []string{}
+	types := map[string]string{}
+	opts := map[string]map[string]bool{}
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		label, _ := m["label"].(string)
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		tp, _ := m["type"].(string)
+		tp = strings.ToLower(strings.TrimSpace(tp))
+		if tp != "select" && tp != "multiselect" {
+			continue
+		}
+		set := map[string]bool{}
+		if arr, ok := m["options"].([]any); ok {
+			for _, o := range arr {
+				s, ok := o.(string)
+				if !ok {
+					continue
+				}
+				if s = strings.TrimSpace(s); s != "" {
+					set[s] = true
+				}
+			}
+		}
+		if len(set) == 0 {
+			continue
+		}
+		order = append(order, label)
+		types[label] = tp
+		opts[label] = set
+	}
+	for _, label := range order {
+		v, ok := data[label]
+		if !ok || v == nil {
+			continue
+		}
+		var vals []string
+		switch vv := v.(type) {
+		case string:
+			s := strings.TrimSpace(vv)
+			if s == "" {
+				continue // 空值走「未填写」语义，保持与旧行为一致
+			}
+			if types[label] == "multiselect" {
+				for _, p := range strings.FieldsFunc(s, func(r rune) bool {
+					return r == '、' || r == ',' || r == '，' || r == ';' || r == '；'
+				}) {
+					if p = strings.TrimSpace(p); p != "" {
+						vals = append(vals, p)
+					}
+				}
+			} else {
+				vals = []string{s}
+			}
+		case []any:
+			for _, e := range vv {
+				s, ok := e.(string)
+				if !ok {
+					continue
+				}
+				if s = strings.TrimSpace(s); s != "" {
+					vals = append(vals, s)
+				}
+			}
+		default:
+			continue // 非字符串值（数字/布尔）不做下拉校验
+		}
+		for _, got := range vals {
+			if !opts[label][got] {
+				return fmt.Errorf("字段「%s」的值「%s」不在下拉选项内，请从候选项中选择", label, got)
+			}
+		}
+	}
+	return nil
+}
+
+// formWarning 表单校验问题（逐字段）。基础版仅提示，正式版转成 reasons 拦截。
+type formWarning struct {
+	Field   string `json:"field"`
+	Label   string `json:"label"`
+	Message string `json:"message"`
+}
+
+// validateFormSubmission 表单提交校验（与实战版 PostDrillDecide 的提交硬门槛对齐）：
+//   - 表单模板中 required 字段必须非空；
+//   - 节点配置了文字质量规则时，对表单内自由文本套用同一硬门槛（未实质填写 / 纯敷衍 / 有效字数过低）；
+//   - 全下拉、全数字表单不参与文字质量判定；混淆节点不拦截（与实战版一致）。
+//
+// 只做提交校验，不影响历史提交的只读回显。
+// 返回值：warnings 为逐字段提示（基础版展示用），reasons 为正式版 400 拦截文案（保持原有汇总口径）。
+func validateFormSubmission(database *db.DB, nodeID, fieldsJSON string, data map[string]any) ([]formWarning, []string) {
+	warnings := []formWarning{}
+	reasons := []string{}
+	if missing := missingRequiredFields(util.ToJSON(data), parseFormRequiredFields(fieldsJSON)); len(missing) > 0 {
+		for _, f := range missing {
+			warnings = append(warnings, formWarning{
+				Field:   f.Key,
+				Label:   f.Label,
+				Message: "必填项未填写：" + f.Display(),
+			})
+		}
+		reasons = append(reasons, "表单必填项缺失："+joinFieldDisplays(missing))
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" || len(data) == 0 {
+		return warnings, reasons
+	}
+	var qualityRaw, flowType, keywordsRaw string
+	if err := database.QueryRow(
+		`SELECT COALESCE(quality_rules,''),COALESCE(flow_type,'correct'),COALESCE(keywords,'') FROM script_nodes WHERE id=? AND deleted_at IS NULL`,
+		nodeID,
+	).Scan(&qualityRaw, &flowType, &keywordsRaw); err != nil {
+		return warnings, reasons
+	}
+	// 仅对显式配置了质量规则的节点做文字门槛，避免把默认规则套到普通备注字段。
+	if strings.TrimSpace(qualityRaw) == "" {
+		return warnings, reasons
+	}
+	texts := make([]string, 0, len(data))
+	for _, v := range data {
+		if s, ok := v.(string); ok {
+			if s = strings.TrimSpace(s); s != "" {
+				texts = append(texts, s)
+			}
+		}
+	}
+	if len(texts) == 0 {
+		return warnings, reasons
+	}
+	combined := strings.Join(texts, "\n")
+	keywords := make([]string, 0, 4)
+	for _, kw := range strings.Split(keywordsRaw, ",") {
+		if kw = strings.TrimSpace(kw); kw != "" {
+			keywords = append(keywords, kw)
+		}
+	}
+	q := submissionQuality{
+		HasSubmission: true,
+		Text:          combined,
+		Measure:       combined,
+		Keywords:      keywords,
+	}
+	if gate := evaluateHardGate(q, parseQualityRules(qualityRaw), flowType); len(gate) > 0 {
+		for _, g := range gate {
+			warnings = append(warnings, formWarning{Label: "文字质量", Message: g})
+		}
+		reasons = append(reasons, gate...)
+	}
+	return warnings, reasons
 }
 
 // GetTaskForms GET /api/tasks/:id/forms
@@ -1191,7 +2107,277 @@ func GetTaskForms(database *db.DB) gin.HandlerFunc {
 
 // =========================================================================
 // /api/evidence/*  —— 取证模块全套
+//
+// 数据流：multipart/截图 base64 → uploads/evidence/YYYYMM/ 落盘 → evidence 表
+// （project_id / task_id / node_id / req_key / file_path 全量绑定）→
+// 工作台与取证页共用 queryEvidence 返回的同一份记录与 /uploads 地址。
 // =========================================================================
+
+type evidenceRequirement struct {
+	Type string
+	Name string
+	Note string
+}
+
+// parseEvidenceReqs 兼容对象数组与旧版字符串数组两种 evidence_req 存储格式。
+func parseEvidenceReqs(raw string) []evidenceRequirement {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	var objs []map[string]any
+	if err := json.Unmarshal([]byte(raw), &objs); err == nil {
+		out := make([]evidenceRequirement, 0, len(objs))
+		for _, m := range objs {
+			it := evidenceRequirement{}
+			if v, ok := m["type"].(string); ok {
+				it.Type = strings.TrimSpace(v)
+			}
+			if v, ok := m["name"].(string); ok {
+				it.Name = strings.TrimSpace(v)
+			}
+			if v, ok := m["note"].(string); ok {
+				it.Note = strings.TrimSpace(v)
+			}
+			out = append(out, it)
+		}
+		return out
+	}
+	var strs []string
+	if err := json.Unmarshal([]byte(raw), &strs); err == nil {
+		out := make([]evidenceRequirement, 0, len(strs))
+		for _, s := range strs {
+			out = append(out, evidenceRequirement{Name: strings.TrimSpace(s)})
+		}
+		return out
+	}
+	return nil
+}
+
+// evidenceBinding 是取证记录的三重绑定：任务、项目、剧本节点。
+type evidenceBinding struct {
+	ProjectID string
+	TaskID    string
+	NodeID    string
+	RoleID    string
+}
+
+// resolveEvidenceBinding 复用任务附件的权限口径：
+//   - 任务必须存在、项目未归档、非管理角色只能操作本角色任务；
+//   - 节点必须存在且与项目剧本一致；未显式给项目时按节点所属剧本回填。
+func resolveEvidenceBinding(database *db.DB, u *auth.User, taskID, projectID, nodeID string) (evidenceBinding, string) {
+	b := evidenceBinding{
+		ProjectID: strings.TrimSpace(projectID),
+		TaskID:    strings.TrimSpace(taskID),
+		NodeID:    strings.TrimSpace(nodeID),
+	}
+	if b.TaskID != "" {
+		var taskProject, taskRole, taskNode, projectStatus string
+		err := database.QueryRow(
+			`SELECT COALESCE(t.project_id,''),COALESCE(t.role_id,''),COALESCE(t.node_id,''),COALESCE(p.status,'')
+			 FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?`, b.TaskID,
+		).Scan(&taskProject, &taskRole, &taskNode, &projectStatus)
+		if err != nil {
+			return b, "任务不存在"
+		}
+		if projectStatus == "已归档" {
+			return b, "已归档项目的任务不可再上传取证材料"
+		}
+		if !canManageTask(database, u, taskRole) {
+			return b, "该任务由「" + taskRole + "」负责，当前角色不可代为上传取证材料"
+		}
+		if b.ProjectID == "" {
+			b.ProjectID = taskProject
+		}
+		if b.NodeID == "" {
+			b.NodeID = taskNode
+		}
+		b.RoleID = taskRole
+	}
+	if b.ProjectID != "" {
+		var status string
+		if err := database.QueryRow(`SELECT COALESCE(status,'') FROM projects WHERE id=?`, b.ProjectID).Scan(&status); err != nil {
+			return b, "演练项目不存在"
+		}
+		if status == "已归档" {
+			return b, "已归档项目不可再上传取证材料"
+		}
+	}
+	if b.NodeID != "" {
+		var nodeScenario, nodeTarget string
+		if err := database.QueryRow(`SELECT COALESCE(scenario_id,''),COALESCE(target,'') FROM script_nodes WHERE id=? AND deleted_at IS NULL`, b.NodeID).Scan(&nodeScenario, &nodeTarget); err != nil {
+			return b, "剧本节点不存在"
+		}
+		// 仅绑定节点时按节点归属角色校验；任务绑定已在上面的 canManageTask 覆盖
+		if b.TaskID == "" && !canHandleRole(database, u.Role.ID, nodeTarget) {
+			return b, "该剧本节点由其他角色负责，当前角色不可上传"
+		}
+		if b.ProjectID != "" {
+			var projectScenario string
+			if err := database.QueryRow(`SELECT COALESCE(scenario_id,'') FROM projects WHERE id=?`, b.ProjectID).Scan(&projectScenario); err != nil {
+				return b, "演练项目不存在"
+			}
+			if nodeScenario != "" && projectScenario != "" && nodeScenario != projectScenario {
+				return b, "剧本节点与演练项目不匹配"
+			}
+		} else if nodeScenario != "" {
+			// 只给节点时按该节点所属剧本回填一个项目，保证列表按项目可检索
+			var pid string
+			if err := database.QueryRow(`SELECT id FROM projects WHERE scenario_id=? ORDER BY COALESCE(date,'') DESC,id DESC LIMIT 1`, nodeScenario).Scan(&pid); err == nil {
+				b.ProjectID = pid
+			}
+		}
+	}
+	if b.RoleID == "" {
+		b.RoleID = u.Role.ID
+	}
+	return b, ""
+}
+
+func nullableText(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
+}
+
+// evidenceChainJSON 生成保管链初始事件（JSON 数组）。
+func evidenceChainJSON(actor, action, at, note string) string {
+	ev := []gin.H{{
+		"at":     at,
+		"actor":  actor,
+		"action": action,
+		"note":   truncateText(note, 200),
+	}}
+	b, _ := json.Marshal(ev)
+	return string(b)
+}
+
+// insertEvidenceRecord 写入证据记录；sha 为空表示无实体文件（预填/模拟/元数据），
+// 有 sha 则视为上传事件，同时写入保管人、封存时间与保管链（P1-07）。
+func insertEvidenceRecord(tx *sql.Tx, u *auth.User, b evidenceBinding, id, typ, name, size, rel, note, reqKey string, auto int, sha string) error {
+	url := ""
+	if strings.TrimSpace(rel) != "" {
+		url = "/uploads/" + rel
+	}
+	at := util.Now()
+	action := "归档"
+	if strings.TrimSpace(sha) != "" {
+		action = "上传"
+	}
+	_, err := tx.Exec(
+		`INSERT INTO evidence (id,type,name,size,time,role_id,uploader,user_id,auto,task_id,project_id,url,file_path,note,node_id,req_key,created_at,sha256,custodian,sealed_at,chain_of_custody)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, truncateText(typ, 32), truncateText(name, 120), truncateText(size, 16), util.HHMM(), b.RoleID, u.Name, u.ID, auto,
+		nullableText(b.TaskID), nullableText(b.ProjectID), nullableText(url), nullableText(rel),
+		nullableText(truncateText(note, 500)), nullableText(b.NodeID), nullableText(truncateText(reqKey, 128)), at,
+		nullableText(strings.TrimSpace(sha)), u.Name, at, evidenceChainJSON(u.Name, action, at, note),
+	)
+	return err
+}
+
+func insertEvidenceAttachmentMirror(tx *sql.Tx, u *auth.User, taskID, name, typ, size, rel string) error {
+	if taskID == "" || rel == "" {
+		return nil
+	}
+	_, err := tx.Exec(
+		`INSERT INTO task_attachments (task_id,name,type,size,url,file_path,uploader,uploader_id,time,auto)
+		 VALUES (?,?,?,?,?,?,?,?,?,0)`,
+		taskID, name, typ, size, "/uploads/"+rel, rel, u.Name, u.ID, util.HHMM(),
+	)
+	return err
+}
+
+func formField(form *multipart.Form, key string) string {
+	if form == nil {
+		return ""
+	}
+	if v := form.Value[key]; len(v) > 0 {
+		return strings.TrimSpace(v[0])
+	}
+	return ""
+}
+
+func uploadMaxMB() int {
+	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("UPLOAD_MAX_MB"))); err == nil && n > 0 {
+		return n
+	}
+	return 20
+}
+
+func imageExtByMagic(b []byte) (string, bool) {
+	switch {
+	case len(b) >= 8 && bytes.Equal(b[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}):
+		return ".png", true
+	case len(b) >= 3 && b[0] == 0xff && b[1] == 0xd8 && b[2] == 0xff:
+		return ".jpg", true
+	case len(b) >= 6 && (bytes.Equal(b[:6], []byte("GIF87a")) || bytes.Equal(b[:6], []byte("GIF89a"))):
+		return ".gif", true
+	case len(b) >= 12 && bytes.Equal(b[:4], []byte("RIFF")) && bytes.Equal(b[8:12], []byte("WEBP")):
+		return ".webp", true
+	case len(b) >= 2 && b[0] == 'B' && b[1] == 'M':
+		return ".bmp", true
+	}
+	return "", false
+}
+
+// saveEvidenceDataURL 保存抓屏 base64 图片，按真实文件头决定扩展名。
+func saveEvidenceDataURL(uploadDir, dataURL, origName string, maxMB int) (rel, displayName, size string, err error) {
+	const prefix = "data:image/"
+	if !strings.HasPrefix(strings.ToLower(dataURL), prefix) {
+		return "", "", "", fmt.Errorf("截图数据格式不正确")
+	}
+	comma := strings.IndexByte(dataURL, ',')
+	if comma < 0 {
+		return "", "", "", fmt.Errorf("截图数据缺少 base64 内容")
+	}
+	meta := dataURL[len(prefix):comma]
+	parts := strings.Split(meta, ";")
+	isBase64 := false
+	for _, p := range parts[1:] {
+		if strings.EqualFold(strings.TrimSpace(p), "base64") {
+			isBase64 = true
+		}
+	}
+	if !isBase64 {
+		return "", "", "", fmt.Errorf("截图数据不是 base64 编码")
+	}
+	raw, decErr := base64.StdEncoding.DecodeString(dataURL[comma+1:])
+	if decErr != nil {
+		raw, decErr = base64.RawStdEncoding.DecodeString(dataURL[comma+1:])
+	}
+	if decErr != nil {
+		return "", "", "", fmt.Errorf("截图 base64 解码失败")
+	}
+	if len(raw) == 0 {
+		return "", "", "", fmt.Errorf("截图内容为空")
+	}
+	maxBytes := int64(maxMB) * 1024 * 1024
+	if maxBytes > 0 && int64(len(raw)) > maxBytes {
+		return "", "", "", fmt.Errorf("截图超过 %dMB 限制", maxMB)
+	}
+	ext, ok := imageExtByMagic(raw)
+	if !ok {
+		return "", "", "", fmt.Errorf("仅支持 PNG/JPEG/GIF/WEBP/BMP 截图")
+	}
+	base := strings.TrimSuffix(sanitizeFileName(origName), filepath.Ext(origName))
+	if strings.TrimSpace(base) == "" || base == "." {
+		base = "屏幕截图"
+	}
+	displayName = base + ext
+
+	subDir := filepath.Join("evidence", time.Now().Format("200601"))
+	targetDir := filepath.Join(uploadDir, subDir)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return "", "", "", err
+	}
+	storedName := fmt.Sprintf("%d-%s-%s", time.Now().UnixMilli(), randHex(4), displayName)
+	full := filepath.Join(targetDir, storedName)
+	if err := os.WriteFile(full, raw, 0o644); err != nil {
+		return "", "", "", err
+	}
+	return filepath.ToSlash(filepath.Join(subDir, storedName)), displayName, fmtSizeGo(int64(len(raw))), nil
+}
 
 // GetEvidenceLegacy GET /api/evidence
 func GetEvidenceLegacy(database *db.DB) gin.HandlerFunc {
@@ -1199,80 +2385,661 @@ func GetEvidenceLegacy(database *db.DB) gin.HandlerFunc {
 }
 
 // PostEvidenceLegacy POST /api/evidence
+// 兼容旧前端：dataUrl 抓屏入库；无 dataUrl 时保留纯记录语义。
 func PostEvidenceLegacy(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.External {
+			c.JSON(http.StatusForbidden, gin.H{"error": "外部单位不可上传取证材料"})
+			return
+		}
 		var body struct {
-			Type string `json:"type"`
-			Name string `json:"name"`
-			Size string `json:"size"`
-			Auto bool   `json:"auto"`
-			Task string `json:"taskId"`
-			Proj string `json:"projectId"`
+			Type      string `json:"type"`
+			Name      string `json:"name"`
+			Size      string `json:"size"`
+			Note      string `json:"note"`
+			DataURL   string `json:"dataUrl"`
+			ReqKey    string `json:"reqKey"`
+			TaskID    string `json:"taskId"`
+			ProjectID string `json:"projectId"`
+			NodeID    string `json:"nodeId"`
+			Auto      bool   `json:"auto"`
 		}
-		_ = c.ShouldBindJSON(&body)
-		if body.Type == "" {
-			body.Type = "文档"
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误"})
+			return
 		}
-		if body.Name == "" {
-			body.Name = "未命名材料"
+		b, msg := resolveEvidenceBinding(database, u, body.TaskID, body.ProjectID, body.NodeID)
+		if msg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
 		}
-		id := fmt.Sprintf("E%d", time.Now().UnixMilli())
-		_, _ = database.Exec(
-			`INSERT INTO evidence (id,type,name,size,time,role_id,uploader,user_id,auto,task_id,project_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-			id, body.Type, body.Name, body.Size, util.HHMM(), u.Role.ID, u.Name, u.ID, body.Auto, body.Task, body.Proj, util.Now(),
-		)
-		c.JSON(http.StatusOK, gin.H{"ok": true, "id": id})
+
+		typ := strings.TrimSpace(body.Type)
+		if typ == "" {
+			typ = "文档"
+		}
+		name := strings.TrimSpace(body.Name)
+		if name == "" {
+			name = "未命名材料"
+		}
+		size := strings.TrimSpace(body.Size)
+		rel := ""
+		if strings.TrimSpace(body.DataURL) != "" {
+			uploadDir := resolveUploadRootDir()
+			savedRel, savedName, savedSize, err := saveEvidenceDataURL(uploadDir, body.DataURL, name, uploadMaxMB())
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			rel, name, size = savedRel, savedName, savedSize
+			if strings.TrimSpace(body.Type) == "" {
+				typ = "附件截图"
+			}
+		}
+
+		id := fmt.Sprintf("E%d_%s", time.Now().UnixMilli(), randHex(3))
+		tx, err := database.Begin()
+		if err != nil {
+			if rel != "" {
+				removeUploadFile(resolveUploadRootDir(), rel)
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库事务开启失败"})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+		auto := 0
+		if body.Auto {
+			auto = 1
+		}
+		if err := insertEvidenceRecord(tx, u, b, id, typ, name, size, rel, strings.TrimSpace(body.Note), body.ReqKey, auto, ""); err != nil {
+			if rel != "" {
+				removeUploadFile(resolveUploadRootDir(), rel)
+			}
+			slog.Warn("取证记录写入失败", "err", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "取证材料保存失败"})
+			return
+		}
+		if err := insertEvidenceAttachmentMirror(tx, u, b.TaskID, name, typ, size, rel); err != nil {
+			if rel != "" {
+				removeUploadFile(resolveUploadRootDir(), rel)
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "附件记录保存失败"})
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			if rel != "" {
+				removeUploadFile(resolveUploadRootDir(), rel)
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "取证材料提交失败"})
+			return
+		}
+
+		url := ""
+		if rel != "" {
+			url = "/uploads/" + rel
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"ok": true, "id": id, "name": name, "type": typ, "size": size,
+			"url": url, "hasFile": rel != "", "projectId": b.ProjectID,
+			"taskId": b.TaskID, "nodeId": b.NodeID, "reqKey": body.ReqKey,
+		})
 	}
 }
 
 // PostEvidencePrefill POST /api/evidence/prefill
+// 按「节点#序号」把本角色负责的剧本取证要求登记为已归档材料。
 func PostEvidencePrefill(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true, "count": 0}) }
+	type prefillItem struct {
+		NodeID string `json:"nodeId"`
+		Index  int    `json:"index"`
+		Name   string `json:"name"`
+		Note   string `json:"note"`
+	}
+	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.External {
+			c.JSON(http.StatusForbidden, gin.H{"error": "外部单位不可预填取证材料"})
+			return
+		}
+		var body struct {
+			ProjectID string        `json:"projectId"`
+			Items     []prefillItem `json:"items"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误"})
+			return
+		}
+		pid := strings.TrimSpace(body.ProjectID)
+		if pid == "" {
+			pid = resolveActiveProjectID(database)
+		}
+		if pid == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "未指定演练项目"})
+			return
+		}
+		var scenario, status string
+		if err := database.QueryRow(`SELECT COALESCE(scenario_id,''),COALESCE(status,'') FROM projects WHERE id=?`, pid).Scan(&scenario, &status); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+			return
+		}
+		if status == "已归档" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "已归档项目不可再预填取证材料"})
+			return
+		}
+
+		tx, err := database.Begin()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库事务开启失败"})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		created := 0
+		skipped := []string{}
+		seen := map[string]bool{}
+		for _, it := range body.Items {
+			nid := strings.TrimSpace(it.NodeID)
+			if nid == "" {
+				skipped = append(skipped, "缺少节点")
+				continue
+			}
+			var target, nodeScenario, rawReq string
+			if err := tx.QueryRow(
+				`SELECT COALESCE(target,''),COALESCE(scenario_id,''),COALESCE(evidence_req,'[]')
+				 FROM script_nodes WHERE id=? AND deleted_at IS NULL`, nid,
+			).Scan(&target, &nodeScenario, &rawReq); err != nil {
+				skipped = append(skipped, nid+"：节点不存在")
+				continue
+			}
+			if scenario != "" && nodeScenario != "" && scenario != nodeScenario {
+				skipped = append(skipped, nid+"：不属于当前项目剧本")
+				continue
+			}
+			reqs := parseEvidenceReqs(rawReq)
+			if it.Index < 0 || it.Index >= len(reqs) {
+				skipped = append(skipped, fmt.Sprintf("%s#%d：取证要求不存在", nid, it.Index))
+				continue
+			}
+			key := fmt.Sprintf("%s#%d", nid, it.Index)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if !canHandleRole(database, u.Role.ID, target) {
+				skipped = append(skipped, key+"：非本角色负责")
+				continue
+			}
+			var exists int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM evidence WHERE project_id=? AND req_key=?`, pid, key).Scan(&exists); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "校验取证状态失败"})
+				return
+			}
+			if exists > 0 {
+				skipped = append(skipped, key+"：已归档")
+				continue
+			}
+			req := reqs[it.Index]
+			name := strings.TrimSpace(it.Name)
+			if name == "" {
+				name = req.Name
+			}
+			if name == "" {
+				name = "取证材料"
+			}
+			typ := req.Type
+			if typ == "" {
+				typ = "文档"
+			}
+			id := fmt.Sprintf("E%d_%s", time.Now().UnixMilli(), randHex(3))
+			b := evidenceBinding{ProjectID: pid, NodeID: nid, RoleID: u.Role.ID}
+			if err := insertEvidenceRecord(tx, u, b, id, typ, name, "-", "", strings.TrimSpace(it.Note), key, 1, ""); err != nil {
+				slog.Warn("预填取证材料写入失败", "err", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "预填材料保存失败"})
+				return
+			}
+			created++
+		}
+		if err := tx.Commit(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "预填材料提交失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "count": created, "skipped": skipped, "projectId": pid})
+	}
 }
 
 // PostEvidenceMock POST /api/evidence/mock
+// 一键导入与剧本要求相符的模拟材料（仅登记记录，不伪造物理文件）。
 func PostEvidenceMock(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) }
+	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.External {
+			c.JSON(http.StatusForbidden, gin.H{"error": "外部单位不可导入模拟材料"})
+			return
+		}
+		var body struct {
+			NodeID    string `json:"nodeId"`
+			Index     int    `json:"index"`
+			ProjectID string `json:"projectId"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误"})
+			return
+		}
+		nid := strings.TrimSpace(body.NodeID)
+		if nid == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "缺少节点 ID"})
+			return
+		}
+		pid := strings.TrimSpace(body.ProjectID)
+		if pid == "" {
+			pid = resolveActiveProjectID(database)
+		}
+		if pid == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "未指定演练项目"})
+			return
+		}
+		var target, nodeScenario, rawReq, status string
+		if err := database.QueryRow(
+			`SELECT COALESCE(target,''),COALESCE(scenario_id,''),COALESCE(evidence_req,'[]') FROM script_nodes WHERE id=? AND deleted_at IS NULL`, nid,
+		).Scan(&target, &nodeScenario, &rawReq); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "剧本节点不存在"})
+			return
+		}
+		if err := database.QueryRow(`SELECT COALESCE(status,'') FROM projects WHERE id=?`, pid).Scan(&status); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+			return
+		}
+		if status == "已归档" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "已归档项目不可再导入模拟材料"})
+			return
+		}
+		reqs := parseEvidenceReqs(rawReq)
+		if body.Index < 0 || body.Index >= len(reqs) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "该节点没有对应的取证要求"})
+			return
+		}
+		if !canHandleRole(database, u.Role.ID, target) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "该取证要求不属于当前角色"})
+			return
+		}
+		key := fmt.Sprintf("%s#%d", nid, body.Index)
+		req := reqs[body.Index]
+		name := req.Name
+		if name == "" {
+			name = "模拟材料"
+		}
+		typ := req.Type
+		if typ == "" {
+			typ = "文档"
+		}
+		var exists int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM evidence WHERE project_id=? AND req_key=?`, pid, key).Scan(&exists); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "校验取证状态失败"})
+			return
+		}
+		if exists > 0 {
+			c.JSON(http.StatusOK, gin.H{"ok": true, "deduped": true, "name": name, "key": key, "projectId": pid})
+			return
+		}
+		tx, err := database.Begin()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库事务开启失败"})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+		id := fmt.Sprintf("E%d_%s", time.Now().UnixMilli(), randHex(3))
+		b := evidenceBinding{ProjectID: pid, NodeID: nid, RoleID: u.Role.ID}
+		note := "演练模拟材料（按剧本预填，请按实际处置核对修改）"
+		if err := insertEvidenceRecord(tx, u, b, id, typ, name, "-", "", note, key, 1, ""); err != nil {
+			slog.Warn("模拟取证材料写入失败", "err", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "模拟材料保存失败"})
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "模拟材料提交失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "id": id, "name": name, "key": key, "projectId": pid})
+	}
 }
 
 // GetEvidenceRequirements GET /api/evidence/requirements
+// 按项目剧本节点 + evidence_req 返回逐项归档状态；mine 表示当前角色是否负责该节点。
 func GetEvidenceRequirements(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) { c.JSON(http.StatusOK, []gin.H{}) }
+	empty := func() gin.H {
+		return gin.H{
+			"project": nil, "items": []gin.H{}, "total": 0, "done": 0, "pending": 0,
+			"mineTotal": 0, "mineDone": 0, "minePending": 0,
+		}
+	}
+	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		pid := strings.TrimSpace(c.Query("projectId"))
+		if pid == "" {
+			pid = resolveActiveProjectID(database)
+		}
+		if pid == "" {
+			c.JSON(http.StatusOK, empty())
+			return
+		}
+		var pName, scenario, status string
+		if err := database.QueryRow(
+			`SELECT COALESCE(name,''),COALESCE(scenario_id,''),COALESCE(status,'') FROM projects WHERE id=?`, pid,
+		).Scan(&pName, &scenario, &status); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+			return
+		}
+
+		type doneInfo struct {
+			ID, Time string
+			HasFile  bool
+		}
+		doneMap := map[string]doneInfo{}
+		if rows, err := database.Query(
+			`SELECT COALESCE(req_key,''),id,COALESCE(time,''),CASE WHEN COALESCE(file_path,'')<>'' THEN 1 ELSE 0 END
+			 FROM evidence WHERE project_id=? AND req_key IS NOT NULL AND req_key<>''
+			 ORDER BY created_at DESC,id DESC`, pid,
+		); err == nil {
+			for rows.Next() {
+				var key, id, tm string
+				var hasFile int
+				if rows.Scan(&key, &id, &tm, &hasFile) != nil {
+					continue
+				}
+				if _, ok := doneMap[key]; !ok {
+					doneMap[key] = doneInfo{ID: id, Time: tm, HasFile: hasFile == 1}
+				}
+			}
+			rows.Close()
+		}
+
+		items := []gin.H{}
+		total, done, mineTotal, mineDone, minePending := 0, 0, 0, 0, 0
+		rows, err := database.Query(
+			`SELECT id,COALESCE(title,''),COALESCE(target,''),COALESCE(evidence_req,'[]'),COALESCE(flow_type,'correct')
+			 FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL AND type!='end' ORDER BY seq,id`, scenario,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取剧本节点失败"})
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var nid, title, target, rawReq, flowType string
+			if rows.Scan(&nid, &title, &target, &rawReq, &flowType) != nil {
+				continue
+			}
+			if strings.EqualFold(flowType, "distractor") {
+				continue
+			}
+			reqs := parseEvidenceReqs(rawReq)
+			for i, req := range reqs {
+				key := fmt.Sprintf("%s#%d", nid, i)
+				typ := req.Type
+				if typ == "" {
+					typ = "文档"
+				}
+				mine := false
+				if u != nil && !u.Role.External {
+					mine = canHandleRole(database, u.Role.ID, target)
+				}
+				hit, isDone := doneMap[key]
+				total++
+				if isDone {
+					done++
+				}
+				if mine {
+					mineTotal++
+					if isDone {
+						mineDone++
+					} else {
+						minePending++
+					}
+				}
+				items = append(items, gin.H{
+					"key": key, "nodeId": nid, "nodeTitle": title, "target": target,
+					"index": i, "type": typ, "name": req.Name, "note": req.Note,
+					"mine": mine, "done": isDone,
+					"evidenceId": hit.ID, "doneAt": hit.Time, "hasFile": hit.HasFile,
+				})
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"project": gin.H{"id": pid, "name": pName, "status": status},
+			"items":   items, "total": total, "done": done, "pending": total - done,
+			"mineTotal": mineTotal, "mineDone": mineDone, "minePending": minePending,
+		})
+	}
 }
 
 // PostEvidenceUpload POST /api/evidence/upload
 func PostEvidenceUpload(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		file, err := c.FormFile("file")
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.External {
+			c.JSON(http.StatusForbidden, gin.H{"error": "外部单位不可上传取证材料"})
+			return
+		}
+		form, err := c.MultipartForm()
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "未接收到文件"})
 			return
 		}
-		ext := ""
-		if idx := strings.LastIndex(file.Filename, "."); idx >= 0 {
-			ext = file.Filename[idx:]
+		files := form.File["files"]
+		if len(files) == 0 {
+			files = form.File["file"]
 		}
-		saved := fmt.Sprintf("evidence/%d%s", time.Now().UnixMilli(), ext)
-		id := fmt.Sprintf("E%d", time.Now().UnixMilli())
-		c.JSON(http.StatusOK, gin.H{"files": []gin.H{gin.H{
-			"id": id, "name": file.Filename, "size": file.Size,
-			"url": "/uploads/" + saved,
-		}}})
+		if len(files) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "未接收到文件"})
+			return
+		}
+		if len(files) > 10 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "单次最多上传 10 个文件"})
+			return
+		}
+
+		taskID := formField(form, "taskId")
+		projectID := formField(form, "projectId")
+		nodeID := formField(form, "nodeId")
+		reqKey := formField(form, "reqKey")
+		note := formField(form, "note")
+		typ := formField(form, "type")
+		b, msg := resolveEvidenceBinding(database, u, taskID, projectID, nodeID)
+		if msg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+
+		maxMB := uploadMaxMB()
+		maxBytes := int64(maxMB) * 1024 * 1024
+		for _, fh := range files {
+			if fh.Size <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "文件内容为空：" + sanitizeFileName(fh.Filename)})
+				return
+			}
+			if maxBytes > 0 && fh.Size > maxBytes {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("文件「%s」超过 %dMB 限制", sanitizeFileName(fh.Filename), maxMB)})
+				return
+			}
+			if dangerousAttExts[strings.ToLower(filepath.Ext(fh.Filename))] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "不允许上传可执行程序或脚本：" + sanitizeFileName(fh.Filename)})
+				return
+			}
+		}
+
+		type savedFile struct {
+			rel, full, name, typ, size, id, sha string
+		}
+		uploadDir := resolveUploadRootDir()
+		saved := make([]savedFile, 0, len(files))
+		cleanup := func() {
+			for _, s := range saved {
+				_ = os.Remove(s.full)
+			}
+		}
+		for _, fh := range files {
+			rel, full, err := saveUploadedFile(uploadDir, "evidence", fh.Filename, fh)
+			if err != nil {
+				cleanup()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "文件保存失败：" + err.Error()})
+				return
+			}
+			fileType := typ
+			if fileType == "" {
+				fileType = guessAttType(fh.Filename)
+			}
+			saved = append(saved, savedFile{
+				rel: rel, full: full, name: sanitizeFileName(fh.Filename),
+				typ: fileType, size: fmtSizeGo(fh.Size), sha: fileSHA256(full),
+			})
+		}
+
+		tx, err := database.Begin()
+		if err != nil {
+			cleanup()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库事务开启失败"})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+		out := make([]gin.H, 0, len(saved))
+		for i := range saved {
+			id := fmt.Sprintf("E%d_%s", time.Now().UnixMilli(), randHex(3))
+			saved[i].id = id
+			if err := insertEvidenceRecord(tx, u, b, id, saved[i].typ, saved[i].name, saved[i].size, saved[i].rel, note, reqKey, 0, saved[i].sha); err != nil {
+				cleanup()
+				slog.Warn("取证材料写入失败", "err", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "取证材料保存失败"})
+				return
+			}
+			if err := insertEvidenceAttachmentMirror(tx, u, b.TaskID, saved[i].name, saved[i].typ, saved[i].size, saved[i].rel); err != nil {
+				cleanup()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "附件记录保存失败"})
+				return
+			}
+			out = append(out, gin.H{
+				"id": id, "name": saved[i].name, "type": saved[i].typ, "size": saved[i].size,
+				"url": "/uploads/" + saved[i].rel, "projectId": b.ProjectID,
+				"taskId": b.TaskID, "nodeId": b.NodeID, "reqKey": reqKey,
+			})
+		}
+		if err := tx.Commit(); err != nil {
+			cleanup()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "取证材料提交失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"ok": true, "files": out, "count": len(out),
+			"projectId": b.ProjectID, "taskId": b.TaskID, "nodeId": b.NodeID, "reqKey": reqKey,
+		})
 	}
 }
 
-// GetEvidenceDownload GET /api/evidence/:id/download
+// DeleteEvidence DELETE /api/evidence/:id —— 删除取证材料（含物理文件）
+// 权限口径与任务附件一致：上传者本人或指挥部/信息科负责人/平台管理员。
+func DeleteEvidence(database *db.DB, uploadDir string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.External {
+			c.JSON(http.StatusForbidden, gin.H{"error": "外部单位不可删除取证材料"})
+			return
+		}
+		id := c.Param("id")
+		var taskID, projectID, filePath string
+		var userID int64
+		if err := database.QueryRow(
+			`SELECT COALESCE(task_id,''),COALESCE(project_id,''),COALESCE(file_path,''),COALESCE(user_id,0)
+			 FROM evidence WHERE id=?`, id,
+		).Scan(&taskID, &projectID, &filePath, &userID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "取证材料不存在"})
+			return
+		}
+		allowed := false
+		switch u.Role.ID {
+		case "platformadmin", "commander", "itlead":
+			allowed = true
+		default:
+			allowed = userID == u.ID
+		}
+		if !allowed {
+			c.JSON(http.StatusForbidden, gin.H{"error": "仅上传者本人或指挥部/信息科负责人/平台管理员可删除取证材料"})
+			return
+		}
+		// 与任务附件共用同一物理文件时，先移除附件记录，避免留下悬空附件
+		if filePath != "" && taskID != "" {
+			_, _ = database.Exec(`DELETE FROM task_attachments WHERE task_id=? AND file_path=?`, taskID, filePath)
+		}
+		if _, err := database.Exec(`DELETE FROM evidence WHERE id=?`, id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "取证材料删除失败"})
+			return
+		}
+		// 仅当没有其他证据/附件引用同一物理文件时才删盘
+		var remains int
+		_ = database.QueryRow(`SELECT COUNT(*) FROM evidence WHERE file_path=?`, filePath).Scan(&remains)
+		var attRemains int
+		_ = database.QueryRow(`SELECT COUNT(*) FROM task_attachments WHERE file_path=?`, filePath).Scan(&attRemains)
+		if filePath != "" && remains == 0 && attRemains == 0 {
+			removeUploadFile(uploadDir, filePath)
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "id": id, "projectId": projectID})
+	}
+}
+
+// GetEvidenceDownload GET /api/evidence/:id/download —— 返回真实文件字节流
 func GetEvidenceDownload(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		var name string
-		err := database.QueryRow(`SELECT COALESCE(name,'') FROM evidence WHERE id=?`, id).Scan(&name)
+		var name, filePath string
+		err := database.QueryRow(`SELECT COALESCE(name,''),COALESCE(file_path,'') FROM evidence WHERE id=?`, id).Scan(&name, &filePath)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "取证材料不存在"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "id": id, "name": name})
+		if strings.TrimSpace(filePath) == "" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "该取证材料没有实体文件"})
+			return
+		}
+		uploadDir := resolveUploadRootDir()
+		clean := filepath.Clean(filepath.FromSlash(filePath))
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "文件路径不合法"})
+			return
+		}
+		full := filepath.Join(uploadDir, clean)
+		if rel, err := filepath.Rel(uploadDir, full); err != nil || strings.HasPrefix(rel, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "文件路径不合法"})
+			return
+		}
+		st, err := os.Stat(full)
+		if err != nil || st.IsDir() {
+			c.JSON(http.StatusNotFound, gin.H{"error": "取证文件不存在或已被清理"})
+			return
+		}
+		if strings.TrimSpace(name) == "" {
+			name = filepath.Base(full)
+		}
+		c.FileAttachment(full, sanitizeFileName(name))
 	}
 }
 
@@ -1281,31 +3048,551 @@ func GetEvidenceDownload(database *db.DB) gin.HandlerFunc {
 // =========================================================================
 
 // AdminRestoreUpload POST /api/admin/restore-upload
+// 上传 .sql 备份并真正执行恢复：校验 → 恢复前自动备份 → 导入 → 校验 → 审计。
 func AdminRestoreUpload(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		file, _ := c.FormFile("file")
-		if file == nil {
+		file, err := c.FormFile("file")
+		if err != nil || file == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "未接收到备份文件"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "file": file.Filename})
+		if !strings.EqualFold(filepath.Ext(file.Filename), ".sql") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "仅支持 .sql 备份文件（系统导出的 mysqldump 文本）；旧 .db 文件不再支持"})
+			return
+		}
+		const maxRestoreBytes = int64(2) * 1024 * 1024 * 1024
+		if file.Size <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "备份文件为空"})
+			return
+		}
+		if file.Size > maxRestoreBytes {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "备份文件超过 2GB 限制"})
+			return
+		}
+
+		backupDir := resolveBackupDir()
+		if err := os.MkdirAll(backupDir, 0o755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建备份目录失败：" + err.Error()})
+			return
+		}
+		name := fmt.Sprintf("drill-upload-%s-%s.sql", time.Now().Format("20060102-150405"), randHex(3))
+		target := filepath.Join(backupDir, name)
+
+		src, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "读取上传文件失败：" + err.Error()})
+			return
+		}
+		defer src.Close()
+		dst, err := os.Create(target)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存上传备份失败：" + err.Error()})
+			return
+		}
+		written, copyErr := io.Copy(dst, src)
+		closeErr := dst.Close()
+		if copyErr != nil || closeErr != nil {
+			_ = os.Remove(target)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存上传备份失败"})
+			return
+		}
+		if written <= 0 {
+			_ = os.Remove(target)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "备份文件为空"})
+			return
+		}
+		if err := validateSQLDump(target); err != nil {
+			_ = os.Remove(target)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "备份文件校验失败：" + err.Error()})
+			return
+		}
+
+		data, failure := performRestore(database, c, dbConnFromEnv(), backupDir, target, name)
+		if failure != nil {
+			c.JSON(failure.Code, gin.H{"error": failure.Msg})
+			return
+		}
+		c.JSON(http.StatusOK, data)
+	}
+}
+
+// sha256HexRe 匹配 64 位十六进制摘要（F13 申报值与归档文件摘要都按此提取）。
+var sha256HexRe = regexp.MustCompile(`(?i)[a-f0-9]{64}`)
+
+// extractSHA256Values 从任意文本/JSON 中提取去重后的 SHA-256 摘要（小写）。
+func extractSHA256Values(raw string) []string {
+	out := make([]string, 0, 2)
+	seen := map[string]bool{}
+	for _, m := range sha256HexRe.FindAllString(raw, -1) {
+		h := strings.ToLower(m)
+		if !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// evidenceHashCheck 比对 F13 申报哈希与 evidence 归档文件实际 SHA-256（P1-07）。
+// 结果只用于报告展示，不参与扣分；未申报/无归档时给出明确状态而不是报错。
+func evidenceHashCheck(database *db.DB, projectID string) gin.H {
+	declared := make([]string, 0, 4)
+	declaredSet := map[string]bool{}
+	collect := func(raw string) {
+		for _, h := range extractSHA256Values(raw) {
+			if !declaredSet[h] {
+				declaredSet[h] = true
+				declared = append(declared, h)
+			}
+		}
+	}
+	// 基础版：任务表单提交（F13）
+	if rows, err := database.Query(`SELECT COALESCE(fs.data,'') FROM form_submissions fs
+		JOIN tasks t ON t.id=fs.task_id WHERE t.project_id=? AND fs.form_id='F13'`, projectID); err == nil {
+		for rows.Next() {
+			var d string
+			if rows.Scan(&d) == nil {
+				collect(d)
+			}
+		}
+		rows.Close()
+	}
+	// 实战版：处置记录里的表单 JSON
+	if rows, err := database.Query(`SELECT COALESCE(forms,'') FROM drill_steps
+		WHERE project_id=? AND COALESCE(forms,'')<>''`, projectID); err == nil {
+		for rows.Next() {
+			var d string
+			if rows.Scan(&d) == nil {
+				collect(d)
+			}
+		}
+		rows.Close()
+	}
+
+	type evHash struct{ id, name, sha string }
+	evs := make([]evHash, 0, 4)
+	if rows, err := database.Query(`SELECT id,COALESCE(name,''),LOWER(COALESCE(sha256,'')) FROM evidence
+		WHERE project_id=? AND COALESCE(sha256,'')<>'' ORDER BY created_at,id`, projectID); err == nil {
+		for rows.Next() {
+			var e evHash
+			if rows.Scan(&e.id, &e.name, &e.sha) == nil {
+				evs = append(evs, e)
+			}
+		}
+		rows.Close()
+	}
+	actualSet := map[string]bool{}
+	for _, e := range evs {
+		actualSet[e.sha] = true
+	}
+	matched := 0
+	for _, h := range declared {
+		if actualSet[h] {
+			matched++
+		}
+	}
+	status := "一致"
+	switch {
+	case len(declared) == 0:
+		status = "未申报"
+	case matched == 0:
+		status = "不一致"
+	case matched < len(declared):
+		status = "部分一致"
+	}
+	items := make([]gin.H, 0, len(evs))
+	for _, e := range evs {
+		items = append(items, gin.H{"evidenceId": e.id, "name": e.name, "sha256": e.sha, "matched": declaredSet[e.sha]})
+	}
+	return gin.H{
+		"status": status, "declared": len(declared), "archived": len(evs),
+		"matched": matched, "mismatched": len(declared) - matched, "items": items,
 	}
 }
 
 // AdminReport GET /api/admin/report/:projectId
+// 演练报告数据聚合：按项目汇总概况、剧本、任务、时序、实战决策、取证、评分与台账。
+// 结构与旧 Node 版 src/routes/admin.js 对齐，前端 report.js 直接消费。
 func AdminReport(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		pid := c.Param("projectId")
-		c.JSON(http.StatusOK, gin.H{"projectId": pid, "sections": []gin.H{}})
+		pid := strings.TrimSpace(c.Param("projectId"))
+		var (
+			pID, pName, pType, pDate, pLevel, pStatus, pTarget, pScenario, pMode string
+			pUnits, pMembers, pObservers                                         string
+		)
+		err := database.QueryRow(`SELECT id,COALESCE(name,''),COALESCE(type,''),COALESCE(date,''),COALESCE(level,''),
+			COALESCE(status,''),COALESCE(target,''),COALESCE(scenario_id,''),COALESCE(mode,'基础版'),
+			COALESCE(units,'[]'),COALESCE(members,'[]'),COALESCE(observers,'[]')
+			FROM projects WHERE id=?`, pid).Scan(&pID, &pName, &pType, &pDate, &pLevel, &pStatus, &pTarget,
+			&pScenario, &pMode, &pUnits, &pMembers, &pObservers)
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取演练项目失败"})
+			return
+		}
+
+		// 角色名称映射
+		roleNames := map[string]string{}
+		if rows, e := database.Query(`SELECT id,COALESCE(name,'') FROM roles`); e == nil {
+			for rows.Next() {
+				var rid, rname string
+				if rows.Scan(&rid, &rname) == nil {
+					roleNames[rid] = rname
+				}
+			}
+			rows.Close()
+		}
+		roleName := func(rid string) string {
+			if n, ok := roleNames[rid]; ok && n != "" {
+				return n
+			}
+			return rid
+		}
+
+		// 剧本与节点元数据（时限、标题、责任角色）
+		var scenario gin.H
+		nodeTotal := 0
+		nodeMeta := map[string]struct{ Title, Target string }{}
+		durationMap := map[string]int{}
+		if pScenario != "" {
+			var sID, sName, sType, sLevel, sVersion, sDescr string
+			if e := database.QueryRow(`SELECT id,COALESCE(name,''),COALESCE(type,''),COALESCE(level,''),
+				COALESCE(version,''),COALESCE(descr,'') FROM scenarios WHERE id=?`, pScenario).
+				Scan(&sID, &sName, &sType, &sLevel, &sVersion, &sDescr); e == nil {
+				scenario = gin.H{"id": sID, "name": sName, "type": sType, "level": sLevel,
+					"version": sVersion, "descr": sDescr}
+			}
+			if rows, e := database.Query(`SELECT id,COALESCE(title,''),COALESCE(target,''),COALESCE(timeout,0),COALESCE(flow_type,'correct')
+				FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL`, pScenario); e == nil {
+				for rows.Next() {
+					var nid, title, target, flowType string
+					var timeout int
+					if rows.Scan(&nid, &title, &target, &timeout, &flowType) == nil {
+						nodeMeta[nid] = struct{ Title, Target string }{title, target}
+						if timeout > 0 {
+							durationMap[nid] = timeout
+						}
+						// 报告展示口径：混淆节点不计入剧本节点数（仍保留元数据供错选明细使用）
+						if !strings.EqualFold(strings.TrimSpace(flowType), "distractor") {
+							nodeTotal++
+						}
+					}
+				}
+				rows.Close()
+			}
+			if scenario != nil {
+				scenario["nodes"] = nodeTotal
+			}
+		}
+
+		// 任务 + 分角色统计
+		tasks := []gin.H{}
+		type roleAgg struct {
+			Role                                 string
+			Total, Done, Doing, Pending, Overdue int
+		}
+		byRoleMap := map[string]*roleAgg{}
+		byRoleOrder := []string{}
+		total, done, doing, pending, overdue := 0, 0, 0, 0, 0
+		if rows, e := database.Query(`SELECT id,COALESCE(title,''),COALESCE(descr,''),COALESCE(role_id,''),
+			COALESCE(level,''),COALESCE(deadline,''),COALESCE(node_id,''),COALESCE(status,'')
+			FROM tasks WHERE project_id=? ORDER BY seq,id`, pid); e == nil {
+			for rows.Next() {
+				var tid, title, descr, roleID, level, deadline, nodeID, status string
+				if rows.Scan(&tid, &title, &descr, &roleID, &level, &deadline, &nodeID, &status) != nil {
+					continue
+				}
+				rname := roleName(roleID)
+				var duration any
+				if d, ok := durationMap[nodeID]; ok {
+					duration = d
+				}
+				tasks = append(tasks, gin.H{"id": tid, "title": title, "descr": descr, "role": roleID,
+					"roleName": rname, "level": level, "deadline": deadline, "duration": duration, "status": status})
+				total++
+				agg := byRoleMap[rname]
+				if agg == nil {
+					agg = &roleAgg{Role: rname}
+					byRoleMap[rname] = agg
+					byRoleOrder = append(byRoleOrder, rname)
+				}
+				agg.Total++
+				switch status {
+				case "已完成":
+					done++
+					agg.Done++
+				case "处理中":
+					doing++
+					agg.Doing++
+				case "超时":
+					overdue++
+					agg.Overdue++
+				default:
+					pending++
+					agg.Pending++
+				}
+			}
+			rows.Close()
+		}
+		byRole := []gin.H{}
+		for _, k := range byRoleOrder {
+			a := byRoleMap[k]
+			byRole = append(byRole, gin.H{"role": a.Role, "total": a.Total, "done": a.Done,
+				"doing": a.Doing, "pending": a.Pending, "overdue": a.Overdue})
+		}
+		rate := 0
+		if total > 0 {
+			rate = int(math.Round(float64(done) / float64(total) * 100))
+		}
+
+		// 时序台账
+		timeline := []gin.H{}
+		if rows, e := database.Query(`SELECT COALESCE(t,''),COALESCE(actor,''),COALESCE(role_id,''),
+			COALESCE(action,''),COALESCE(detail,''),COALESCE(level,'') FROM timeline WHERE project_id=? ORDER BY seq,id`, pid); e == nil {
+			for rows.Next() {
+				var t, actor, roleID, action, detail, level string
+				if rows.Scan(&t, &actor, &roleID, &action, &detail, &level) == nil {
+					timeline = append(timeline, gin.H{"t": t, "actor": actor, "role": roleName(roleID),
+						"action": action, "detail": detail, "level": level})
+				}
+			}
+			rows.Close()
+		}
+
+		// 处置时序图
+		seqFlow := []gin.H{}
+		if rows, e := database.Query(`SELECT COALESCE(name,''),COALESCE(time,''),COALESCE(role,''),
+			COALESCE(state,'') FROM seq_flow WHERE project_id=? ORDER BY seq,id`, pid); e == nil {
+			for rows.Next() {
+				var name, tm, role, state string
+				if rows.Scan(&name, &tm, &role, &state) == nil {
+					seqFlow = append(seqFlow, gin.H{"name": name, "time": tm, "role": role, "state": state})
+				}
+			}
+			rows.Close()
+		}
+
+		// 取证材料
+		evidence := []gin.H{}
+		evByType := map[string]int{}
+		autoEv := 0
+		if rows, e := database.Query(`SELECT id,COALESCE(type,''),COALESCE(name,''),COALESCE(size,''),
+			COALESCE(time,''),COALESCE(role_id,''),COALESCE(task_id,''),COALESCE(auto,0),
+			COALESCE(node_id,''),COALESCE(req_key,''),COALESCE(sha256,''),COALESCE(custodian,''),COALESCE(sealed_at,'')
+			FROM evidence WHERE project_id=? OR task_id IN (SELECT id FROM tasks WHERE project_id=?)
+			ORDER BY created_at,id`, pid, pid); e == nil {
+			for rows.Next() {
+				var eid, etype, name, size, tm, roleID, taskID, nodeID, reqKey, sha, custodian, sealedAt string
+				var auto int
+				if rows.Scan(&eid, &etype, &name, &size, &tm, &roleID, &taskID, &auto,
+					&nodeID, &reqKey, &sha, &custodian, &sealedAt) != nil {
+					continue
+				}
+				isAuto := auto == 1
+				evidence = append(evidence, gin.H{"id": eid, "type": etype, "name": name, "size": size,
+					"time": tm, "role": roleID, "taskId": taskID, "auto": isAuto,
+					"nodeId": nodeID, "reqKey": reqKey, "sha256": sha,
+					"custodian": custodian, "sealedAt": sealedAt})
+				evByType[etype]++
+				if isAuto {
+					autoEv++
+				}
+			}
+			rows.Close()
+		}
+
+		// 实战版处置决策记录
+		decisions := []gin.H{}
+		dTotal, dCorrect, dWrong, dOntime := 0, 0, 0, 0
+		if rows, e := database.Query(`SELECT COALESCE(matched_node,''),COALESCE(title,''),COALESCE(choice,''),
+			COALESCE(correct,1),COALESCE(ontime,0),COALESCE(step_time,''),COALESCE(found_at,''),
+			COALESCE(found,''),COALESCE(measure,''),COALESCE(result,''),COALESCE(user,'')
+			FROM drill_steps WHERE project_id=? ORDER BY step_time,id`, pid); e == nil {
+			for rows.Next() {
+				var nodeID, title, choice, stepTime, foundAt, found, measure, result, user string
+				var correct, ontime int
+				if rows.Scan(&nodeID, &title, &choice, &correct, &ontime, &stepTime, &foundAt,
+					&found, &measure, &result, &user) != nil {
+					continue
+				}
+				meta := nodeMeta[nodeID]
+				dTitle := title
+				if meta.Title != "" {
+					dTitle = meta.Title
+				}
+				dCorrectFlag := correct != 0
+				decisions = append(decisions, gin.H{"nodeId": nodeID, "title": dTitle, "target": meta.Target,
+					"choice": choice, "correct": dCorrectFlag, "ontime": ontime == 1, "stepTime": stepTime,
+					"foundAt": foundAt, "found": found, "measure": measure, "result": result, "user": user})
+				dTotal++
+				if dCorrectFlag {
+					dCorrect++
+				} else {
+					dWrong++
+				}
+				if ontime == 1 {
+					dOntime++
+				}
+			}
+			rows.Close()
+		}
+		baseline := 0
+		if pScenario != "" {
+			_ = database.QueryRow(`SELECT COUNT(*) FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL AND required=1 AND type<>'end' AND COALESCE(flow_type,'correct')!='distractor'`,
+				pScenario).Scan(&baseline)
+		}
+
+		// 考评明细（K1-K9）+ MODE 模式化自动考评
+		type scoreRow struct {
+			Score sql.NullFloat64
+			Max   sql.NullInt64
+			Note  string
+		}
+		scoreMap := map[string]scoreRow{}
+		if rows, e := database.Query(`SELECT item_id,score,max,COALESCE(note,'') FROM scores WHERE project_id=?`, pid); e == nil {
+			for rows.Next() {
+				var itemID string
+				var sr scoreRow
+				if rows.Scan(&itemID, &sr.Score, &sr.Max, &sr.Note) == nil {
+					scoreMap[itemID] = sr
+				}
+			}
+			rows.Close()
+		}
+		scores := []gin.H{}
+		scoreSum, scoreMax := 0.0, 0
+		graded := 0
+		if rows, e := database.Query(`SELECT id,COALESCE(name,''),COALESCE(weight,0),COALESCE(rule,'')
+			FROM score_items WHERE id<>'MODE' ORDER BY seq,id`); e == nil {
+			for rows.Next() {
+				var itemID, name, rule string
+				var weight int
+				if rows.Scan(&itemID, &name, &weight, &rule) != nil {
+					continue
+				}
+				max := weight
+				var sc any = nil
+				note := ""
+				if sr, ok := scoreMap[itemID]; ok {
+					if sr.Max.Valid {
+						max = int(sr.Max.Int64)
+					}
+					if sr.Score.Valid {
+						sc = sr.Score.Float64
+						scoreSum += sr.Score.Float64
+						graded++
+					}
+					note = sr.Note
+				}
+				scoreMax += max
+				scores = append(scores, gin.H{"itemId": itemID, "name": name, "weight": weight,
+					"rule": rule, "max": max, "score": sc, "note": note})
+			}
+			rows.Close()
+		}
+		var scorePct any
+		if graded > 0 && scoreMax > 0 {
+			scorePct = int(math.Round(scoreSum / float64(scoreMax) * 100))
+		}
+		var modeScore any
+		if sr, ok := scoreMap["MODE"]; ok {
+			modeScore = gin.H{"score": sr.Score.Float64, "max": sr.Max.Int64, "note": sr.Note}
+		}
+
+		// 台账
+		var ledger any
+		var lID, lName, lDate, lType, lEvent, lLevel, lResult, lScore, lOrg string
+		if e := database.QueryRow(`SELECT id,COALESCE(name,''),COALESCE(date,''),COALESCE(type,''),
+			COALESCE(event,''),COALESCE(level,''),COALESCE(result,''),COALESCE(score,''),COALESCE(org,'')
+			FROM ledger WHERE project_id=? LIMIT 1`, pid).
+			Scan(&lID, &lName, &lDate, &lType, &lEvent, &lLevel, &lResult, &lScore, &lOrg); e == nil {
+			ledger = gin.H{"id": lID, "name": lName, "date": lDate, "type": lType, "event": lEvent,
+				"level": lLevel, "result": lResult, "score": lScore, "org": lOrg}
+		}
+
+		generatedBy := "平台管理员"
+		if u := auth.CurrentUser(c); u != nil && u.Name != "" {
+			generatedBy = u.Name
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"project": gin.H{
+				"id": pID, "name": pName, "type": pType, "date": pDate, "level": pLevel,
+				"status": pStatus, "target": pTarget, "scenarioId": pScenario, "mode": pMode,
+				"units": rptJSONArray(pUnits), "members": rptJSONArray(pMembers), "observers": rptJSONArray(pObservers),
+			},
+			"scenario": scenario,
+			"stats": gin.H{"total": total, "done": done, "doing": doing, "pending": pending,
+				"overdue": overdue, "rate": rate},
+			"byRole": byRole,
+			"tasks":  tasks, "timeline": timeline, "seqFlow": seqFlow,
+			"decisions": decisions,
+			"decisionStats": gin.H{"baseline": baseline, "total": dTotal, "correct": dCorrect,
+				"wrong": dWrong, "ontime": dOntime},
+			"evidence":          evidence,
+			"evidenceStats":     gin.H{"total": len(evidence), "auto": autoEv, "byType": evByType},
+			"evidenceHashCheck": evidenceHashCheck(database, pid),
+			"scores":            scores,
+			"scoreStats": gin.H{"sum": scoreSum, "max": scoreMax, "pct": scorePct,
+				"graded": graded, "items": len(scores)},
+			"modeScore":   modeScore,
+			"ledger":      ledger,
+			"generatedAt": time.Now().Format("2006-01-02 15:04:05"),
+			"generatedBy": generatedBy,
+		})
 	}
 }
 
 // AdminReportExport POST /api/admin/report/:projectId/export
+// 校验项目存在后写入审计日志（仅追加），返回导出时间。
 func AdminReportExport(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		pid := c.Param("projectId")
-		c.JSON(http.StatusOK, gin.H{"ok": true, "projectId": pid})
+		pid := strings.TrimSpace(c.Param("projectId"))
+		var name string
+		err := database.QueryRow(`SELECT COALESCE(name,'') FROM projects WHERE id=?`, pid).Scan(&name)
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取演练项目失败"})
+			return
+		}
+		var body struct {
+			Format string `json:"format"`
+		}
+		_ = c.ShouldBindJSON(&body)
+		fmtName := strings.TrimSpace(body.Format)
+		if fmtName == "" {
+			fmtName = "HTML"
+		}
+		now := time.Now().Format("2006-01-02 15:04:05")
+		u := auth.CurrentUser(c)
+		if u != nil {
+			var uid any
+			if u.ID > 0 {
+				uid = u.ID
+			}
+			_, _ = database.Exec(`INSERT INTO audit_logs (time,user,role_id,user_id,action,ip) VALUES (?,?,?,?,?,?)`,
+				now, u.Name, u.Role.ID, uid, "导出演练报告《"+name+"》（"+fmtName+"）", c.ClientIP())
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "time": now})
 	}
+}
+
+// rptJSONArray 将库内 JSON 文本解析为数组；空值/非法值返回空数组，避免前端拿到 null。
+func rptJSONArray(s string) []any {
+	out := []any{}
+	if strings.TrimSpace(s) != "" {
+		_ = json.Unmarshal([]byte(s), &out)
+	}
+	if out == nil {
+		out = []any{}
+	}
+	return out
 }
 
 // =========================================================================
@@ -1327,7 +3614,7 @@ func GetDrillWorkbench(database *db.DB) gin.HandlerFunc {
 			        COALESCE(guide,''),COALESCE(keywords,''),COALESCE(action,''),COALESCE(required,1),
 			        COALESCE(wrong,'[]'),COALESCE(form,''),COALESCE(flow_type,'correct'),COALESCE(score,0),
 			        COALESCE(receiver,''),COALESCE(deps,'[]'),COALESCE(anchor_id,''),COALESCE(release_timing,'before')
-			 FROM script_nodes WHERE scenario_id=? ORDER BY seq`, p.ScenarioID)
+			 FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL ORDER BY seq`, p.ScenarioID)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
@@ -1399,7 +3686,7 @@ func GetDrillWorkbench(database *db.DB) gin.HandlerFunc {
 			"nodes":      nodes,
 			"steps":      steps,
 			"evidence":   loadEvidenceSummary(database, p),
-			"score":      Score(database, p.ID),
+			"score":      displayScore(database, p.ID),
 		})
 	}
 }
@@ -1511,7 +3798,7 @@ func GetDrillFlows(database *db.DB) gin.HandlerFunc {
 				"flows":         []gin.H{},
 				"receivers":     []string{},
 				"evidence":      loadEvidenceSummary(database, p),
-				"score":         Score(database, p.ID),
+				"score":         displayScore(database, p.ID),
 			})
 			return
 		}
@@ -1621,7 +3908,7 @@ func GetDrillFlows(database *db.DB) gin.HandlerFunc {
 			"flows":         flows,
 			"receivers":     receivers,
 			"evidence":      loadEvidenceSummary(database, p),
-			"score":         Score(database, p.ID),
+			"score":         displayScore(database, p.ID),
 		})
 	}
 }

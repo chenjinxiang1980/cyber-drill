@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"net/http"
+	"sort"
 	"strings"
 
 	"drill-system/internal/auth"
@@ -11,6 +12,43 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// anonNameMasker 匿名大屏姓名脱敏：把已知用户姓名替换为其角色名。
+// 只处理姓名（>=2 字），不改变时间、动作、状态等时间线信息。
+func anonNameMasker(database *db.DB) func(string) string {
+	type pair struct{ name, role string }
+	var pairs []pair
+	rows, err := database.Query(
+		`SELECT COALESCE(u.name,''),COALESCE(r.name,'参演人员')
+		 FROM users u LEFT JOIN roles r ON r.id=u.role_id
+		 WHERE u.name IS NOT NULL AND u.name<>''`)
+	if err != nil {
+		return func(s string) string { return s }
+	}
+	for rows.Next() {
+		var name, role string
+		if rows.Scan(&name, &role) == nil {
+			pairs = append(pairs, pair{name: name, role: role})
+		}
+	}
+	rows.Close()
+	// 长姓名优先，避免“张三丰”被“张三”部分替换
+	sort.Slice(pairs, func(i, j int) bool {
+		return len([]rune(pairs[i].name)) > len([]rune(pairs[j].name))
+	})
+	return func(s string) string {
+		if s == "" {
+			return s
+		}
+		for _, p := range pairs {
+			if len([]rune(p.name)) < 2 {
+				continue
+			}
+			s = strings.ReplaceAll(s, p.name, p.role)
+		}
+		return s
+	}
+}
 
 // ScreenNotifsHandler GET /api/screen/notifs?projectId=
 // 大屏语音播报/操作流专用：只返回当前项目的站内消息，不返回全局公告（project_id 为空）。
@@ -37,9 +75,14 @@ func ScreenNotifsHandler(database *db.DB) gin.HandlerFunc {
 		readSet := map[string]bool{}
 		readSQL := `SELECT DISTINCT notif_id FROM notif_reads`
 		var args []any
-		if u := auth.CurrentUser(c); u != nil {
+		current := auth.CurrentUser(c)
+		if current != nil {
 			readSQL = `SELECT notif_id FROM notif_reads WHERE user_id=?`
-			args = append(args, u.ID)
+			args = append(args, current.ID)
+		}
+		var anonMask func(string) string
+		if current == nil {
+			anonMask = anonNameMasker(database)
 		}
 		if rr, err := database.Query(readSQL, args...); err == nil {
 			for rr.Next() {
@@ -65,13 +108,21 @@ func ScreenNotifsHandler(database *db.DB) gin.HandlerFunc {
 				continue
 			}
 			nid := util.ScanNullableString(id)
+			src := util.ScanNullableString(source)
+			titleText := util.ScanNullableString(title)
+			descrText := util.ScanNullableString(descr)
+			if anonMask != nil {
+				src = anonMask(src)
+				titleText = anonMask(titleText)
+				descrText = anonMask(descrText)
+			}
 			out = append(out, gin.H{
 				"id":        nid,
 				"time":      util.ScanNullableString(tm),
 				"level":     util.ScanNullableString(level),
-				"source":    util.ScanNullableString(source),
-				"title":     util.ScanNullableString(title),
-				"desc":      util.ScanNullableString(descr),
+				"source":    src,
+				"title":     titleText,
+				"desc":      descrText,
 				"projectId": util.ScanNullableString(projectID),
 				"read":      readSet[nid],
 			})
@@ -87,7 +138,7 @@ func ScreenSummaryHandler(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var scens, nodes, projs int
 		_ = database.QueryRow(`SELECT COUNT(*) FROM scenarios`).Scan(&scens)
-		_ = database.QueryRow(`SELECT COUNT(*) FROM script_nodes`).Scan(&nodes)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM script_nodes WHERE deleted_at IS NULL AND COALESCE(flow_type,'correct')!='distractor'`).Scan(&nodes)
 		_ = database.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&projs)
 		c.JSON(http.StatusOK, gin.H{"scenarios": scens, "scriptNodes": nodes, "projects": projs})
 	}

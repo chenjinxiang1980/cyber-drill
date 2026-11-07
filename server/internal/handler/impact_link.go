@@ -95,7 +95,7 @@ type impactQuerier interface {
 	Query(query string, args ...any) (*sql.Rows, error)
 }
 
-// impactDefaultSeq 取全局模板行（project_id=''）的展示序号；查不到用 99。
+// impactDefaultSeq 取全局模板行（project_id=”）的展示序号；查不到用 99。
 // 必须先在 Go 侧单独查询再以字面量插入：MySQL 不允许在
 // INSERT ... ON DUPLICATE KEY UPDATE 中对目标表 impact 自身做子查询（ERROR 1093）。
 func impactDefaultSeq(q impactQuerier, sys string) int {
@@ -173,9 +173,10 @@ func (cs impactChanges) systems() []string {
 }
 
 // collectImpactChanges 按表单类型解析要写入的业务系统：
-//   F1 事件初步核实单  → 「受影响系统」多选 → 故障
-//   F3 业务影响评估表  → 「受影响业务系统」多选 → 故障（权威来源）
-//   F7 业务恢复确认单  → 「××状态」select → 对应档位（已恢复=正常）
+//
+//	F1 事件初步核实单  → 「受影响系统」多选 → 故障
+//	F3 业务影响评估表  → 「受影响业务系统」多选 → 故障（权威来源）
+//	F7 业务恢复确认单  → 「××状态」select → 对应档位（已恢复=正常）
 //
 // 注意：F7 字段名为「HIS收费系统状态」「医护工作站状态」等，不能只匹配
 // 「系统状态」后缀，否则「医护工作站」这类不以「系统」结尾的业务系统永远无法恢复。
@@ -220,6 +221,7 @@ func collectImpactChanges(formID string, data map[string]any) impactChanges {
 //   - multiselect 存值 "HIS收费系统、电子病历系统"
 //   - [](any) / []string
 //   - 换行/逗号/分号分隔
+//
 // 非模板内的系统名（如「院内业务系统（模拟地址 10.20.x.x）」）一律丢弃，避免污染 impact。
 func parseImpactSystems(v any) []string {
 	var raw []string
