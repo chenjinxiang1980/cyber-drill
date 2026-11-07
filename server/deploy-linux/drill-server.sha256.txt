@@ -1,9 +1,9 @@
 # drill-server Linux/amd64 构建签名
-# 构建时间: 2026-11-07 00:00:17 (+08:00)（VM 内 Dockerfile 多阶段构建）
-# 构建方式: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X drill-system/internal/version.Version=0.6.0 -X ...BuildTime=... -X ...GitCommit=f125fd8"
-# 源码状态: 0.6.0 开源发布版（节点级文字质量规则与匹配容错 + 表单模板编号三位化及保存修复 + 大屏/工作台交互修正）
-# 校验: 本文件末行哈希 = 镜像 drill-server:0.6.0 内 /opt/drill/bin/drill-server 实测（11,587,744 / f0f605fa…）
-# 上一线上版本: 11583648 / sha256 66ebd5b15fe0b1a14f651f7c4182706b9c264b13d6d37c49701d31be2cce502b
-# 字节数: 11587744
-# 部署记录: 2026-11-07 0.6.0 发布构建，镜像 digest sha256:6ade7adcb14b…；仅签名，现网容器尚未替换
-f0f605faa08a434f802465d7af735628cc4c387811ba8c2df5ee8a2ba1bd0c59  drill-server
+# 构建时间: 2026-11-08 02:27 (+08:00)
+# 构建方式: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X drill-system/internal/version.Version=0.8.3"
+# 源码状态: 0.8.3 开源发布版（评分口径收敛 + 证据链结构化 + 接收人主送/抄送 + 超时计时 + 剧本 2.0 / 5 条干扰项重写 + 编排 SVG 布局 + 导出修复）
+# 校验: 本文件末行哈希 = 二进制实测（sha256sum 小写）一致
+# 上一线上版本: 0.8.2 镜像内二进制（12,062,880 附近，随 0.8.2 增量层交付）
+# 字节数: 12108039
+# 部署记录: 2026-11-08 0.8.3 发布构建，VM 侧编译；镜像 drill-server:0.8.3 / latest 随后发布
+44880a9aa31c22f47883159ed5b65f69474c677df5199837cbe643f3e05d6495  drill-server
