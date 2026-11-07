@@ -1,9 +1,9 @@
 # drill-server Linux/amd64 构建签名
 # 构建时间: 2026-11-08 02:29 (+08:00)
-# 构建方式: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X drill-system/internal/version.Version=0.8.3"
+# 构建方式: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X drill-system/internal/version.Version=0.8.3 -X drill-system/internal/version.BuildTime=2026-11-08T02:29:00+08:00 -X drill-system/internal/version.GitCommit=bf98c80"
 # 部署形态: 静态链接，容器基础镜像 Alpine（musl），无动态库依赖
 # 源码状态: 0.8.3 开源发布版（评分口径收敛 + 证据链结构化 + 接收人主送/抄送 + 超时计时 + 剧本 2.0 / 5 条干扰项重写 + 编排 SVG 布局 + 导出修复）
 # 校验: 本文件末行哈希 = 镜像内 /opt/drill/bin/drill-server 实测（sha256sum 小写）一致
 # 字节数: 12062880
-# 镜像: drill-server:0.8.3 / latest（sha256:351147ae33de…），GHCR 与 SWR manifest digest 均为 sha256:bca10d62deb5…
-b1248ede960609736b48122947defb4e6ed0c79628d04761f6003fc2d9deaaca  drill-server
+# 镜像: drill-server:0.8.3 / latest（sha256:0adbce9f27bd…），GHCR 与 SWR manifest digest 均为 sha256:44650726accc…
+436811089bd382955269dec1172ec9adeab6fd4342aec66113de1f471915bf37  drill-server

@@ -92,12 +92,13 @@
 镜像 manifest digest（GHCR 与 SWR 一致）
 
 ```
-sha256:bca10d62deb5776cf4398859426738161b67f13c109a2b67171024bd5a1a6aaf
+sha256:44650726accc1fef6a415044ea2672fd03b74cb294931cbce17f3e49e0cf31cc
 ```
 
 镜像内 `/opt/drill/bin/drill-server`：12,062,880 B，静态链接（`CGO_ENABLED=0`，Alpine/musl
 可直接运行），SHA-256
-`b1248ede960609736b48122947defb4e6ed0c79628d04761f6003fc2d9deaaca`。
+`436811089bd382955269dec1172ec9adeab6fd4342aec66113de1f471915bf37`；启动日志中
+`version=0.8.3`、`buildTime=2026-11-08T02:29:00+08:00`、`gitCommit=bf98c80`。
 `server/deploy-linux/drill-server.sha256.txt` 已按该实测值重签；镜像内 `public/` 6 个核心文件
 SHA-256 与现网 bind mount 实测一致，静态资源 644、目录与二进制 755，运行用户 `uid 10001(drill)`。
 镜像内 `migrations/` 共 47 个 `.up.sql`，末位 `0090_distractor_rewrite_v2`。
@@ -120,5 +121,5 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 | 现网 `schema_migrations` | 47 行，末位 `0090_distractor_rewrite_v2` |
 | 现网前端 | `public/` 6 个核心文件 SHA-256 与仓库一致 |
 | 镜像内容 | 含全部 47 个迁移与现网一致的 `public/`，静态资源 644 / 目录与二进制 755 |
-| 两个镜像仓库 | `0.8.3` 与 `latest` 均已推送，匿名可拉，digest 一致 `sha256:bca10d62…` |
+| 两个镜像仓库 | `0.8.3` 与 `latest` 均已推送，匿名可拉，digest 一致 `sha256:44650726…` |
 | 隔离冒烟 | 临时 MySQL + 应用容器（端口 18093），`/api/health` 返回 `0.8.3`，新建库迁移 47 条、末位 `0090`，验后容器与网络已清理 |
