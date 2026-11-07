@@ -15,6 +15,8 @@
 .sc-grid{grid-template-columns:repeat(3,1fr)}
 @media (max-width:1400px){.sc-grid{grid-template-columns:repeat(2,1fr)}}
 .editor-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* 编排画布独占更宽的窗口，减少横向滚动（仅本页弹窗，不影响其他页面） */
+.overlay .modal.full{width:min(1760px,96vw)}
 .editor-bar .grow{flex:1}
 .se-layout{display:flex;gap:16px;align-items:flex-start}
 .se-palette{width:230px;flex:none}
@@ -133,12 +135,14 @@ document.addEventListener('app:ready', function(e){
     if(!list.length){ g.innerHTML = '<div class="empty" style="grid-column:1/-1">'+App.icon('search')+'<div>无匹配场景，请调整筛选条件</div></div>'; return; }
     g.innerHTML = list.map(function(s){
       var builtin = BUILTIN.indexOf(s.id)>=0;
+      var dn = Number(s.displayNodes)||0;
+      var dis = Number(s.distractors)||0;
       return '<div class="card sc-card">'
       + '<div class="flex gap2" style="justify-content:space-between"><div class="flex gap2"><span class="tag gray mono">'+s.id+'</span>'+App.levelTag(s.level)+'</div>'+App.statusTag(s.status)+'</div>'
       + '<div class="sc-name">'+App.esc(s.name)+'</div>'
       + '<div class="flex gap2 wrap mt2"><span class="mono dim small">'+s.version+'</span></div>'
       + '<div class="sc-desc">'+App.esc(s.desc)+'</div>'
-      + '<div class="sc-foot"><span>'+App.icon('flow')+' '+s.nodes+' 个节点</span><span class="right">更新于 '+s.updated+'</span>'+(builtin?'<span class="tag gray">内置</span>':'<span class="tag purple">自定义</span>')+'</div>'
+      + '<div class="sc-foot"><span title="主流节点 '+dn+' 个，混淆节点 '+dis+' 条">'+App.icon('flow')+' '+dn+' 个节点'+(dis?'<span class="dim">（另 '+dis+' 条混淆）</span>':'')+'</span><span class="right">更新于 '+s.updated+'</span>'+(builtin?'<span class="tag gray">内置</span>':'<span class="tag purple">自定义</span>')+'</div>'
       + '<div class="flex gap1 wrap sc-acts">'
       + '<button class="btn sm" data-act="edit" data-id="'+s.id+'">'+App.icon('edit')+'编辑剧本</button>'
       + '<button class="btn sm" data-act="copy" data-id="'+s.id+'">'+App.icon('copy')+'复制另存</button>'
@@ -340,6 +344,8 @@ document.addEventListener('app:ready', function(e){
     var openDrawerMs = null;       // { depsMs, recvMs, node } 当前 drawer 绑定的 MultiSelect 实例
     /* 多选框选状态 */
     var selection = new Set();    // 选中的节点 id 集合
+    var justAddedId = null;       // 刚从面板新增、等待 drawer 配置依赖的节点 id
+    var layoutChecked = false;    // 本次打开是否已做过“初始布局体检”（拖拽后不再回弹）
     var selectBox = null;          // 拖框选 DOM（{ el, startX, startY }）
     function renderSelection(){
       root.querySelectorAll('.dag-node').forEach(function(el){
@@ -378,6 +384,7 @@ document.addEventListener('app:ready', function(e){
         +   '<span class="dag-tool-sep"></span>'
         +   '<button class="btn sm" id="btnScore" title="均分分值（首节点 0 分；混淆流程只补齐未分档项为 5 分）">'+App.icon('score')+'均分分值</button>'
         +   '<button class="btn sm" id="btnPlay">'+App.icon('play')+'预览推演</button>'
+        +   '<button class="btn sm" id="btnRecycle" title="查看并恢复已删除节点">'+App.icon('trash')+'回收站</button>'
         +   '<button class="btn sm primary" id="btnSave">'+App.icon('check')+'保存剧本</button>'
         +   '</div>'
         + '</div>'
@@ -405,6 +412,7 @@ document.addEventListener('app:ready', function(e){
         +         '<button class="btn sm outline" id="zoomIn" title="放大画布">＋</button>'
         +         '<button class="btn sm" id="zoomReset" title="恢复 100%">1:1</button>'
         +         '<button class="btn sm" id="zoomFit" title="缩放到完整显示流程">适应画布</button>'
+        +         '<button class="btn sm" id="btnAutoLayout" title="按依赖层级自动排列全部节点（不改变节点内容）">'+App.icon('flow')+'自动布局</button>'
         +         '<span class="dag-tool-sep"></span>'
         +         '<button class="btn sm icon-only" id="btnAlignV" title="上对齐">'+App.icon('arrow-up')+'</button>'
         +         '<button class="btn sm icon-only" id="btnAlignV2" title="下对齐">'+App.icon('arrow-down')+'</button>'
@@ -459,7 +467,7 @@ document.addEventListener('app:ready', function(e){
       var disText = disNodes.length
         ? '混淆流程 <b>'+disNodes.length+'</b> 条（高 <b>'+hi+'</b> / 中 <b>'+mid+'</b> / 低 <b>'+lo+'</b> · 仅选错扣分，不计入总分）'
         : '混淆流程 <b>0</b> 条';
-      el.innerHTML = '正确流程合计 <b>'+total+'</b> / 100 分 · '+disText
+      el.innerHTML = '主流节点 <b>'+correctNodes().length+'</b> 个 · 正确流程合计 <b>'+total+'</b> / 100 分 · '+disText
         + (total>100?'<br><span style="color:var(--err)">已超出 '+(total-100)+' 分，请下调各节点分值</span>'
                     :(total<100?'<br><span style="color:var(--warn)">未满 100 分，请分配剩余分值</span>'
                                :'<br><span style="color:var(--ok)">分值已满 100 分</span>'));
@@ -617,30 +625,184 @@ document.addEventListener('app:ready', function(e){
       return out.length === ids.length ? out : null;
     }
 
-    /* ---------- 自动布局：列=拓扑深度，行=责任角色泳道 ---------- */
-    function autoLayout(){
+    /* ---------- 自动布局：列=拓扑深度，列内按前驱/后继重心排序并垂直居中 ---------- */
+    var LAYOUT = { padX:48, padY:40, colGap:96, nodeH:170, rowGap:24 };
+
+    function topoDepth(){
       var list = correctNodes();
-      if(!list.length) return;
       var order = topoOrder() || list.map(function(n){ return String(n.id); });
       var depth = {};
       order.forEach(function(id){
-        depth[id] = depOf(nodeById(id)).reduce(function(m, x){ return Math.max(m, (depth[x]||0)+1); }, 0);
+        var n = nodeById(id);
+        depth[id] = depOf(n).reduce(function(m, x){ return Math.max(m, (depth[x]||0)+1); }, 0);
       });
-      var lanes = {}, laneIdx = 0;
-      roleNames().forEach(function(r){ lanes[r] = laneIdx++; });
-      var stack = {};
-      list.forEach(function(n){
-        var id = String(n.id);
-        if(lanes[n.target]===undefined) lanes[n.target] = laneIdx++;
-        var key = depth[id] + '-' + lanes[n.target];
-        var s = stack[key] || 0;
-        stack[key] = s + 1;
-        n.posX = 40 + depth[id]*Math.round(NODE_W*1.3);
-        n.posY = 40 + lanes[n.target]*168 + s*146;
+      return { order:order, depth:depth };
+    }
+
+    function autoLayout(){
+      var list = correctNodes();
+      if(!list.length) return;
+      var td = topoDepth();
+      var order = td.order, depth = td.depth;
+      var byId = {}, index = {};
+      list.forEach(function(n){ byId[String(n.id)] = n; });
+      order.forEach(function(id, i){ index[id] = i; });
+
+      var deps = {}, succ = {};
+      order.forEach(function(id){ deps[id] = []; succ[id] = []; });
+      order.forEach(function(id){
+        depOf(byId[id]).forEach(function(d){
+          if(deps[d]) deps[id].push(d);
+        });
+      });
+      order.forEach(function(id){
+        deps[id].forEach(function(d){ succ[d].push(id); });
+      });
+
+      var maxDepth = 0;
+      order.forEach(function(id){ if(depth[id] > maxDepth) maxDepth = depth[id]; });
+      var layers = [];
+      for(var d=0; d<=maxDepth; d++) layers[d] = [];
+      order.forEach(function(id){ layers[depth[id]].push(id); });
+
+      function rowMap(){
+        var m = {};
+        layers.forEach(function(arr){ arr.forEach(function(id, i){ m[id] = i; }); });
+        return m;
+      }
+      var rows = rowMap();
+      function baryOf(ids, fallback){
+        var sum = 0, cnt = 0;
+        ids.forEach(function(x){
+          if(rows[x] !== undefined){ sum += rows[x]; cnt++; }
+        });
+        return cnt ? sum/cnt : fallback;
+      }
+
+      /* 4 轮上下扫描：按前驱/后继重心排序，减少相邻层连线交叉 */
+      for(var iter=0; iter<4; iter++){
+        for(var d=1; d<=maxDepth; d++){
+          layers[d].sort(function(a,b){
+            var ma = baryOf(deps[a], rows[a]), mb = baryOf(deps[b], rows[b]);
+            if(ma !== mb) return ma - mb;
+            return index[a] - index[b];
+          });
+          rows = rowMap();
+        }
+        for(var d2=maxDepth-1; d2>=0; d2--){
+          layers[d2].sort(function(a,b){
+            var ma = baryOf(succ[a], rows[a]), mb = baryOf(succ[b], rows[b]);
+            if(ma !== mb) return ma - mb;
+            return index[a] - index[b];
+          });
+          rows = rowMap();
+        }
+      }
+
+      function crossings(d){
+        if(d < 1) return 0;
+        var edges = [];
+        (layers[d] || []).forEach(function(to, ti){
+          deps[to].forEach(function(from){
+            if(depth[from] === d-1) edges.push([rows[from], ti]);
+          });
+        });
+        var c = 0;
+        for(var i=0; i<edges.length; i++){
+          for(var j=i+1; j<edges.length; j++){
+            if((edges[i][0]-edges[j][0]) * (edges[i][1]-edges[j][1]) < 0) c++;
+          }
+        }
+        return c;
+      }
+      /* 相邻节点交换：只在能减少交叉时交换，保证结果确定 */
+      for(var pass=0; pass<3; pass++){
+        var improved = false;
+        for(var d3=1; d3<=maxDepth; d3++){
+          var base = crossings(d3);
+          for(var k=0; k<layers[d3].length-1; k++){
+            if(base === 0) break;
+            var tmp = layers[d3][k]; layers[d3][k] = layers[d3][k+1]; layers[d3][k+1] = tmp;
+            rows = rowMap();
+            var now = crossings(d3);
+            if(now < base){ base = now; improved = true; }
+            else {
+              tmp = layers[d3][k]; layers[d3][k] = layers[d3][k+1]; layers[d3][k+1] = tmp;
+              rows = rowMap();
+            }
+          }
+        }
+        if(!improved) break;
+      }
+
+      var rowStep = LAYOUT.nodeH + LAYOUT.rowGap;
+      var colStep = NODE_W + LAYOUT.colGap;
+      var maxRows = 0;
+      layers.forEach(function(arr){ if(arr.length > maxRows) maxRows = arr.length; });
+      /* 垂直居中只针对“当前画布可见的行数”，内容超出时顶部对齐，避免首屏一片空白 */
+      var graphEl = root && root.querySelector ? root.querySelector('#canvasFlow') : null;
+      var viewH = graphEl ? (graphEl.clientHeight || 0) : 0;
+      var fitRows = viewH > 0 ? Math.max(1, Math.floor((viewH - LAYOUT.padY*2 + LAYOUT.rowGap) / rowStep)) : maxRows;
+      var centerRows = Math.min(maxRows, fitRows);
+      layers.forEach(function(arr, d){
+        var startY = LAYOUT.padY + (centerRows - arr.length) * rowStep / 2;
+        if(startY < LAYOUT.padY) startY = LAYOUT.padY;
+        arr.forEach(function(id, i){
+          var n = byId[id];
+          n.posX = LAYOUT.padX + d * colStep;
+          n.posY = Math.round(startY + i * rowStep);
+        });
       });
     }
+
+    function isCoordValid(n){
+      var x = n.posX, y = n.posY;
+      if(x===null || x===undefined || x==='' || y===null || y===undefined || y==='') return false;
+      x = Number(x); y = Number(y);
+      if(!isFinite(x) || !isFinite(y) || x < 0 || y < 0) return false;
+      if(x === 0 && y === 0) return false; /* (0,0) 视为占位坐标，交给自动布局兜底 */
+      return true;
+    }
     function ensureLayout(){
-      if(correctNodes().some(function(n){ return n.posX===null || n.posX===undefined || n.posY===null || n.posY===undefined; })) autoLayout();
+      var list = correctNodes();
+      if(!list.length) return false;
+      var bad = list.some(function(n){ return !isCoordValid(n); });
+      /* 首次打开时再做一次重叠体检；之后的拖拽/渲染不再自动回弹 */
+      if(!bad && !layoutChecked){
+        for(var i=0; i<list.length && !bad; i++){
+          for(var j=i+1; j<list.length; j++){
+            if(Math.abs((Number(list[i].posX)||0)-(Number(list[j].posX)||0)) < NODE_W &&
+               Math.abs((Number(list[i].posY)||0)-(Number(list[j].posY)||0)) < LAYOUT.nodeH){
+              bad = true;
+              break;
+            }
+          }
+        }
+      }
+      layoutChecked = true;
+      if(bad) autoLayout();
+      return bad;
+    }
+    function layoutColStep(){ return NODE_W + LAYOUT.colGap; }
+    function layoutRowStep(){ return LAYOUT.nodeH + LAYOUT.rowGap; }
+    function firstFreeY(x, skipId){
+      var y = LAYOUT.padY;
+      var others = correctNodes().filter(function(n){
+        return String(n.id) !== String(skipId) && Math.abs((Number(n.posX)||0) - x) < NODE_W;
+      });
+      for(var guard=0; guard<500; guard++){
+        var clash = others.some(function(o){
+          var oy = Number(o.posY)||0;
+          return y < oy + LAYOUT.nodeH && y + LAYOUT.nodeH > oy;
+        });
+        if(!clash) return Math.round(y);
+        y += layoutRowStep();
+      }
+      return Math.round(y);
+    }
+    function depthOfId(id){
+      var td = topoDepth();
+      return td.depth[String(id)] || 0;
     }
 
     /* ---------- 对齐工具（上对齐 / 下对齐 / 平均分配间距） ---------- */
@@ -817,10 +979,20 @@ document.addEventListener('app:ready', function(e){
           var ay = (Number(from.posY)||0) + fromEl.offsetHeight/2;
           var bx = Number(to.posX)||0;
           var by = (Number(to.posY)||0) + toEl.offsetHeight/2;
-          var dx = Math.max(36, Math.abs(bx-ax)*0.45);
+          var gap = bx - ax;
+          var d;
+          if(gap > 56){
+            /* 正常列间连线：控制点限制在列间空隙内，不穿过中间列卡片 */
+            var dx = Math.max(24, Math.min(150, gap*0.45));
+            d = 'M'+ax+','+ay+' C'+(ax+dx)+','+ay+' '+(bx-dx)+','+by+' '+bx+','+by;
+          } else {
+            /* 同列/回连线：从节点右侧绕行，避免直接穿过卡片 */
+            var out = ax + 72;
+            d = 'M'+ax+','+ay+' C'+out+','+ay+' '+out+','+by+' '+bx+','+by;
+          }
           var path = document.createElementNS('http://www.w3.org/2000/svg','path');
           path.setAttribute('class', 'dag-edge'+((from.type==='parallel'||to.type==='parallel')?' parallel':''));
-          path.setAttribute('d', 'M'+ax+','+ay+' C'+(ax+dx)+','+ay+' '+(bx-dx)+','+by+' '+bx+','+by);
+          path.setAttribute('d', d);
           path.setAttribute('marker-end', 'url(#dagArrow)');
           path.setAttribute('data-from', String(from.id));
           path.setAttribute('data-to', String(to.id));
@@ -860,7 +1032,7 @@ document.addEventListener('app:ready', function(e){
       var maxX = 640, maxY = 400;
       correct.forEach(function(n){
         maxX = Math.max(maxX, (Number(n.posX)||0) + NODE_W + 80);
-        maxY = Math.max(maxY, (Number(n.posY)||0) + 210 + 60);
+        maxY = Math.max(maxY, (Number(n.posY)||0) + LAYOUT.nodeH + 80);
       });
       c.innerHTML = '<div class="se-zoom-view" style="width:'+Math.round(maxX*zoom)+'px;height:'+Math.round(maxY*zoom)+'px">'
         + '<div class="se-stage" style="width:'+maxX+'px;height:'+maxY+'px;transform:scale('+zoom+');transform-origin:0 0">'
@@ -965,12 +1137,12 @@ document.addEventListener('app:ready', function(e){
         }
         copy.id = newId;
         copy.title = (n.title||'') + '（副本）';
-        /* 位置偏移，避免完全重叠 */
-        copy.posX = (Number(n.posX)||0) + 60;
-        copy.posY = (Number(n.posY)||0) + 60;
         /* deps 指向原依赖不变，去掉对自身的引用 */
         copy.deps = (Array.isArray(n.deps) ? n.deps : []).map(String).filter(function(d){ return d !== id; });
         nodes.push(copy);
+        /* 副本落在同拓扑列的空位，避免与原节点重叠 */
+        copy.posX = LAYOUT.padX + depthOfId(newId) * layoutColStep();
+        copy.posY = firstFreeY(copy.posX, newId);
         render();
         selectOne(newId);
         App.toast('节点已复制：「'+copy.title+'」（演练模拟，保存后生效）','ok');
@@ -1347,7 +1519,10 @@ document.addEventListener('app:ready', function(e){
           App.toast('已按剧本节点自动生成需取证材料，可逐项修改后保存','ok');
         };
         dv.querySelector('.d-body').insertAdjacentHTML('beforeend','<div class="mt4 flex gap2"><button class="btn grow" id="ndCancel">取消</button><button class="btn primary grow" id="ndSave">保存节点</button></div>');
-        dv.querySelector('#ndCancel').onclick = dv.close;
+        dv.querySelector('#ndCancel').onclick = function(){
+          justAddedId = null;
+          dv.close();
+        };
         dv.querySelector('#ndSave').onclick = function(){
           var newId = dv.querySelector('#ndId').value.trim();
           if(!newId){ App.toast('节点编号不能为空','err'); return; }
@@ -1425,6 +1600,12 @@ document.addEventListener('app:ready', function(e){
             });
             n.id = newId;
           }
+          /* 新增节点配置完依赖后，落到对应拓扑列的空位，不移动其他节点 */
+          if(justAddedId && (justAddedId === oldId || justAddedId === String(n.id))){
+            n.posX = LAYOUT.padX + depthOfId(n.id) * layoutColStep();
+            n.posY = firstFreeY(n.posX, n.id);
+            justAddedId = null;
+          }
           dv.close(); render();
           var tot = scoreTotal();
           App.toast(tot>100
@@ -1446,13 +1627,10 @@ document.addEventListener('app:ready', function(e){
       if(isDis){ n.anchorId = ''; n.releaseTiming = 'before'; }
       nodes.push(n);
       if(!isDis){
-        var lastX = 0, lastY = 0;
-        correctNodes().forEach(function(x){
-          lastX = Math.max(lastX, Number(x.posX)||0);
-          if(Number(x.posX)===lastX) lastY = Number(x.posY)||0;
-        });
-        n.posX = lastX + Math.round(NODE_W*1.3);
-        n.posY = lastY;
+        /* 先放进拓扑列的空位，drawer 改完依赖后再按新深度落位 */
+        n.posX = LAYOUT.padX + depthOfId(n.id) * layoutColStep();
+        n.posY = firstFreeY(n.posX, n.id);
+        justAddedId = String(n.id);
       }
       render();
       openDrawer(nodes.length-1);
@@ -1464,6 +1642,11 @@ document.addEventListener('app:ready', function(e){
     root.querySelector('#btnAlignV2').onclick = function(){ alignBottom(selectedOrAll()); render(); App.toast('已下对齐','ok'); };
     root.querySelector('#btnAlignH').onclick = function(){ alignLeft(selectedOrAll()); render(); App.toast('已左对齐','ok'); };
     root.querySelector('#btnAlignH2').onclick = function(){ alignRight(selectedOrAll()); render(); App.toast('已右对齐','ok'); };
+    root.querySelector('#btnAutoLayout').onclick = function(){
+      autoLayout();
+      render();
+      App.toast('已按依赖层级自动布局（保存剧本后生效）','ok');
+    };
     root.querySelector('#btnScore').onclick = function(){
       ensureLayout();
       autoSplitScore();
@@ -1473,6 +1656,7 @@ document.addEventListener('app:ready', function(e){
     root.querySelector('#seSel').onchange = function(){
       curId = this.value;
       nodes = loadNodes(curId);
+      layoutChecked = false;
       var s = scenarioById(curId);
       var alertBox = root.querySelector('#seAlert');
       if(alertBox) alertBox.value = s.alert || '';
@@ -1492,14 +1676,61 @@ document.addEventListener('app:ready', function(e){
       _doSave();
     };
 
+    /* 节点回收站：查看软删节点并恢复（二次确认 + 服务端审计） */
+    root.querySelector('#btnRecycle').onclick = function(){ openRecycle(); };
+    function openRecycle(){
+      DRILL.get('/content/scenarios/'+encodeURIComponent(curId)+'/nodes/deleted').then(function(list){
+        list = Array.isArray(list) ? list : [];
+        var rows = list.map(function(n){
+          return '<div class="tn-row" style="cursor:default">'
+            + '<span class="tn-ic">'+App.icon('trash')+'</span>'
+            + '<div class="tn-main"><div class="tn-title">'+App.esc(n.title||n.id)+'</div>'
+            + '<div class="tn-meta"><span class="mono">'+App.esc(n.id)+'</span>'
+            + '<span>'+App.esc(n.type||'节点')+'</span>'
+            + '<span>删除于 '+App.esc(n.deletedAt||'—')+'</span></div></div>'
+            + '<button class="btn sm primary" data-restore="'+App.esc(n.id)+'">恢复</button></div>';
+        }).join('');
+        App.modal({
+          title:'节点回收站 · '+curId, wide:true,
+          body:'<div class="sim-banner">'+App.icon('alert')+'<span>恢复后该节点重新参与评分、任务下发与报告统计；操作会写入审计日志。</span></div>'
+            + (list.length ? '<div class="task-nav">'+rows+'</div>' : '<div class="empty">当前剧本没有已删除节点</div>'),
+          foot:'<button class="btn" id="rcClose">关闭</button>',
+          onOpen:function(ov){
+            ov.querySelector('#rcClose').onclick = ov.close;
+            ov.querySelectorAll('[data-restore]').forEach(function(b){
+              b.onclick = function(){
+                var nid = b.getAttribute('data-restore');
+                App.confirmSim('确认恢复节点「'+App.esc(nid)+'」？恢复后该节点会重新参与本次演练的评分与统计。', function(){
+                  DRILL.post('/content/scenarios/'+encodeURIComponent(curId)+'/nodes/'+encodeURIComponent(nid)+'/restore', {}).then(function(){
+                    return API.getScriptNodes();
+                  }).then(function(all){
+                    if(Array.isArray(all)) MOCK.SCRIPT_NODES = all;
+                    nodes = loadNodes(curId);
+                    layoutChecked = false;
+                    ov.close();
+                    render();
+                    App.toast('节点已恢复并重新载入画布','ok');
+                  }).catch(function(err){
+                    App.toast((err && err.message) || '恢复节点失败，请稍后重试','err');
+                  });
+                });
+              };
+            });
+          }
+        });
+      }).catch(function(err){
+        App.toast((err && err.message) || '回收站加载失败，请稍后重试','err');
+      });
+    }
+
     function _doSave(){
       var miss = correctNodes().filter(function(n){ return n.type!=='end' && !(Number(n.timeout)>0); });
       if(miss.length){ App.toast('以下节点未设置处置时长：'+miss.map(function(n){ return n.title; }).join('、'),'err'); return; }
-      if(correctNodes().some(function(n){ return n.type!=='end' && (n.posX===null || n.posX===undefined); })) autoLayout();
+      ensureLayout();
       nodes.forEach(function(x){ x.time=''; });
       var alertText = String((root.querySelector('#seAlert')||{}).value||'').trim();
       var tot = scoreTotal();
-      var dis = nodes.filter(function(x){ return x.type!=='end' && x.flowType==='distractor'; }).length;
+      var dis = nodes.filter(function(x){ return x.flowType==='distractor'; }).length;
       var correctN = correctNodes().length;
       var curSc = scenarioById(curId) || {};
       var curVer = curSc.version || 'v1.0';
@@ -1519,14 +1750,14 @@ document.addEventListener('app:ready', function(e){
           ov.querySelector('#cfYes').onclick=function(){
             var vb = ov.querySelector('input[name="vb"]:checked').value || 'minor';
             ov.close();
-            API.saveScriptNodes(curId, nodes, alertText, name, vb).then(function(r){
+            API.saveScriptNodes(curId, nodes, alertText, name, vb, curVer).then(function(r){
               var s = scenarioById(curId);
               if(s) s.name = r.name || name;
               var sel = root.querySelector('#seSel');
               if(sel && sel.options[sel.selectedIndex]) sel.options[sel.selectedIndex].text = curId+' · '+(r.name||name);
               var vbType = r.versionBump || vb;
               var verMsg = vbType === 'none' ? '版本保持 '+r.version : '版本更新为 '+r.version;
-              App.toast('剧本《'+(r.name||name)+'》已保存，'+verMsg+'（共 '+r.count+' 个节点）','ok');
+              App.toast('剧本《'+(r.name||name)+'》已保存，'+verMsg+'（共 '+r.displayNodes+' 个主流节点'+(r.distractors?'，另 '+r.distractors+' 条混淆':'')+'）','ok');
               render();
             }).catch(function(err){
               App.toast((err && err.message) || '剧本保存失败，请稍后重试','err');

@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -371,12 +372,13 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 		}
 
 		var body struct {
-			ScenarioID  string         `json:"scenarioId"`
-			Name        string         `json:"name"`
-			Alert       string         `json:"alert"`
-			Version     string         `json:"version"`
-			VersionBump string         `json:"versionBump"`
-			Nodes       []scriptNodeIn `json:"nodes"`
+			ScenarioID      string         `json:"scenarioId"`
+			Name            string         `json:"name"`
+			Alert           string         `json:"alert"`
+			Version         string         `json:"version"`
+			VersionBump     string         `json:"versionBump"`
+			ExpectedVersion string         `json:"expectedVersion"`
+			Nodes           []scriptNodeIn `json:"nodes"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil || body.Nodes == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "节点数据格式错误"})
@@ -394,6 +396,14 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库查询失败"})
+			return
+		}
+		// 乐观锁：客户端基于旧版本提交时直接拒绝，避免并发覆盖
+		if ev := strings.TrimSpace(body.ExpectedVersion); ev != "" && ev != sc.Version {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":   "剧本已被他人修改（当前版本 " + sc.Version + "），请刷新后重新编辑",
+				"version": sc.Version,
+			})
 			return
 		}
 
@@ -689,9 +699,30 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 		}
 		defer func() { _ = tx.Rollback() }()
 
+		// 行级锁复核版本：两次保存并发时，后到者在此发现版本已变化并放弃写入
+		var lockedVersion string
+		if err := tx.QueryRow(`SELECT COALESCE(version,'') FROM scenarios WHERE id=? FOR UPDATE`, scenarioID).Scan(&lockedVersion); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取剧本版本失败"})
+			return
+		}
+		if lockedVersion != sc.Version {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":   "剧本已被他人修改（当前版本 " + lockedVersion + "），请刷新后重新编辑",
+				"version": lockedVersion,
+			})
+			return
+		}
+
 		// 先读取既有节点关键字段。结构未变化的节点只更新页面确实改动的字段，
 		// 不做物理删除重建，避免覆盖 descr/short_title/keywords/evidence_req/
 		// anchor_id/release_timing 等已改造数据。
+		// 保存前把当前状态写入版本历史：即使本次保存删除了节点，
+		// 也能从上一版快照中找回（P1-3）。
+		if err := saveScriptRevision(tx, scenarioID, sc.Version, sc.Name, u.Name, "save"); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "写入剧本版本历史失败：" + err.Error()})
+			return
+		}
+
 		existing, maxSeq, err := loadScriptNodeRows(tx, scenarioID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取旧节点失败：" + err.Error()})
@@ -1008,6 +1039,8 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 			if evWrite {
 				set("evidence_req", evReqJSON)
 			}
+			// 已软删的节点被重新提交视为恢复，清空删除标记。
+			set("deleted_at", nil)
 
 			args = append(args, id)
 			if _, err := tx.Exec(`UPDATE script_nodes SET `+strings.Join(cols, ",")+` WHERE id=?`, args...); err != nil {
@@ -1016,19 +1049,19 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 			}
 		}
 
-		// 仅删除本场景中确实被移除的节点
+		// 仅软删除本场景中确实被移除的节点：保留行以便版本回滚与处置记录追溯。
 		if len(incomingIDs) > 0 {
 			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(incomingIDs)), ",")
-			delArgs := make([]any, 0, len(incomingIDs)+1)
-			delArgs = append(delArgs, scenarioID)
+			delArgs := make([]any, 0, len(incomingIDs)+2)
+			delArgs = append(delArgs, util.Now(), scenarioID)
 			for _, id := range incomingIDs {
 				delArgs = append(delArgs, id)
 			}
-			if _, err := tx.Exec(`DELETE FROM script_nodes WHERE scenario_id=? AND id NOT IN (`+placeholders+`)`, delArgs...); err != nil {
+			if _, err := tx.Exec(`UPDATE script_nodes SET deleted_at=? WHERE scenario_id=? AND deleted_at IS NULL AND id NOT IN (`+placeholders+`)`, delArgs...); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "清理移除节点失败：" + err.Error()})
 				return
 			}
-		} else if _, err := tx.Exec(`DELETE FROM script_nodes WHERE scenario_id=?`, scenarioID); err != nil {
+		} else if _, err := tx.Exec(`UPDATE script_nodes SET deleted_at=? WHERE scenario_id=? AND deleted_at IS NULL`, util.Now(), scenarioID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "清理旧节点失败：" + err.Error()})
 			return
 		}
@@ -1052,7 +1085,7 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 		updated := util.DateStr()
 
 		if _, err := tx.Exec(`UPDATE scenarios SET name=?, nodes=?, version=?, updated=?, alert=? WHERE id=?`,
-			finalName, len(correctNodes), newVersion, updated, alertText, scenarioID); err != nil {
+			finalName, len(ordered), newVersion, updated, alertText, scenarioID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新场景信息失败：" + err.Error()})
 			return
 		}
@@ -1063,14 +1096,33 @@ func PostScriptNodes(database *db.DB) gin.HandlerFunc {
 		}
 
 		nowSc, _ := queryScenario(database, scenarioID)
+		displayCount, distractorCount := queryScenarioNodeCounts(database, scenarioID)
+		added, removed := 0, 0
+		incomingSet := make(map[string]bool, len(incomingIDs))
+		for _, id := range incomingIDs {
+			incomingSet[id] = true
+			if _, ok := existing[id]; !ok {
+				added++
+			}
+		}
+		for id, row := range existing {
+			if !incomingSet[id] && !row.deleted.Valid {
+				removed++
+			}
+		}
+		writeAudit(database, auth.CurrentUser(c), c, fmt.Sprintf(
+			"剧本保存：%s %s→%s，节点 %d（新增 %d / 删除 %d）",
+			scenarioID, sc.Version, nowSc.Version, len(ordered), added, removed))
 		c.JSON(200, gin.H{
-			"ok":         true,
-			"count":      len(correctNodes),
-			"scenarioId": scenarioID,
-			"version":    nowSc.Version,
-			"updated":    nowSc.Updated,
-			"alert":      nowSc.Alert,
-			"name":       nowSc.Name,
+			"ok":           true,
+			"count":        len(ordered),
+			"displayNodes": displayCount,
+			"distractors":  distractorCount,
+			"scenarioId":   scenarioID,
+			"version":      nowSc.Version,
+			"updated":      nowSc.Updated,
+			"alert":        nowSc.Alert,
+			"name":         nowSc.Name,
 		})
 	}
 }
@@ -1083,12 +1135,15 @@ type scriptNodeRow struct {
 	wrong       sql.NullString
 	flowType    sql.NullString
 	seq         sql.NullInt64
+	deleted     sql.NullString
 }
 
 // loadScriptNodeRows 读取场景下现有节点的关键字段，并返回当前最大 seq。
+// 含已软删行：旧页面带着已删节点 ID 重新保存时走更新分支并清空 deleted_at，
+// 等价于「重新提交即恢复」，避免主键冲突；审计里的删除计数会跳过这些行。
 func loadScriptNodeRows(tx *sql.Tx, scenarioID string) (map[string]*scriptNodeRow, int64, error) {
 	rows, err := tx.Query(
-		`SELECT id,seq,deps,receiver,evidence_req,wrong,flow_type FROM script_nodes WHERE scenario_id=?`, scenarioID)
+		`SELECT id,seq,deps,receiver,evidence_req,wrong,flow_type,deleted_at FROM script_nodes WHERE scenario_id=?`, scenarioID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1099,10 +1154,13 @@ func loadScriptNodeRows(tx *sql.Tx, scenarioID string) (map[string]*scriptNodeRo
 	for rows.Next() {
 		var id string
 		row := &scriptNodeRow{}
-		if err := rows.Scan(&id, &row.seq, &row.deps, &row.receiver, &row.evidenceReq, &row.wrong, &row.flowType); err != nil {
+		if err := rows.Scan(&id, &row.seq, &row.deps, &row.receiver, &row.evidenceReq, &row.wrong, &row.flowType, &row.deleted); err != nil {
 			return nil, 0, err
 		}
 		out[id] = row
+		if row.deleted.Valid {
+			continue
+		}
 		if row.seq.Valid && row.seq.Int64 > maxSeq {
 			maxSeq = row.seq.Int64
 		}
@@ -1136,6 +1194,301 @@ func sameStringSet(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// ========================================================================
+// P1-3 剧本版本历史：保存前快照、查看、回滚
+// ========================================================================
+
+// scriptRevisionNodeColumns 允许从版本快照写回 script_nodes 的列白名单。
+var scriptRevisionNodeColumns = []string{
+	"id", "scenario_id", "type", "title", "short_title", "target", "time", "timeout",
+	"form", "att", "descr", "branches", "seq", "guide", "keywords", "quality_rules",
+	"action", "wrong", "evidence_req", "required", "flow_type", "score", "receiver",
+	"deps", "pos_x", "pos_y", "anchor_id", "release_timing", "parallel_desc",
+}
+
+// snapshotScenarioNodes 读取场景当前有效节点的原始行并序列化为 JSON 快照。
+// 已软删的节点不属于任何版本的「生效剧本」，快照与回滚都只处理 deleted_at IS NULL 的行；
+// 版本回滚按快照重建生效节点表，回收站不参与快照。
+func snapshotScenarioNodes(tx *sql.Tx, scenarioID string) (string, int, error) {
+	rows, err := tx.Query(`SELECT * FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL ORDER BY seq`, scenarioID)
+	if err != nil {
+		return "", 0, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return "", 0, err
+	}
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return "", 0, err
+		}
+		item := make(map[string]any, len(cols))
+		for i, c := range cols {
+			if b, ok := vals[i].([]byte); ok {
+				item[c] = string(b)
+			} else {
+				item[c] = vals[i]
+			}
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return "", 0, err
+	}
+	b, err := json.Marshal(out)
+	return string(b), len(out), err
+}
+
+// saveScriptRevision 把「保存前」的节点状态写入版本历史；无节点时跳过。
+// 同一场景同一版本只保留最早的一份快照（INSERT IGNORE）。
+func saveScriptRevision(tx *sql.Tx, scenarioID, version, name, operator, source string) error {
+	payload, cnt, err := snapshotScenarioNodes(tx, scenarioID)
+	if err != nil {
+		return err
+	}
+	if cnt == 0 {
+		return nil
+	}
+	if strings.TrimSpace(source) == "" {
+		source = "save"
+	}
+	_, err = tx.Exec(
+		`INSERT IGNORE INTO script_revisions (scenario_id,version,name,node_count,nodes_payload,source,created_by,created_at)
+		 VALUES (?,?,?,?,?,?,?,?)`,
+		scenarioID, version, name, cnt, payload, source, operator, util.Now())
+	return err
+}
+
+// GetDeletedScriptNodes GET /api/content/scenarios/:id/nodes/deleted —— 回收站列表
+func GetDeletedScriptNodes(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scenarioID := strings.TrimSpace(c.Param("id"))
+		rows, err := database.Query(
+			`SELECT id,COALESCE(type,''),COALESCE(title,''),COALESCE(target,''),COALESCE(deleted_at,'')
+			   FROM script_nodes WHERE scenario_id=? AND deleted_at IS NOT NULL
+			  ORDER BY deleted_at DESC, seq`, scenarioID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取回收站失败"})
+			return
+		}
+		defer rows.Close()
+		out := []gin.H{}
+		for rows.Next() {
+			var id, typ, title, target, deletedAt string
+			if rows.Scan(&id, &typ, &title, &target, &deletedAt) == nil {
+				out = append(out, gin.H{"id": id, "type": typ, "title": title, "target": target, "deletedAt": deletedAt})
+			}
+		}
+		c.JSON(http.StatusOK, out)
+	}
+}
+
+// PostScriptNodeRestore POST /api/content/scenarios/:id/nodes/:nodeId/restore
+// 恢复软删节点（前端需二次确认）。
+func PostScriptNodeRestore(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.ID != "platformadmin" && u.Role.ID != "commander" && u.Role.ID != "itlead" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "无剧本编排权限"})
+			return
+		}
+		scenarioID := strings.TrimSpace(c.Param("id"))
+		nodeID := strings.TrimSpace(c.Param("nodeId"))
+		if nodeID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "节点 ID 不能为空"})
+			return
+		}
+		res, err := database.Exec(
+			`UPDATE script_nodes SET deleted_at=NULL WHERE id=? AND scenario_id=? AND deleted_at IS NOT NULL`,
+			nodeID, scenarioID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "恢复节点失败"})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "节点不存在或未被删除"})
+			return
+		}
+		writeAudit(database, u, c, "恢复软删节点："+scenarioID+"/"+nodeID)
+		c.JSON(http.StatusOK, gin.H{"ok": true, "scenarioId": scenarioID, "nodeId": nodeID})
+	}
+}
+
+// GetScriptRevisions GET /api/content/scenarios/:id/revisions —— 版本历史列表
+func GetScriptRevisions(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scenarioID := strings.TrimSpace(c.Param("id"))
+		rows, err := database.Query(
+			`SELECT version,COALESCE(name,''),COALESCE(node_count,0),COALESCE(source,''),COALESCE(created_by,''),COALESCE(created_at,'')
+			   FROM script_revisions WHERE scenario_id=? ORDER BY id DESC LIMIT 50`, scenarioID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取版本历史失败"})
+			return
+		}
+		defer rows.Close()
+		out := []gin.H{}
+		for rows.Next() {
+			var version, name, source, by, at string
+			var cnt int
+			if rows.Scan(&version, &name, &cnt, &source, &by, &at) == nil {
+				out = append(out, gin.H{
+					"scenarioId": scenarioID, "version": version, "name": name,
+					"nodeCount": cnt, "source": source, "createdBy": by, "createdAt": at,
+				})
+			}
+		}
+		c.JSON(http.StatusOK, out)
+	}
+}
+
+// GetScriptRevision GET /api/content/scenarios/:id/revisions/:version —— 版本快照明细
+func GetScriptRevision(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scenarioID := strings.TrimSpace(c.Param("id"))
+		version := strings.TrimSpace(c.Param("version"))
+		var name, payload, source, by, at string
+		var cnt int
+		err := database.QueryRow(
+			`SELECT COALESCE(name,''),COALESCE(node_count,0),COALESCE(nodes_payload,'[]'),COALESCE(source,''),COALESCE(created_by,''),COALESCE(created_at,'')
+			   FROM script_revisions WHERE scenario_id=? AND version=?`, scenarioID, version,
+		).Scan(&name, &cnt, &payload, &source, &by, &at)
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "版本快照不存在"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取版本快照失败"})
+			return
+		}
+		var nodes []map[string]any
+		if err := json.Unmarshal([]byte(payload), &nodes); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "版本快照解析失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"scenarioId": scenarioID, "version": version, "name": name, "nodeCount": cnt,
+			"source": source, "createdBy": by, "createdAt": at, "nodes": nodes,
+		})
+	}
+}
+
+// PostScriptRevisionRestore POST /api/content/scenarios/:id/revisions/:version/restore
+// 用历史快照覆盖当前节点，并把覆盖前的状态再写一份版本历史；版本号 minor 自增。
+func PostScriptRevisionRestore(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := auth.CurrentUser(c)
+		if u == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.ID != "platformadmin" && u.Role.ID != "commander" && u.Role.ID != "itlead" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "无剧本编排权限"})
+			return
+		}
+		scenarioID := strings.TrimSpace(c.Param("id"))
+		version := strings.TrimSpace(c.Param("version"))
+
+		var payload string
+		if err := database.QueryRow(
+			`SELECT COALESCE(nodes_payload,'[]') FROM script_revisions WHERE scenario_id=? AND version=?`,
+			scenarioID, version).Scan(&payload); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "版本快照不存在"})
+			return
+		}
+		var nodes []map[string]any
+		if err := json.Unmarshal([]byte(payload), &nodes); err != nil || len(nodes) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "版本快照为空或已损坏，无法回滚"})
+			return
+		}
+		sc, err := queryScenario(database, scenarioID)
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "场景剧本不存在"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库查询失败"})
+			return
+		}
+
+		tx, err := database.Begin()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "开启事务失败"})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		var lockedVersion string
+		if err := tx.QueryRow(`SELECT COALESCE(version,'') FROM scenarios WHERE id=? FOR UPDATE`, scenarioID).Scan(&lockedVersion); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取剧本版本失败"})
+			return
+		}
+		if lockedVersion != sc.Version {
+			c.JSON(http.StatusConflict, gin.H{"error": "剧本已被他人修改（当前版本 " + lockedVersion + "），请刷新后重试", "version": lockedVersion})
+			return
+		}
+		// 回滚前状态单独记一个 -pre 版本：同版本快照已存在时不会被覆盖，
+		// 否则会毁掉正在用于回滚的那份快照。
+		if err := saveScriptRevision(tx, scenarioID, sc.Version+"-pre", sc.Name, u.Name, "restore"); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "写入版本历史失败：" + err.Error()})
+			return
+		}
+		if _, err := tx.Exec(`DELETE FROM script_nodes WHERE scenario_id=?`, scenarioID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "清理当前节点失败：" + err.Error()})
+			return
+		}
+		written := 0
+		for _, n := range nodes {
+			names := make([]string, 0, len(scriptRevisionNodeColumns))
+			vals := make([]any, 0, len(scriptRevisionNodeColumns))
+			for _, col := range scriptRevisionNodeColumns {
+				if col == "scenario_id" {
+					names = append(names, col)
+					vals = append(vals, scenarioID)
+					continue
+				}
+				v, ok := n[col]
+				if !ok {
+					continue
+				}
+				names = append(names, col)
+				vals = append(vals, v)
+			}
+			if len(names) == 0 {
+				continue
+			}
+			ph := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
+			if _, err := tx.Exec(`INSERT INTO script_nodes (`+strings.Join(names, ",")+`) VALUES (`+ph+`)`, vals...); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "回滚节点写入失败：" + err.Error()})
+				return
+			}
+			written++
+		}
+		newVersion := resolveVersion("", "minor", sc.Version)
+		if _, err := tx.Exec(`UPDATE scenarios SET nodes=?,version=?,updated=? WHERE id=?`,
+			written, newVersion, util.DateStr(), scenarioID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新场景版本失败：" + err.Error()})
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "回滚提交失败"})
+			return
+		}
+		writeAudit(database, u, c, fmt.Sprintf("剧本回滚：%s 恢复自 %s，当前版本 %s，节点 %d", scenarioID, version, newVersion, written))
+		c.JSON(http.StatusOK, gin.H{"ok": true, "scenarioId": scenarioID, "restoredFrom": version, "version": newVersion, "count": written})
+	}
 }
 
 // --- 辅助 ---
