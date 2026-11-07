@@ -89,7 +89,18 @@
 | SWR | `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:0.8.3` / `:latest` |
 | 迁移 | `migrations/` 共 47 个 `.up.sql`，末位 `0090_distractor_rewrite_v2` |
 
-镜像 manifest digest 与构建提交见发布回填记录。
+镜像 manifest digest（GHCR 与 SWR 一致）
+
+```
+sha256:bca10d62deb5776cf4398859426738161b67f13c109a2b67171024bd5a1a6aaf
+```
+
+镜像内 `/opt/drill/bin/drill-server`：12,062,880 B，静态链接（`CGO_ENABLED=0`，Alpine/musl
+可直接运行），SHA-256
+`b1248ede960609736b48122947defb4e6ed0c79628d04761f6003fc2d9deaaca`。
+`server/deploy-linux/drill-server.sha256.txt` 已按该实测值重签；镜像内 `public/` 6 个核心文件
+SHA-256 与现网 bind mount 实测一致，静态资源 644、目录与二进制 755，运行用户 `uid 10001(drill)`。
+镜像内 `migrations/` 共 47 个 `.up.sql`，末位 `0090_distractor_rewrite_v2`。
 
 **可复现构建**（在 Linux / VM 侧编译，避免 Windows 终端安全软件拦截 Go 编译产物）
 
@@ -108,8 +119,6 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 | 现网 `/api/health` | 200，`version=0.8.3` |
 | 现网 `schema_migrations` | 47 行，末位 `0090_distractor_rewrite_v2` |
 | 现网前端 | `public/` 6 个核心文件 SHA-256 与仓库一致 |
-| 匿名大屏 | 只读接口正常，写接口 403 |
-| 镜像内容 | 含全部 47 个迁移与仓库一致的 `public/`，静态资源 644 / 目录与二进制 755 |
-| 两个镜像仓库 | `0.8.3` 与 `latest` 可拉，digest 一致（回填） |
-| 登录与角色 | 既有账号正常登录，角色职责面板正常 |
-| 导出 | Word / HTML / PDF 导出成功并写审计 |
+| 镜像内容 | 含全部 47 个迁移与现网一致的 `public/`，静态资源 644 / 目录与二进制 755 |
+| 两个镜像仓库 | `0.8.3` 与 `latest` 均已推送，匿名可拉，digest 一致 `sha256:bca10d62…` |
+| 隔离冒烟 | 临时 MySQL + 应用容器（端口 18093），`/api/health` 返回 `0.8.3`，新建库迁移 47 条、末位 `0090`，验后容器与网络已清理 |
