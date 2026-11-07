@@ -599,9 +599,17 @@ func joinFieldDisplays(fields []formRequiredField) string {
 
 // submissionQuality 一次处置提交的文本证据（实战版结算用；基础版无提交文本，HasSubmission=false）
 type submissionQuality struct {
-	Late          bool
-	RecvBad       bool
+	Late    bool
+	RecvBad bool
+	// RecvRatio 接收人扣分比例：主送缺失 0.30 / 仅抄送缺失 0.10 / 不扣 0。
+	// >0 时优先使用，RecvBad 仅作为兜底与状态标签。
+	RecvRatio float64
+	// RecvNote 接收人扣分文案（主送缺失 / 抄送缺失），为空时回退默认文案。
+	RecvNote      string
 	HasSubmission bool
+	// EvidenceArchived / EvidenceReqCount 证据表已归档数与本节点取证要求数（P0-04 主口径）
+	EvidenceArchived int
+	EvidenceReqCount int
 	// Text 仅处置文本：处置措施、处置结果、发现情况、证据说明。
 	// 表单填写值不参与关键词/证据匹配，避免「把关键词塞进表单」白拿分。
 	Text string
@@ -724,6 +732,24 @@ func evidenceRequirementHit(req string, text string) bool {
 		}
 	}
 	return false
+}
+
+// evidenceTextHitCount 返回处置文本中命中的材料名称数量（归一化后比对，单字忽略）。
+func evidenceTextHitCount(req string, text string) int {
+	norm := normalizeMatchText(text)
+	hits := 0
+	seen := map[string]bool{}
+	for _, token := range evidenceReqTokens(req) {
+		key := normalizeMatchText(token)
+		if len([]rune(key)) < 2 || seen[key] {
+			continue
+		}
+		seen[key] = true
+		if strings.Contains(norm, key) {
+			hits++
+		}
+	}
+	return hits
 }
 
 // ========== 文字质量判定 ==========
@@ -868,10 +894,24 @@ func ratioText(p float64) string {
 	return fmt.Sprintf("%.0f%%", p*100)
 }
 
+// bonusMatchText 加分词的匹配文本：只取处置叙述（措施 / 结果 / 发现），不含证据说明。
+// 证据说明只用于 evidence_req 命中判定，避免「证据里写回执」把缺失的必含项抵扣掉。
+func bonusMatchText(q submissionQuality) string {
+	if s := strings.TrimSpace(q.Measure + q.Result + q.Found); s != "" {
+		return strings.Join([]string{q.Measure, q.Result, q.Found}, "\n")
+	}
+	text := q.Text
+	if ev := strings.TrimSpace(q.EvidenceText); ev != "" {
+		text = strings.Replace(text, ev, "", 1)
+	}
+	return text
+}
+
 // keywordDeductionPart 关键词扣分项：
-//   - 配置了必含关键词：缺一项按比例扣，加分词每命中 1 个抵扣 1 项；
+//   - 配置了必含关键词：缺一项按比例扣，加分词每命中 1 个抵扣 1 项，但最多抵扣到
+//     仍保留 1 项缺失（缺失扣分不得被加分归零）；
 //   - 未配置（老节点）：保持旧口径 keywords + 命中≥2，未达标扣满分值比例。
-func keywordDeductionPart(nodeScore int, q submissionQuality, rules QualityRules, text string) *scoreDeductPart {
+func keywordDeductionPart(nodeScore int, q submissionQuality, rules QualityRules, text, bonusText string) *scoreDeductPart {
 	required := rules.RequiredKeywords
 	if len(required) == 0 {
 		legacy := splitReqTokens(strings.Join(q.Keywords, "、"))
@@ -905,7 +945,14 @@ func keywordDeductionPart(nodeScore int, q submissionQuality, rules QualityRules
 	if len(missing) == 0 {
 		return nil
 	}
-	bonusHits := bonusHitCount(rules.BonusKeywords, text)
+	bonusHits := bonusHitCount(rules.BonusKeywords, bonusText)
+	// 加分抵扣上限：最多抵扣到仍保留 1 项缺失，缺失必含项的扣分不得被加分归零。
+	if bonusHits > len(missing)-1 {
+		bonusHits = len(missing) - 1
+	}
+	if bonusHits < 0 {
+		bonusHits = 0
+	}
 	effective := len(missing) - bonusHits
 	if effective <= 0 {
 		return nil
@@ -937,17 +984,30 @@ func correctNodeDeduction(nodeScore int, q submissionQuality) (float64, []scoreD
 	if q.Late {
 		parts = append(parts, scoreDeductPart{Type: "超时完成（扣本节点20%）", Point: ratioDeduct(nodeScore, TimeoutPenaltyRatio)})
 	}
-	if q.RecvBad {
-		parts = append(parts, scoreDeductPart{Type: "接收人选择错误（扣本节点30%）", Point: ratioDeduct(nodeScore, ReceiverErrPenaltyRatio)})
+	if q.RecvBad || q.RecvRatio > 0 {
+		ratio := q.RecvRatio
+		if ratio <= 0 {
+			ratio = ReceiverErrPenaltyRatio
+		}
+		reason := q.RecvNote
+		if strings.TrimSpace(reason) == "" {
+			reason = "接收人选择错误"
+		}
+		parts = append(parts, scoreDeductPart{
+			Type:  reason + "（扣本节点" + ratioText(ratio) + "）",
+			Point: ratioDeduct(nodeScore, ratio),
+		})
 	}
 	if q.HasSubmission {
 		quality := evaluateTextQuality(q, rules)
 		keywordText := q.Text
+		bonusText := bonusMatchText(q)
 		if quality.Filler {
-			// 敷衍短文本按未填写处理：关键词视为 0 命中
+			// 敷衍短文本按未填写处理：关键词与加分词均视为 0 命中
 			keywordText = ""
+			bonusText = ""
 		}
-		if p := keywordDeductionPart(nodeScore, q, rules, keywordText); p != nil {
+		if p := keywordDeductionPart(nodeScore, q, rules, keywordText, bonusText); p != nil {
 			parts = append(parts, *p)
 		}
 		if quality.Invalid && rules.TextQualityRatio > 0 {
@@ -956,18 +1016,30 @@ func correctNodeDeduction(nodeScore int, q submissionQuality) (float64, []scoreD
 				Point: ratioDeduct(nodeScore, rules.TextQualityRatio),
 			})
 		}
-		// evidence_req 为空或 "[]" 视为本节点无取证要求，不参与扣分
-		if len(evidenceReqTokens(q.EvidenceReq)) > 0 {
-			missingEvidence := strings.TrimSpace(q.EvidenceText) == ""
-			if !missingEvidence && !evidenceRequirementHit(q.EvidenceReq, q.Text) {
-				missingEvidence = true
+	}
+	// 证据材料：以 evidence 表已归档为主口径，文本命中降为辅助（最多抵 50%）。
+	// 不依赖 HasSubmission —— 基础版没有处置文本，也要按归档情况评分。
+	if q.EvidenceReqCount > 0 {
+		archivedRate := float64(q.EvidenceArchived) / float64(q.EvidenceReqCount)
+		if archivedRate > 1 {
+			archivedRate = 1
+		}
+		textCredit := 0.0
+		if q.HasSubmission && strings.TrimSpace(q.EvidenceText) != "" {
+			if hits := evidenceTextHitCount(q.EvidenceReq, q.Text); hits > 0 {
+				textCredit = 0.5 * float64(hits) / float64(q.EvidenceReqCount)
+				if textCredit > 0.5 {
+					textCredit = 0.5
+				}
 			}
-			if missingEvidence {
-				parts = append(parts, scoreDeductPart{
-					Type:  "证据材料未提交或未命中要求（扣本节点20%）",
-					Point: ratioDeduct(nodeScore, EvidencePenaltyRatio),
-				})
-			}
+		}
+		credit := math.Max(archivedRate, textCredit)
+		if credit < 1 {
+			parts = append(parts, scoreDeductPart{
+				Type: "证据材料未提交或未归档（已归档 " + strconv.Itoa(q.EvidenceArchived) + "/" +
+					strconv.Itoa(q.EvidenceReqCount) + "，扣本节点" + ratioText(EvidencePenaltyRatio*(1-credit)) + "）",
+				Point: ratioDeduct(nodeScore, EvidencePenaltyRatio*(1-credit)),
+			})
 		}
 	}
 	parts = capNodeParts(parts, nodeScore)

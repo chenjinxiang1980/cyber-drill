@@ -39,6 +39,7 @@ type drillV1Node struct {
 	FlowType      string // "correct" / "distractor"
 	Score         int
 	Receiver      string
+	ReceiverCC    string
 	Deps          []string
 	AnchorID      string
 	ReleaseTiming string
@@ -58,14 +59,17 @@ type drillV1Project struct {
 	StartedAt  string
 	Date       string
 	Name       string
+	PausedSec  int
+	PausedAt   string
 }
 
 // drillV1ProjectOf 等价 projectOf(pid)
 func drillV1ProjectOf(database *db.DB, pid string) *drillV1Project {
 	var p drillV1Project
 	err := database.QueryRow(
-		`SELECT id,COALESCE(scenario_id,''),COALESCE(mode,'基础版'),COALESCE(status,''),COALESCE(started_at,''),COALESCE(date,''),COALESCE(name,'') FROM projects WHERE id=?`, pid,
-	).Scan(&p.ID, &p.ScenarioID, &p.Mode, &p.Status, &p.StartedAt, &p.Date, &p.Name)
+		`SELECT id,COALESCE(scenario_id,''),COALESCE(mode,'基础版'),COALESCE(status,''),COALESCE(started_at,''),COALESCE(date,''),COALESCE(name,''),
+			COALESCE(paused_sec,0),COALESCE(paused_at,'') FROM projects WHERE id=?`, pid,
+	).Scan(&p.ID, &p.ScenarioID, &p.Mode, &p.Status, &p.StartedAt, &p.Date, &p.Name, &p.PausedSec, &p.PausedAt)
 	if err != nil {
 		return nil
 	}
@@ -76,10 +80,10 @@ func drillV1ProjectOf(database *db.DB, pid string) *drillV1Project {
 func drillV1NodesOf(database *db.DB, scenarioID string) []drillV1Node {
 	rows, err := database.Query(
 		`SELECT id,type,title,COALESCE(target,''),COALESCE(timeout,0),COALESCE(form,''),
-			COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(receiver,''),COALESCE(deps,'[]'),
+			COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(receiver,''),COALESCE(receiver_cc,''),COALESCE(deps,'[]'),
 			COALESCE(anchor_id,''),COALESCE(release_timing,'before'),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),
 			COALESCE(keywords,''),COALESCE(evidence_req,''),COALESCE(quality_rules,''),COALESCE(required,1)
-		 FROM script_nodes WHERE scenario_id=? ORDER BY seq`, scenarioID)
+		 FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL ORDER BY seq`, scenarioID)
 	if err != nil {
 		return nil
 	}
@@ -91,7 +95,7 @@ func drillV1NodesOf(database *db.DB, scenarioID string) []drillV1Node {
 		var depsStr, keywords string
 		var required int
 		if err := rows.Scan(&n.ID, &n.Type, &n.Title, &n.Target, &n.Timeout, &n.Form,
-			&n.FlowType, &n.Score, &n.Receiver, &depsStr, &n.AnchorID, &n.ReleaseTiming,
+			&n.FlowType, &n.Score, &n.Receiver, &n.ReceiverCC, &depsStr, &n.AnchorID, &n.ReleaseTiming,
 			&n.Action, &n.Desc, &keywords, &n.EvidenceReq, &n.QualityRules, &required); err != nil {
 			continue
 		}
@@ -114,7 +118,19 @@ func drillV1NodesOf(database *db.DB, scenarioID string) []drillV1Node {
 	return out
 }
 
-// drillV1NodeLock 等价 nodeLock(node, byId, doneSet)
+// projectForTiming / scriptNodeForTiming 把 v1 结构适配到评分引擎的计时结构（P0-10）。
+func projectForTiming(p *drillV1Project) *ProjectForScore {
+	return &ProjectForScore{
+		ID: p.ID, ScenarioID: p.ScenarioID, Mode: p.Mode, Status: p.Status,
+		StartedAt: p.StartedAt, Date: p.Date, PausedSec: p.PausedSec, PausedAt: p.PausedAt,
+	}
+}
+
+func scriptNodeForTiming(n *drillV1Node) ScriptNodeForScore {
+	return ScriptNodeForScore{ID: n.ID, Timeout: n.Timeout, Deps: n.Deps}
+}
+
+// drillV1NodeLockResult 等价 nodeLock(node, byId, doneSet)
 type drillV1NodeLockResult struct {
 	Locked    bool    `json:"locked"`
 	BlockedBy []gin.H `json:"blockedBy"`
@@ -160,40 +176,64 @@ func canHandleRole(database *db.DB, roleID, target string) bool {
 	return mapped == roleID
 }
 
-// evSummaryResult 等价 evidenceSummary(project) 的返回值
+// evSummaryResult 等价 evidenceSummary(project) 的返回值（含 core / support 分级）
 type evSummaryResult struct {
-	Total        int             `json:"total"`
-	Done         int             `json:"done"`
-	Pending      int             `json:"pending"`
-	PendingItems []evSummaryItem `json:"pendingItems"`
+	Total          int             `json:"total"`
+	Done           int             `json:"done"`
+	Pending        int             `json:"pending"`
+	Core           int             `json:"core"`
+	CoreDone       int             `json:"coreDone"`
+	CorePending    int             `json:"corePending"`
+	CoreRate       float64         `json:"coreRate"`
+	Support        int             `json:"support"`
+	SupportDone    int             `json:"supportDone"`
+	SupportPending int             `json:"supportPending"`
+	PendingItems   []evSummaryItem `json:"pendingItems"`
 }
 
 type evSummaryItem struct {
-	Key       string `json:"key"`
-	NodeID    string `json:"nodeId"`
-	NodeTitle string `json:"nodeTitle"`
-	Target    string `json:"target"`
-	Type      string `json:"type"`
-	Name      string `json:"name"`
+	Key               string `json:"key"`
+	NodeID            string `json:"nodeId"`
+	NodeTitle         string `json:"nodeTitle"`
+	Target            string `json:"target"`
+	Type              string `json:"type"`
+	Name              string `json:"name"`
+	Core              bool   `json:"core"`
+	SuggestedDeadline string `json:"suggestedDeadline"`
 }
 
-// loadEvidenceSummary 复刻 drill.js evidenceSummary(project)
+// loadEvidenceSummary 复刻 drill.js evidenceSummary(project)，并按项目 core 清单标注分级。
 func loadEvidenceSummary(database *db.DB, p *drillV1Project) evSummaryResult {
 	archived := make(map[string]bool)
-	rows, _ := database.Query(`SELECT COALESCE(req_key,'') FROM evidence WHERE project_id=? AND req_key IS NOT NULL AND req_key!=''`, p.ID)
-	defer rows.Close()
-	for rows.Next() {
-		var k string
-		rows.Scan(&k)
-		if strings.TrimSpace(k) != "" {
-			archived[k] = true
+	rows, err := database.Query(`SELECT COALESCE(req_key,'') FROM evidence WHERE project_id=? AND req_key IS NOT NULL AND req_key!=''`, p.ID)
+	if err == nil && rows != nil {
+		for rows.Next() {
+			var k string
+			rows.Scan(&k)
+			if strings.TrimSpace(k) != "" {
+				archived[k] = true
+			}
 		}
+		rows.Close()
 	}
 
+	coreSet := make(map[string]bool)
+	for _, it := range loadCoreEvidence(database, p.ID, p.ScenarioID) {
+		coreSet[it.Key] = true
+	}
+	hours := settingIntValue(database, "drill_supplement_hours", 72)
+	if hours <= 0 {
+		hours = 72
+	}
+	suggestedDeadline := time.Now().Add(time.Duration(hours) * time.Hour).Format("2006-01-02 15:04")
+
 	var summary evSummaryResult
-	nodeRows, _ := database.Query(
+	nodeRows, err := database.Query(
 		`SELECT id,title,COALESCE(target,''),COALESCE(evidence_req,'[]'),COALESCE(flow_type,'correct')
-		 FROM script_nodes WHERE scenario_id=? AND type!='end' ORDER BY seq`, p.ScenarioID)
+		 FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL AND type!='end' ORDER BY seq`, p.ScenarioID)
+	if err != nil || nodeRows == nil {
+		return summary
+	}
 	defer nodeRows.Close()
 	for nodeRows.Next() {
 		var nid, ntitle, ntarget, nft, evReqStr string
@@ -206,7 +246,18 @@ func loadEvidenceSummary(database *db.DB, p *drillV1Project) evSummaryResult {
 		for i, it := range evList {
 			summary.Total++
 			key := fmt.Sprintf("%s#%d", nid, i)
+			isCore := coreSet[key]
+			if isCore {
+				summary.Core++
+			} else {
+				summary.Support++
+			}
 			if archived[key] {
+				if isCore {
+					summary.CoreDone++
+				} else {
+					summary.SupportDone++
+				}
 				continue
 			}
 			summary.Pending++
@@ -219,10 +270,14 @@ func loadEvidenceSummary(database *db.DB, p *drillV1Project) evSummaryResult {
 			}
 			summary.PendingItems = append(summary.PendingItems, evSummaryItem{
 				Key: key, NodeID: nid, NodeTitle: ntitle, Target: ntarget, Type: itype, Name: iname,
+				Core: isCore, SuggestedDeadline: suggestedDeadline,
 			})
 		}
 	}
 	summary.Done = summary.Total - summary.Pending
+	summary.CorePending = summary.Core - summary.CoreDone
+	summary.SupportPending = summary.Support - summary.SupportDone
+	summary.CoreRate = pctRate(summary.CoreDone, summary.Core)
 	return summary
 }
 
@@ -325,7 +380,8 @@ func PostDrillSkip(database *db.DB) gin.HandlerFunc {
 		var res sql.Result
 		res, err = database.Exec(
 			`INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,choice,correct,found_at,measure,result,forms,flow_type,score,receiver,receiver_ok,skipped,skip_reason,created_at)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			 ON DUPLICATE KEY UPDATE id=id`,
 			p.ID, p.ScenarioID, u.Role.ID, u.Name, node.Action, node.Title,
 			"参演人员判定该流程不执行（跳过）", stepTime, node.ID, 1, 0, node.Title,
 			func() int {
@@ -341,7 +397,10 @@ func PostDrillSkip(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "写入处置记录失败：" + err.Error()})
 			return
 		}
-		_ = res
+		if n, _ := res.RowsAffected(); n == 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": "该流程已有处置记录，不可重复跳过", "nodeId": node.ID})
+			return
+		}
 
 		_, _ = database.Exec(
 			`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
@@ -466,6 +525,11 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "表单必填项缺失：" + joinFieldDisplays(missing)})
 			return
 		}
+		// F19 报案必要性评估单：跨字段一致性硬校验
+		if msg := validateReportAssessment(node.Form, util.ParseJSONObj(formsJSON)); msg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
 
 		// 提交硬门槛：只拦「不写就说明没做这件事」（未填措施 / 有效字数过低 / 敷衍短文本）。
 		// 节点配置的最少字数与必备要素转为扣分项（correctNodeDeduction 内的 evaluateTextQuality），
@@ -494,31 +558,51 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		receiver := strings.Join(recv, "、")
+		recvRatio := receiverDeductRatio(wantRecv, parseReceivers(node.ReceiverCC), recv, node.Target)
 		receiverOk := 1
-		if len(wantRecv) > 0 && !sameReceivers(wantRecv, recv) {
+		if recvRatio > 0 {
 			receiverOk = 0
+		}
+		recvNote := ""
+		if recvRatio >= ReceiverErrPenaltyRatio {
+			recvNote = "接收人选择错误（主送未命中）"
+		} else if recvRatio > 0 {
+			recvNote = "接收人抄送缺失"
 		}
 
 		stepTime := hhmm()
 		now := nowSec()
 		nowS := timeNowSec()
+		// P0-10：按前驱完成/任务下发 + 超时，扣除暂停时长；缺时间戳回退旧口径
 		ontime := !isLateV1(p, node)
+		if late, ok := nodeLateAdvanced(projectForTiming(p), scriptNodeForTiming(node), nowS, nil, database); ok {
+			ontime = !late
+		}
 
-		// delta（与 Score() 同一口径：超时 20% / 接收人 30% / 关键词分级扣分 / 文字质量 20% / 证据未提交或未命中 20%）
+		// delta（与 Score() 同一口径：超时 20% / 接收人 30%（抄送缺失 10%）/ 关键词分级扣分 / 文字质量 20% / 证据按归档率扣分）
 		var delta float64
 		var parts []scoreDeductPart
 		if !isCorrect {
 			delta = -float64(node.Score)
 		} else {
+			reqKeys := evidenceReqKeys(node.ID, node.EvidenceReq)
+			archivedKeys := loadArchivedEvidenceKeys(database, p.ID)
+			archivedCnt := 0
+			for _, k := range reqKeys {
+				if archivedKeys[k] {
+					archivedCnt++
+				}
+			}
 			q := submissionQuality{
-				Late: !ontime, RecvBad: receiverOk == 0, HasSubmission: true,
+				Late: !ontime, RecvBad: receiverOk == 0, RecvRatio: recvRatio, RecvNote: recvNote, HasSubmission: true,
 				// 关键词/证据只匹配处置文本，表单填写值不参与（避免塞关键词刷分）
 				Text:         strings.Join([]string{measure, result, found, evidence}, "\n"),
 				Measure:      measure,
 				Result:       result,
 				Found:        found,
 				EvidenceText: evidence, Keywords: node.Keywords, EvidenceReq: node.EvidenceReq,
-				Rules: rules,
+				Rules:            rules,
+				EvidenceReqCount: len(reqKeys), EvidenceArchived: archivedCnt,
 			}
 			deduct, ps := correctNodeDeduction(node.Score, q)
 			parts = ps
@@ -536,7 +620,8 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 
 		res, err := database.Exec(
 			`INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,choice,correct,found_at,found,measure,result,evidence,forms,flow_type,score,receiver,receiver_ok,created_at)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			 ON DUPLICATE KEY UPDATE id=id`,
 			p.ID, p.ScenarioID, u.Role.ID, u.Name, node.Action, node.Title, descr, stepTime,
 			node.ID, 1, ontime, node.Title, func() int {
 				if isCorrect {
@@ -548,6 +633,11 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "写入处置记录失败：" + err.Error()})
+			return
+		}
+		// uk_ds_proj_node 唯一索引兜底：并发/重复点击时第二次插入影响 0 行。
+		if n, _ := res.RowsAffected(); n == 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": "该节点已提交，请刷新后查看", "nodeId": node.ID})
 			return
 		}
 		id, _ := res.LastInsertId()
@@ -653,7 +743,11 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 // POST /api/drill/finish — 结束演练（Node drill.js:741）
 // ========================================================================
 
-// PostDrillFinish 归档 evidence → UPDATE projects status → timeline → score → notify
+// PostDrillFinish 结束演练：核对清单 → 缺项说明 → 状态 → 评分快照 → timeline/审计。
+// 请求体：
+//
+//	{ projectId, dryRun?: true }                      仅返回结束核对清单
+//	{ projectId, exception?: { reason, missingKeys[], owner, deadline, approver } } 有缺项结束
 func PostDrillFinish(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := auth.CurrentUser(c)
@@ -674,83 +768,37 @@ func PostDrillFinish(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		if p.Status != "演练中" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "演练" + p.Status + "，无需重复结束"})
-			return
-		}
-
-		// evidenceSummary 前置校验：有未归档证据则禁止结束
-		ev := loadEvidenceSummary(database, p)
-		if ev.Pending > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error":        "尚有 " + itoa(ev.Pending) + " 项取证材料未归档（已归档 " + itoa(ev.Done) + "/" + itoa(ev.Total) + "），请完成取证后再结束演练",
-				"pending":      ev.Pending,
-				"done":         ev.Done,
-				"total":        ev.Total,
-				"pendingItems": ev.PendingItems,
-			})
-			return
-		}
-
-		scBefore := Score(database, p.ID)
-
-		// UPDATE projects
-		_, err := database.Exec(`UPDATE projects SET status='已结束' WHERE id=?`, p.ID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "结束演练失败：" + err.Error()})
-			return
-		}
-
-		// timeline
-		hitCnt, totalCnt := 0, 0
-		if scBefore != nil {
-			hitCnt = scBefore.Hit
-			totalCnt = scBefore.Total
-		}
-		_, _ = database.Exec(
-			`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
-			p.ID, hhmm(), u.Name, rid, "演练结束",
-			"结束演练：已完成 "+itoa(hitCnt)+"/"+itoa(totalCnt)+" 项正确流程，最终得分 "+fmt.Sprintf("%.1f", func() float64 {
-				if scBefore != nil {
-					return scBefore.Score
+			if p.Status == "已结束" || p.Status == "已归档" {
+				seal := loadSeal(database, p.ID)
+				if seal != nil {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"error":  "演练" + p.Status + "，无需重复结束",
+						"sealed": gin.H{"snapshotId": seal.SnapshotID, "version": seal.SnapshotVersion, "endMode": seal.EndMode},
+					})
+					return
 				}
-				return 0
-			}()),
-			"P1", nil,
-		)
-
-		final := Score(database, p.ID)
-
-		// 站内消息：演练结束综合得分（Node drill.js:765-776 → notify.js:111-143）
-		// 幂等：同项目已推过「演练结束」类通知则跳过（重复 finish 已被 status 校验拦截，这里兜底）
-		if final != nil {
-			var dup int
-			_ = database.QueryRow(`SELECT COUNT(*) FROM notifs WHERE project_id=? AND title LIKE '演练结束%'`, p.ID).Scan(&dup)
-			if dup == 0 {
-				vars := map[string]any{
-					"project": p.Name, "mode": p.Mode, "score": final.Score,
-					"hit": final.Hit, "total": final.Total, "grade": final.Grade,
-				}
-				title, descr, source, level, fromDB := RenderNotifTemplate(database, "drill_end_score", vars)
-				if !fromDB {
-					title = "演练结束 · 综合得分 " + strVal(final.Score) + " 分"
-					descr = fmt.Sprintf("演练项目「%s」（%s）已结束；正确流程完成 %d/%d 项，评级 %s。", p.Name, p.Mode, final.Hit, final.Total, final.Grade)
-					source, level = "演练调度", "P1"
-				}
-				seq := 1
-				if err := database.QueryRow(`SELECT COALESCE(MAX(seq),0)+1 FROM notifs`).Scan(&seq); err != nil {
-					seq = 1
-				}
-				id := "N" + fmt.Sprint(time.Now().UnixMilli()) + "_" + itoa(100+rand.Intn(900))
-				_, _ = database.Exec(
-					`INSERT INTO notifs (id,time,level,source,title,descr,seq,target,project_id) VALUES (?,?,?,?,?,?,?,?,?)`,
-					id, time.Now().Format("2006-01-02 15:04"), level, truncRunes(source, 40),
-					truncRunes(title, 120), truncRunes(descr, 500), seq, "internal", p.ID,
-				)
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":                 "演练" + p.Status + "，无需重复结束",
+					"needsSupplementalSeal": true,
+				})
+				return
 			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "演练" + p.Status + "，暂不能结束"})
+			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"ok": true, "projectId": p.ID, "score": final})
+		code, payload := executeDrillFinish(database, u, p, body)
+		c.JSON(code, payload)
 	}
+}
+
+// nullableMatchedNode 空节点转 NULL：uk_ds_proj_node 允许多条 NULL，
+// 避免「通用动作记录」因 matched_node 为空被误判为同一节点重复提交。
+func nullableMatchedNode(id string) any {
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+	return id
 }
 
 // ========================================================================
@@ -823,6 +871,10 @@ func PostDrillSteps(database *db.DB) gin.HandlerFunc {
 		if matchedNode != nil {
 			matchedNodeID = matchedNode.ID
 			ontime = !isLateV1(p, matchedNode)
+			// P0-10：同一套实战版计时口径
+			if late, ok := nodeLateAdvanced(projectForTiming(p), scriptNodeForTiming(matchedNode), timeNowSec(), nil, database); ok {
+				ontime = !late
+			}
 		}
 		matchOK := bestScore >= 2
 
@@ -830,7 +882,7 @@ func PostDrillSteps(database *db.DB) gin.HandlerFunc {
 			`INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,created_at)
 			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 			p.ID, p.ScenarioID, u.Role.ID, u.Name, action, title, descr, stepTime,
-			matchedNodeID, func() int {
+			nullableMatchedNode(matchedNodeID), func() int {
 				if matchOK {
 					return 1
 				}
@@ -916,7 +968,7 @@ func GetDrillPredecessor(database *db.DB) gin.HandlerFunc {
 		projectID := c.Query("projectId")
 
 		var depsStr, ft string
-		database.QueryRow(`SELECT COALESCE(deps,'[]'),COALESCE(flow_type,'correct') FROM script_nodes WHERE id=?`, nodeID).Scan(&depsStr, &ft)
+		database.QueryRow(`SELECT COALESCE(deps,'[]'),COALESCE(flow_type,'correct') FROM script_nodes WHERE id=? AND deleted_at IS NULL`, nodeID).Scan(&depsStr, &ft)
 		var deps []string
 		_ = json.Unmarshal([]byte(depsStr), &deps)
 
@@ -925,7 +977,7 @@ func GetDrillPredecessor(database *db.DB) gin.HandlerFunc {
 		for _, d := range deps {
 			if !done[d] {
 				var title string
-				database.QueryRow(`SELECT COALESCE(title,'') FROM script_nodes WHERE id=?`, d).Scan(&title)
+				database.QueryRow(`SELECT COALESCE(title,'') FROM script_nodes WHERE id=? AND deleted_at IS NULL`, d).Scan(&title)
 				blockedBy = append(blockedBy, gin.H{"id": d, "title": title})
 			}
 		}
@@ -959,7 +1011,7 @@ func loadPredecessorDetails(database *db.DB, projectID string, deps []string) []
 func loadPredecessorDetail(database *db.DB, projectID, nodeID string) gin.H {
 	var title, target, formID, nodeType string
 	_ = database.QueryRow(
-		`SELECT COALESCE(title,''),COALESCE(target,''),COALESCE(form,''),COALESCE(type,'') FROM script_nodes WHERE id=?`, nodeID,
+		`SELECT COALESCE(title,''),COALESCE(target,''),COALESCE(form,''),COALESCE(type,'') FROM script_nodes WHERE id=? AND deleted_at IS NULL`, nodeID,
 	).Scan(&title, &target, &formID, &nodeType)
 	out := gin.H{
 		"nodeId": nodeID, "title": title, "target": target, "type": nodeType,
@@ -1021,8 +1073,15 @@ func loadPredecessorDetail(database *db.DB, projectID, nodeID string) gin.H {
 	return out
 }
 
+// formFieldLegacyAliases 兼容历史提交：模板字段改名后，旧提交仍以旧 label 为 key。
+var formFieldLegacyAliases = map[string][]string{
+	"发现方式": {"发现渠道"},
+	"影响数量": {"受影响主机数量"},
+}
+
 // formFieldPairs 把表单提交的 data 按模板字段顺序摊平为 [{label,value}]，
 // 前端前置区直接按顺序只读渲染，避免 JSON 对象乱序或漏字段。
+// 新字段在历史提交里没有 key 时返回空串；改名字段按别名回退取旧值。
 func formFieldPairs(database *db.DB, formID string, data map[string]any) []gin.H {
 	_, fields := drillV1FormFields(database, formID)
 	out := make([]gin.H, 0, len(fields))
@@ -1038,6 +1097,13 @@ func formFieldPairs(database *db.DB, formID string, data map[string]any) []gin.H
 		v := ""
 		if raw, ok := data[label]; ok && raw != nil {
 			v = toPlainString(raw)
+		} else {
+			for _, alias := range formFieldLegacyAliases[label] {
+				if raw, ok := data[alias]; ok && raw != nil {
+					v = toPlainString(raw)
+					break
+				}
+			}
 		}
 		out = append(out, gin.H{"label": label, "value": v})
 	}

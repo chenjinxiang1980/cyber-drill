@@ -32,16 +32,16 @@ func ElapsedSecExport(startedAt, pausedAt string, pausedSec int, endedAt, status
 // dict 里的模板键是 {drill_start, drill_end, drill_end_score, node_done, node_submit, node_skip, auto_eval, project_created}
 var eventAlias = map[string]string{
 	"project_created": "project_created", // 直接匹配
-	"project_started":  "drill_start",     // 演练开始 → drill_start
-	"project_paused":  "",                 // dict 暂无 paused 模板 → 兜底
-	"project_resumed": "",                 // dict 暂无 resumed 模板 → 兜底
-	"project_ended":   "drill_end",        // 演练结束 → drill_end
-	"node_submit":     "node_submit",      // 直接匹配
-	"node_skip":       "node_skip",        // 直接匹配
-	"node_done":       "node_done",        // 直接匹配
-	"auto_eval":       "auto_eval",        // 直接匹配
-	"drill_start":     "drill_start",      // 直接匹配（演练开始/继续）
-	"drill_end":       "drill_end",        // 直接匹配（状态改为已结束）
+	"project_started": "drill_start",     // 演练开始 → drill_start
+	"project_paused":  "",                // dict 暂无 paused 模板 → 兜底
+	"project_resumed": "",                // dict 暂无 resumed 模板 → 兜底
+	"project_ended":   "drill_end",       // 演练结束 → drill_end
+	"node_submit":     "node_submit",     // 直接匹配
+	"node_skip":       "node_skip",       // 直接匹配
+	"node_done":       "node_done",       // 直接匹配
+	"auto_eval":       "auto_eval",       // 直接匹配
+	"drill_start":     "drill_start",     // 直接匹配（演练开始/继续）
+	"drill_end":       "drill_end",       // 直接匹配（状态改为已结束）
 }
 
 // RenderMessageDB 带 DB 的版本：优先读 dict.notif_templates，命中则按模板渲染 title + desc；
@@ -58,7 +58,7 @@ func RenderMessageDB(database *db.DB, event string, vars map[string]any) (string
 		return renderFallback(event, vars), false
 	}
 	var val sql.NullString
-	err := database.QueryRow(`SELECT value FROM dict WHERE `+"`key`"+`='notif_templates'`).Scan(&val)
+	err := database.QueryRow(`SELECT value FROM dict WHERE ` + "`key`" + `='notif_templates'`).Scan(&val)
 	if err != nil || !val.Valid || strings.TrimSpace(val.String) == "" {
 		return renderFallback(event, vars), false
 	}
@@ -100,7 +100,7 @@ func RenderNotifTemplate(database *db.DB, event string, vars map[string]any) (ti
 		return "", "", "", "", false
 	}
 	var val sql.NullString
-	err := database.QueryRow(`SELECT value FROM dict WHERE `+"`key`"+`='notif_templates'`).Scan(&val)
+	err := database.QueryRow(`SELECT value FROM dict WHERE ` + "`key`" + `='notif_templates'`).Scan(&val)
 	if err != nil || !val.Valid || strings.TrimSpace(val.String) == "" {
 		return "", "", "", "", false
 	}

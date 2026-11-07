@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"drill-system/internal/auth"
 	"drill-system/internal/db"
@@ -71,16 +72,30 @@ func GetEvaluation(database *db.DB) gin.HandlerFunc {
 			scores = []gin.H{}
 		}
 
-		c.JSON(http.StatusOK, gin.H{
+		resp := gin.H{
 			"items":  items,
 			"scores": scores,
-		})
+		}
+		if qProjID != "" {
+			// 评分封存读取路径：默认展示封存版本；?snapshotVersion=N 可切换历史/重算版本。
+			seal := loadSeal(database, qProjID)
+			ver, _ := strconv.Atoi(c.Query("snapshotVersion"))
+			if ver <= 0 && seal != nil {
+				ver = seal.SnapshotVersion
+			}
+			resp["seal"] = seal
+			resp["snapshots"] = listSnapshots(database, qProjID)
+			resp["snapshot"] = loadSnapshot(database, qProjID, ver)
+			resp["endException"] = loadEndException(database, qProjID)
+		}
+
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
 // PostEvaluationScores POST /api/content/evaluation/scores
 // 手动考评 K1-K9 分项写入。权限: commander / itlead / platformadmin
-// Request body: { projectId?: string, scores: [{ itemId: 'K1', score: 0, max: 15, note?: '' }, ...] }
+// Request body: { projectId?: string, scores: [{ itemId: 'K1', score: 0, max: 15, note?: ” }, ...] }
 // MySQL 复合主键 ON DUPLICATE KEY UPDATE 以 (item_id, project_id) 为冲突键
 func PostEvaluationScores(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {

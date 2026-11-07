@@ -187,6 +187,12 @@ func PostProject(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
+		// 3.5 复制项目核心证据清单（平台默认，项目内可调整）
+		if err := seedProjectCoreEvidenceTx(tx, database, id, scenarioID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "初始化核心证据清单失败：" + err.Error()})
+			return
+		}
+
 		// 4. timeline 审计
 		now := time.Now().Format("15:04")
 		if _, err := tx.Exec(`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
@@ -329,7 +335,7 @@ func ensureBasicTasksTx(tx *sql.Tx, projectID, scenarioID string) (int, error) {
 		id, typ, title, descr, form, target string
 	}
 	var nodes []node
-	rows, err := tx.Query(`SELECT id,type,title,COALESCE(`+"`descr`"+`,''),COALESCE(form,''),COALESCE(target,'') FROM script_nodes WHERE scenario_id=? AND type!='end' AND COALESCE(flow_type,'correct')!='distractor' ORDER BY seq`, scenarioID)
+	rows, err := tx.Query(`SELECT id,type,title,COALESCE(`+"`descr`"+`,''),COALESCE(form,''),COALESCE(target,'') FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL AND type!='end' AND COALESCE(flow_type,'correct')!='distractor' ORDER BY seq`, scenarioID)
 	if err != nil {
 		return 0, fmt.Errorf("查询剧本节点失败: %w", err)
 	}
@@ -592,7 +598,7 @@ func GetProjectScript(database *db.DB) gin.HandlerFunc {
 		if !includeDistractors {
 			nodeWhere += ` AND COALESCE(flow_type,'correct')!='distractor'`
 		}
-		rows, err := database.Query(`SELECT seq,id,type,title,COALESCE(target,''),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),COALESCE(guide,''),COALESCE(keywords,''),COALESCE(score,0),COALESCE(receiver,''),COALESCE(evidence_req,'[]'),COALESCE(deps,'[]'),COALESCE(timeout,0),COALESCE(form,''),COALESCE(required,1),COALESCE(flow_type,'correct'),COALESCE(anchor_id,'') FROM script_nodes WHERE `+nodeWhere+` ORDER BY seq`, scenarioID)
+		rows, err := database.Query(`SELECT seq,id,type,title,COALESCE(target,''),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),COALESCE(guide,''),COALESCE(keywords,''),COALESCE(score,0),COALESCE(receiver,''),COALESCE(evidence_req,'[]'),COALESCE(deps,'[]'),COALESCE(timeout,0),COALESCE(form,''),COALESCE(required,1),COALESCE(flow_type,'correct'),COALESCE(anchor_id,'') FROM script_nodes WHERE `+nodeWhere+` AND deleted_at IS NULL ORDER BY seq`, scenarioID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "剧本节点查询失败"})
 			return

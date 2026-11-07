@@ -180,3 +180,140 @@ func TestQualityRulesContrast(t *testing.T) {
 		t.Fatalf("必含关键词扣分理由未列出缺失词：%+v", parts)
 	}
 }
+
+// ========== 加分词抵扣漏洞回归（证据不参与加分 + 抵扣不得归零） ==========
+
+// bonusRules 复刻 S01-8B 类配置：3 组必含 + 4 个加分词，关键词扣分比例 25%。
+const bonusRules = `{"requiredKeywords":["向网信办报送|向市网信办报送|报送市网信办","事件基本情况|基本情况|影响范围","已采取措施|处置措施|应对措施"],"bonusKeywords":["1小时","一小时内","回执","研判"],"minMeasureLen":15,"minResultLen":10,"textQualityRatio":0.2,"keywordPenaltyRatio":0.25}`
+
+// bonusCase 一个提交样例：old 按改造前口径（证据参与加分、抵扣无上限）只算关键词扣分。
+type bonusCase struct {
+	name     string
+	measure  string
+	result   string
+	found    string
+	evidence string
+	flowType string
+}
+
+func (c bonusCase) quality() submissionQuality {
+	return submissionQuality{
+		HasSubmission: true,
+		Measure:       c.measure,
+		Result:        c.result,
+		Found:         c.found,
+		EvidenceText:  c.evidence,
+		Rules:         parseQualityRules(bonusRules),
+		Text:          strings.Join([]string{c.measure, c.result, c.found, c.evidence}, "\n"),
+	}
+}
+
+// legacyKeywordDeduct 改造前关键词扣分：加分词在含证据的整段文本上命中，无抵扣上限。
+func legacyKeywordDeduct(nodeScore int, q submissionQuality, rules QualityRules) float64 {
+	groups := requiredKeywordGroups(rules.RequiredKeywords)
+	missing := missingRequiredGroups(groups, q.Text)
+	if len(missing) == 0 {
+		return 0
+	}
+	effective := len(missing) - bonusHitCount(rules.BonusKeywords, q.Text)
+	if effective <= 0 {
+		return 0
+	}
+	return ratioDeduct(nodeScore, rules.KeywordPenaltyRatio*float64(effective)/float64(len(groups)))
+}
+
+func TestBonusCannotOffsetMissingRequired(t *testing.T) {
+	const nodeScore = 6 // 6 × 25% / 3 组 = 0.5 分/组
+	cases := []bonusCase{
+		{
+			name:     "完整合规（证据含回执）",
+			measure:  "于11月7日10时向市网信办报送事件基本情况与影响范围，并已采取措施隔离受影响主机",
+			result:   "已确认业务恢复正常运行",
+			evidence: "回执与上报表已归档",
+		},
+		{
+			name:     "缺报送对象但证据写回执",
+			measure:  "于11月7日10时完成事件基本情况与影响范围的核实，并已采取措施隔离受影响主机",
+			result:   "已确认业务恢复正常运行",
+			evidence: "已取得市网信办回执并归档",
+		},
+		{
+			name:     "缺报送对象且处置文本命中 1 个加分词",
+			measure:  "于11月7日10时完成事件基本情况与影响范围的核实，并已采取措施隔离受影响主机，1小时内向指挥中心报告",
+			result:   "已确认业务恢复正常运行",
+			evidence: "无",
+		},
+		{
+			name:     "缺报送对象且处置文本命中 2 个加分词",
+			measure:  "于11月7日10时完成事件基本情况与影响范围的核实，并已采取措施隔离受影响主机，1小时内向指挥中心报告并完成研判",
+			result:   "已确认业务恢复正常运行",
+			evidence: "无",
+		},
+		{
+			name:     "缺 2 组且命中 2 个加分词",
+			measure:  "于11月7日10时完成事件基本情况与影响范围的核实，1小时内向指挥中心报告并完成研判",
+			result:   "已确认业务恢复正常运行",
+			evidence: "无",
+		},
+		{
+			name:     "纯套话",
+			measure:  "已处理",
+			result:   "无",
+			evidence: "回执已归档",
+		},
+		{
+			name:     "distractor 短文本",
+			measure:  "隔离主机",
+			result:   "已恢复",
+			evidence: "已归档",
+			flowType: "distractor",
+		},
+	}
+
+	fmt.Println("加分抵扣漏洞：改造前 / 改造后扣分对照（节点 6 分，3 组必含，关键词 25%）")
+	fmt.Println(strings.Repeat("-", 96))
+	got := make([]float64, len(cases))
+	for i, c := range cases {
+		q := c.quality()
+		rules := effectiveQualityRules(q)
+		oldPart := legacyKeywordDeduct(nodeScore, q, rules)
+		newTotal, parts := correctNodeDeduction(nodeScore, q)
+		got[i] = newTotal
+		fmt.Printf("%-32s 改造前关键词 -%.1f | 改造后合计 -%.1f\n", c.name, oldPart, newTotal)
+		for _, p := range parts {
+			fmt.Printf("    · -%.1f %s\n", p.Point, p.Type)
+		}
+	}
+
+	// 完整合规：必含项齐全，证据里的「回执」不产生加分，也不应扣分
+	if got[0] != 0 {
+		t.Fatalf("完整合规应 0 扣分，实际 %.1f", got[0])
+	}
+	// 缺 1 组：证据里的加分词不再抵扣，必须扣 1 组（0.5 分）
+	if got[1] != 0.5 {
+		t.Fatalf("缺报送对象且证据写回执：应扣 0.5，实际 %.1f", got[1])
+	}
+	// 缺 1 组 + 处置文本命中 1/2 个加分词：抵扣最多归零到保留 1 项，仍扣 0.5
+	if got[2] != 0.5 || got[3] != 0.5 {
+		t.Fatalf("缺 1 组被处置文本加分抹平：命中 1 个扣 %.1f，命中 2 个扣 %.1f，期望均 0.5", got[2], got[3])
+	}
+	// 缺 2 组：最多抵扣 1 组，仍保留 1 组扣分（0.5），不得归零
+	if got[4] != 0.5 {
+		t.Fatalf("缺 2 组且命中 2 个加分词：应扣 0.5（保留 1 组），实际 %.1f", got[4])
+	}
+	// 纯套话：硬门槛拦截，扣分口径不变（关键词 3 组全缺 1.5 + 文字质量 1.2）
+	if reasons := evaluateHardGate(cases[5].quality(), effectiveQualityRules(cases[5].quality()), cases[5].flowType); len(reasons) == 0 {
+		t.Fatal("纯套话应被硬门槛拦截")
+	}
+	if got[5] != 2.7 {
+		t.Fatalf("纯套话扣分应为 2.7，实际 %.1f", got[5])
+	}
+	// distractor 短文本：硬门槛按原口径放行，扣分口径与改造前一致
+	q6 := cases[6].quality()
+	if reasons := evaluateHardGate(q6, effectiveQualityRules(q6), cases[6].flowType); len(reasons) != 0 {
+		t.Fatalf("distractor 短文本不应被硬门槛拦截：%v", reasons)
+	}
+	if got[6] != 2.7 {
+		t.Fatalf("distractor 短文本扣分应为 2.7，实际 %.1f", got[6])
+	}
+}

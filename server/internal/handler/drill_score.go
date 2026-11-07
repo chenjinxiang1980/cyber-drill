@@ -14,32 +14,32 @@ import (
 
 // ScoreResult 纯函数 Score() 返回值（结构与 Node drill.js:162 对齐）
 type ScoreResult struct {
-	ProjectID      string         `json:"projectId"`
-	Mode           string         `json:"mode"`
-	ScenarioID     string         `json:"scenarioId"`
-	Ended          bool           `json:"ended"`
-	Total          int            `json:"total"`
-	Hit            int            `json:"hit"`
-	Ontime         int            `json:"ontime"`
-	Missed         int            `json:"missed"`
-	Pending        int            `json:"pending"`
-	Wrong          int            `json:"wrong"`
-	Late           int            `json:"late"`
-	MaxScore       int            `json:"maxScore"`
-	Distractors    int            `json:"distractors"`
-	Skipped        int            `json:"skipped"`
-	SkippedCorrect int            `json:"skippedCorrect"`
-	SkippedDistract int           `json:"skippedDistract"`
-	Completeness   float64        `json:"completeness"`
-	TimeRate       float64        `json:"timeRate"`
-	Score          float64        `json:"score"`
-	Grade          string         `json:"grade"`
-	Deductions     []Deduction    `json:"deductions"`
-	Bonuses        []any          `json:"bonuses"`
-	Formula        string         `json:"formula"`
-	Nodes          []NodeResult   `json:"nodes"`
-	Steps          []any          `json:"steps"`
-	CorrectTotal   int            `json:"correctTotal"`
+	ProjectID       string       `json:"projectId"`
+	Mode            string       `json:"mode"`
+	ScenarioID      string       `json:"scenarioId"`
+	Ended           bool         `json:"ended"`
+	Total           int          `json:"total"`
+	Hit             int          `json:"hit"`
+	Ontime          int          `json:"ontime"`
+	Missed          int          `json:"missed"`
+	Pending         int          `json:"pending"`
+	Wrong           int          `json:"wrong"`
+	Late            int          `json:"late"`
+	MaxScore        int          `json:"maxScore"`
+	Distractors     int          `json:"distractors"`
+	Skipped         int          `json:"skipped"`
+	SkippedCorrect  int          `json:"skippedCorrect"`
+	SkippedDistract int          `json:"skippedDistract"`
+	Completeness    float64      `json:"completeness"`
+	TimeRate        float64      `json:"timeRate"`
+	Score           float64      `json:"score"`
+	Grade           string       `json:"grade"`
+	Deductions      []Deduction  `json:"deductions"`
+	Bonuses         []any        `json:"bonuses"`
+	Formula         string       `json:"formula"`
+	Nodes           []NodeResult `json:"nodes"`
+	Steps           []any        `json:"steps"`
+	CorrectTotal    int          `json:"correctTotal"`
 }
 
 type Deduction struct {
@@ -50,71 +50,76 @@ type Deduction struct {
 }
 
 type NodeResult struct {
-	ID          string  `json:"id"`
-	Title       string  `json:"title"`
-	Role        string  `json:"role"`
-	Plan        string  `json:"plan"`
-	Actual      string  `json:"actual"`
-	Required    bool    `json:"required"`
-	Submitted   bool    `json:"submitted"`
-	Hit         bool    `json:"hit"`
-	Ontime      bool    `json:"ontime"`
-	Wrong       bool    `json:"wrong"`
-	Skipped     bool    `json:"skipped"`
-	Score       int     `json:"score"`
-	Earned      float64 `json:"earned"`
-	Late        bool    `json:"late"`
-	Receiver    string  `json:"receiver,omitempty"`
-	ReceiverOk  bool    `json:"receiverOk"`
-	State       string  `json:"state"`
-	Distract    bool    `json:"distract,omitempty"`
+	ID        string  `json:"id"`
+	Title     string  `json:"title"`
+	Role      string  `json:"role"`
+	Plan      string  `json:"plan"`
+	Actual    string  `json:"actual"`
+	Required  bool    `json:"required"`
+	Submitted bool    `json:"submitted"`
+	Hit       bool    `json:"hit"`
+	Ontime    bool    `json:"ontime"`
+	Wrong     bool    `json:"wrong"`
+	Skipped   bool    `json:"skipped"`
+	Score     int     `json:"score"`
+	Earned    float64 `json:"earned"`
+	Late      bool    `json:"late"`
+	Receiver  string  `json:"receiver,omitempty"`
+	// ReceiverOk 仅对“已执行且记录接收人”的节点有意义：
+	// 实战版为 true/false，基础版/未执行节点为 null（不适用），
+	// 避免前端把基础版恒 false 误读为“接收人全错”。
+	ReceiverOk *bool  `json:"receiverOk"`
+	State      string `json:"state"`
+	Distract   bool   `json:"distract,omitempty"`
 }
 
 // ScriptNodeForScore score() 内部使用的剧本节点轻量结构
 type ScriptNodeForScore struct {
-	ID           string
-	Type         string
-	Title        string
-	Target       string
-	Timeout      int
-	Form         string
-	FlowType     string // "correct" 或 "distractor"
-	Score        int
-	Receiver     string
-	Deps         []string
-	AnchorID     string
+	ID       string
+	Type     string
+	Title    string
+	Target   string
+	Timeout  int
+	Form     string
+	FlowType string // "correct" 或 "distractor"
+	Score    int
+	Receiver string
+	// ReceiverCC 抄送接收人（可选），缺失只扣 10%，不影响主送判定。
+	ReceiverCC    string
+	Deps          []string
+	AnchorID      string
 	ReleaseTiming string
-	Keywords     []string
-	EvidenceReq  string
-	QualityRules string
-	Action       string
-	Desc         string
-	Guide        string
-	Wrong        []string
-	Required     bool
+	Keywords      []string
+	EvidenceReq   string
+	QualityRules  string
+	Action        string
+	Desc          string
+	Guide         string
+	Wrong         []string
+	Required      bool
 }
 
 // DrillStepForScore score() 内部使用的处置记录轻量结构
 type DrillStepForScore struct {
-	ID           int64
-	MatchedNode  string
-	Correct      int
-	Ontime       int
-	Skipped      int
-	Receiver     string
-	ReceiverOK   int
-	StepTime     string
-	CreatedAt    string
-	FlowType     string
-	Score        float64
-	Target       string
-	RoleID       string
-	User         string
-	Forms        string
-	Measure      string
-	Result       string
-	Found        string
-	Evidence     string
+	ID          int64
+	MatchedNode string
+	Correct     int
+	Ontime      int
+	Skipped     int
+	Receiver    string
+	ReceiverOK  int
+	StepTime    string
+	CreatedAt   string
+	FlowType    string
+	Score       float64
+	Target      string
+	RoleID      string
+	User        string
+	Forms       string
+	Measure     string
+	Result      string
+	Found       string
+	Evidence    string
 }
 
 // ProjectForScore score() 内部使用的项目轻量结构
@@ -125,6 +130,9 @@ type ProjectForScore struct {
 	Status     string
 	StartedAt  string
 	Date       string
+	// PausedSec 已结算暂停秒数；PausedAt 当前暂停开始时刻（空表示未暂停）。
+	PausedSec int
+	PausedAt  string
 }
 
 // ========== 时间工具（复刻 src/drill_clock.js） ==========
@@ -153,11 +161,11 @@ func parseLocalTime(s string) int64 {
 
 func loadNodesForScore(database *db.DB, scenarioID string) []ScriptNodeForScore {
 	rows, err := database.Query(`SELECT id,type,title,COALESCE(target,''),COALESCE(timeout,0),COALESCE(form,''),
-		COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(receiver,''),COALESCE(deps,'[]'),
+		COALESCE(flow_type,'correct'),COALESCE(score,0),COALESCE(receiver,''),COALESCE(receiver_cc,''),COALESCE(deps,'[]'),
 		COALESCE(anchor_id,''),COALESCE(release_timing,'before'),
 		COALESCE(keywords,''),COALESCE(evidence_req,''),COALESCE(quality_rules,''),COALESCE(action,''),COALESCE(`+"`descr`"+`,''),COALESCE(guide,''),
 		COALESCE(wrong,'[]'),COALESCE(required,1)
-		FROM script_nodes WHERE scenario_id=? ORDER BY seq`, scenarioID)
+		FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL ORDER BY seq`, scenarioID)
 	if err != nil {
 		return nil
 	}
@@ -169,7 +177,7 @@ func loadNodesForScore(database *db.DB, scenarioID string) []ScriptNodeForScore 
 		var depsStr, wrongStr, keywords string
 		var required int
 		if err := rows.Scan(&n.ID, &n.Type, &n.Title, &n.Target, &n.Timeout, &n.Form,
-			&n.FlowType, &n.Score, &n.Receiver, &depsStr, &n.AnchorID, &n.ReleaseTiming,
+			&n.FlowType, &n.Score, &n.Receiver, &n.ReceiverCC, &depsStr, &n.AnchorID, &n.ReleaseTiming,
 			&keywords, &n.EvidenceReq, &n.QualityRules, &n.Action, &n.Desc, &n.Guide, &wrongStr, &required); err != nil {
 			continue
 		}
@@ -237,14 +245,14 @@ func loadTasksForScore(database *db.DB, projectID string) []map[string]any {
 			continue
 		}
 		out = append(out, map[string]any{
-			"id":          id,
-			"node_id":     nodeID,
-			"status":      status,
+			"id":           id,
+			"node_id":      nodeID,
+			"status":       status,
 			"completed_at": completedAt,
-			"accepted_at": acceptedAt,
-			"title":       title,
-			"descr":       descr,
-			"role_id":     roleID,
+			"accepted_at":  acceptedAt,
+			"title":        title,
+			"descr":        descr,
+			"role_id":      roleID,
 		})
 	}
 	return out
@@ -252,8 +260,9 @@ func loadTasksForScore(database *db.DB, projectID string) []map[string]any {
 
 func loadProjectForScore(database *db.DB, projectID string) *ProjectForScore {
 	var p ProjectForScore
-	err := database.QueryRow(`SELECT id,scenario_id,COALESCE(mode,'基础版'),COALESCE(status,''),COALESCE(started_at,''),COALESCE(date,'') FROM projects WHERE id=?`, projectID).
-		Scan(&p.ID, &p.ScenarioID, &p.Mode, &p.Status, &p.StartedAt, &p.Date)
+	err := database.QueryRow(`SELECT id,scenario_id,COALESCE(mode,'基础版'),COALESCE(status,''),COALESCE(started_at,''),COALESCE(date,''),
+		COALESCE(paused_sec,0),COALESCE(paused_at,'') FROM projects WHERE id=?`, projectID).
+		Scan(&p.ID, &p.ScenarioID, &p.Mode, &p.Status, &p.StartedAt, &p.Date, &p.PausedSec, &p.PausedAt)
 	if err != nil {
 		return nil
 	}
@@ -330,6 +339,75 @@ func nodeStartMs(p *ProjectForScore, node ScriptNodeForScore, database *db.DB) i
 
 // ========== receiver 判定 ==========
 
+// nodeStartMsAdvanced 实战版节点起算时刻：
+// 取「各前驱节点完成时刻」与「本节点任务下发/接收时刻」中的最大值；
+// 都没有时回退项目开始时间，再回退演练日期（只作兜底）。
+func nodeStartMsAdvanced(p *ProjectForScore, node ScriptNodeForScore, taskByNode map[string]map[string]any, database *db.DB) int64 {
+	var best int64
+	for _, depID := range node.Deps {
+		var stepCreatedAt sql.NullString
+		_ = database.QueryRow(`SELECT created_at FROM drill_steps WHERE project_id=? AND matched_node=? ORDER BY id LIMIT 1`, p.ID, depID).
+			Scan(&stepCreatedAt)
+		if stepCreatedAt.Valid {
+			if ms := parseLocalTime(stepCreatedAt.String); ms > 0 && ms > best {
+				best = ms
+			}
+		}
+		if t, ok := taskByNode[depID]; ok {
+			if ms := parseLocalTime(strOr(t["completed_at"], "")); ms > 0 && ms > best {
+				best = ms
+			}
+		}
+	}
+	if t, ok := taskByNode[node.ID]; ok {
+		if ms := parseLocalTime(strOr(t["accepted_at"], "")); ms > 0 && ms > best {
+			best = ms
+		}
+	}
+	if best > 0 {
+		return best
+	}
+	if ms := parseLocalTime(p.StartedAt); ms > 0 {
+		return ms
+	}
+	return parseLocalTime(p.Date)
+}
+
+// pausedMsBefore 截至 atMs 已发生的暂停总时长（已结算 + 当前未结算）。
+func pausedMsBefore(p *ProjectForScore, atMs int64) int64 {
+	ms := int64(p.PausedSec) * 1000
+	if p.PausedAt != "" {
+		if pm := parseLocalTime(p.PausedAt); pm > 0 && atMs > pm {
+			ms += atMs - pm
+		}
+	}
+	if ms < 0 {
+		return 0
+	}
+	return ms
+}
+
+// nodeLateAdvanced 实战版超时判定：前驱完成/任务下发时刻 + 节点 timeout，扣除暂停时长。
+// ok=false 表示缺少可用时间戳，调用方回退旧口径。
+func nodeLateAdvanced(p *ProjectForScore, node ScriptNodeForScore, submittedAt string, taskByNode map[string]map[string]any, database *db.DB) (bool, bool) {
+	if node.Timeout <= 0 {
+		return false, true
+	}
+	atMs := parseLocalTime(submittedAt)
+	if atMs <= 0 {
+		return false, false
+	}
+	start := nodeStartMsAdvanced(p, node, taskByNode, database)
+	if start <= 0 {
+		return false, false
+	}
+	elapsed := atMs - start - pausedMsBefore(p, atMs)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	return float64(elapsed)/60000 > float64(node.Timeout), true
+}
+
 func parseReceivers(s string) []string {
 	parts := strings.FieldsFunc(s, func(r rune) bool {
 		return strings.ContainsRune("、,，;；", r)
@@ -360,6 +438,55 @@ func sameReceivers(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// receiverDeductRatio 接收人扣分比例（P1-02）：
+//   - 主送（receiver）必须全部命中，缺任一扣 30%；
+//   - 抄送（receiver_cc）为空时不扣分，非空且一个未选扣 10%；
+//   - 角色兼任（target 与唯一主送同名）关闭该维度；
+//   - 多选了合法协同单位不再扣分（不再要求集合完全相等）。
+func receiverDeductRatio(main, cc, chosen []string, target string) float64 {
+	if len(main) == 0 {
+		return 0
+	}
+	if len(main) == 1 && strings.EqualFold(normalizeMatchText(main[0]), normalizeMatchText(target)) {
+		return 0
+	}
+	chosenSet := make(map[string]bool, len(chosen))
+	for _, c := range chosen {
+		chosenSet[normalizeMatchText(c)] = true
+	}
+	for _, m := range main {
+		if !chosenSet[normalizeMatchText(m)] {
+			return ReceiverErrPenaltyRatio
+		}
+	}
+	if len(cc) > 0 {
+		for _, c := range cc {
+			if chosenSet[normalizeMatchText(c)] {
+				return 0
+			}
+		}
+		return 0.10
+	}
+	return 0
+}
+
+// evidenceReqKeys 把节点 evidence_req 展开为归档键 nodeID#index（只计 name 非空的项）。
+func evidenceReqKeys(nodeID, reqJSON string) []string {
+	var arr []map[string]any
+	if json.Unmarshal([]byte(strings.TrimSpace(reqJSON)), &arr) != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(arr))
+	for i, it := range arr {
+		name, _ := it["name"].(string)
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		keys = append(keys, fmt.Sprintf("%s#%d", nodeID, i))
+	}
+	return keys
 }
 
 // ========== grade ==========
@@ -414,12 +541,17 @@ func formValueString(v any) string {
 // Score 是单一纯函数：从 MySQL 读取项目 + 剧本 + tasks + drill_steps，计算扣分制评分结果。
 // 被 monitor/dashboard/finish/decide/recalc 共用，唯一数据源。
 func Score(database *db.DB, projectID string) *ScoreResult {
+	return scoreInternal(database, projectID, false)
+}
+
+// scoreInternal forceEnded=true 时按「已结束」口径计算（结束前预演最终分，不写库）。
+func scoreInternal(database *db.DB, projectID string, forceEnded bool) *ScoreResult {
 	p := loadProjectForScore(database, projectID)
 	if p == nil {
 		return nil
 	}
 	mode := p.Mode
-	ended := p.Status == "已结束" || p.Status == "已归档"
+	ended := forceEnded || p.Status == "已结束" || p.Status == "已归档"
 
 	all := loadNodesForScore(database, p.ScenarioID)
 	// 过滤掉 end 节点
@@ -479,6 +611,9 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 		}
 	}
 
+	// 已归档证据键（P0-04 主口径）：evidence 表 req_key = nodeID#index
+	archivedEvidence := loadArchivedEvidenceKeys(database, projectID)
+
 	// ========== hitMap ==========
 	hitMap := make(map[string]map[string]any)
 
@@ -519,7 +654,7 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 			}
 		}
 	} else {
-		// 实战版
+		// 实战版：超时判定按「前驱完成/任务下发 + timeout，扣暂停时长」，旧值仅作兜底
 		for _, s := range steps {
 			if s.MatchedNode == "" || s.Correct == 0 || s.Skipped == 1 {
 				continue
@@ -530,9 +665,19 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 			if _, dup := hitMap[s.MatchedNode]; dup {
 				continue
 			}
+			late := s.Ontime == 0
+			if n, ok := byID[s.MatchedNode]; ok {
+				submittedAt := s.CreatedAt
+				if strings.TrimSpace(submittedAt) == "" {
+					submittedAt = s.StepTime
+				}
+				if v, ok2 := nodeLateAdvanced(p, *n, submittedAt, taskByNode, database); ok2 {
+					late = v
+				}
+			}
 			hitMap[s.MatchedNode] = map[string]any{
 				"stepTime": s.StepTime,
-				"late":     s.Ontime == 0,
+				"late":     late,
 				"step":     s,
 			}
 		}
@@ -614,12 +759,32 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 
 		if hasHit {
 			var recvBad bool
+			recvNote := ""
 			lateHit, _ := hit["late"].(bool)
-			q := submissionQuality{Late: lateHit, Keywords: n.Keywords, EvidenceReq: n.EvidenceReq, Rules: parseQualityRules(n.QualityRules)}
+			reqKeys := evidenceReqKeys(n.ID, n.EvidenceReq)
+			archivedCnt := 0
+			for _, k := range reqKeys {
+				if archivedEvidence[k] {
+					archivedCnt++
+				}
+			}
+			q := submissionQuality{
+				Late: lateHit, Keywords: n.Keywords, EvidenceReq: n.EvidenceReq,
+				Rules: parseQualityRules(n.QualityRules),
+				// 证据以归档为主口径，基础版没有处置文本也照样按归档率评分
+				EvidenceReqCount: len(reqKeys), EvidenceArchived: archivedCnt,
+			}
 			if step, ok := hit["step"].(DrillStepForScore); ok {
-				recvBad = step.ReceiverOK == 0
 				q.HasSubmission = true
+				q.RecvRatio = receiverDeductRatio(parseReceivers(n.Receiver), parseReceivers(n.ReceiverCC), parseReceivers(step.Receiver), n.Target)
+				recvBad = q.RecvRatio > 0
 				q.RecvBad = recvBad
+				if q.RecvRatio >= ReceiverErrPenaltyRatio {
+					recvNote = "接收人选择错误（主送未命中）"
+				} else if q.RecvRatio > 0 {
+					recvNote = "接收人抄送缺失"
+				}
+				q.RecvNote = recvNote
 				q.EvidenceText = step.Evidence
 				q.Measure = step.Measure
 				q.Result = step.Result
@@ -647,17 +812,22 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 			earned -= deduct
 			stepTime, _ := hit["stepTime"].(string)
 			var receiverStr string
-			var receiverOk bool
+			var receiverOk *bool
 			if step, ok := hit["step"].(DrillStepForScore); ok {
 				receiverStr = step.Receiver
-				receiverOk = step.ReceiverOK != 0
+				okv := !recvBad
+				receiverOk = &okv
+			}
+			recvLabel := "接收人错误"
+			if q.RecvRatio > 0 && q.RecvRatio < ReceiverErrPenaltyRatio {
+				recvLabel = "接收人抄送缺失"
 			}
 			state := "已完成"
 			if recvBad {
 				if lateHit {
-					state = "超时且接收人错误"
+					state = "超时且" + recvLabel
 				} else {
-					state = "接收人错误"
+					state = recvLabel
 				}
 			} else if lateHit {
 				state = "超时完成"
@@ -867,32 +1037,32 @@ func Score(database *db.DB, projectID string) *ScoreResult {
 	}
 
 	return &ScoreResult{
-		ProjectID:      projectID,
-		Mode:           mode,
-		ScenarioID:     p.ScenarioID,
-		Ended:          ended,
-		Total:          total,
-		Hit:            hitCnt,
-		Ontime:         ontimeCnt,
-		Missed:         missedCnt,
-		Pending:        pendingCnt,
-		Wrong:          wrongCnt,
-		Late:           lateCnt,
-		MaxScore:       maxScore,
-		Distractors:    len(releasedDistractors),
-		Skipped:        skippedCorrect + skippedDistract,
-		SkippedCorrect: skippedCorrect,
+		ProjectID:       projectID,
+		Mode:            mode,
+		ScenarioID:      p.ScenarioID,
+		Ended:           ended,
+		Total:           total,
+		Hit:             hitCnt,
+		Ontime:          ontimeCnt,
+		Missed:          missedCnt,
+		Pending:         pendingCnt,
+		Wrong:           wrongCnt,
+		Late:            lateCnt,
+		MaxScore:        maxScore,
+		Distractors:     len(releasedDistractors),
+		Skipped:         skippedCorrect + skippedDistract,
+		SkippedCorrect:  skippedCorrect,
 		SkippedDistract: skippedDistract,
-		Completeness:   completeness,
-		TimeRate:       timeRate,
-		Score:          sc,
-		Grade:          gradeOf(sc),
-		Deductions:     deductions,
-		Bonuses:        []any{},
-		Formula:        formula,
-		Nodes:          nodeResults,
-		Steps:          stepsAny,
-		CorrectTotal:   maxScore,
+		Completeness:    completeness,
+		TimeRate:        timeRate,
+		Score:           sc,
+		Grade:           gradeOf(sc),
+		Deductions:      deductions,
+		Bonuses:         []any{},
+		Formula:         formula,
+		Nodes:           nodeResults,
+		Steps:           stepsAny,
+		CorrectTotal:    maxScore,
 	}
 }
 

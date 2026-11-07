@@ -251,7 +251,12 @@ func EndProject(database *db.DB) gin.HandlerFunc {
 
 		_, _ = database.Exec(`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
 			id, hhmm(), userNameFromContext(c), roleIDFromContext(c), "演练结束",
-			fmt.Sprintf("演练结束，最终得分 %.1f 分", func() float64 { if sc != nil { return sc.Score }; return 0 }()),
+			fmt.Sprintf("演练结束，最终得分 %.1f 分", func() float64 {
+				if sc != nil {
+					return sc.Score
+				}
+				return 0
+			}()),
 			"P1", nil)
 
 		c.JSON(http.StatusOK, gin.H{"ok": true, "projectId": id, "endedAt": now, "score": sc})
@@ -265,9 +270,12 @@ func GetProjectTasks(database *db.DB) gin.HandlerFunc {
 		var scenarioID, mode string
 		database.QueryRow(`SELECT COALESCE(scenario_id,''),COALESCE(mode,'基础版') FROM projects WHERE id=?`, id).Scan(&scenarioID, &mode)
 
-		rows, err := database.Query(`SELECT id,COALESCE(role_id,''),COALESCE(title,''),COALESCE(`+"`descr`"+`,''),COALESCE(deadline,''),COALESCE(status,''),COALESCE(level,''),COALESCE(forms,'[]'),COALESCE(node_id,''),seq,
-			COALESCE(completed_at,''),COALESCE(accepted_at,'')
-			FROM tasks WHERE project_id=? ORDER BY seq`, id)
+		rows, err := database.Query(`SELECT t.id,COALESCE(t.role_id,''),COALESCE(t.title,''),COALESCE(t.`+"`descr`"+`,''),COALESCE(t.deadline,''),COALESCE(t.status,''),COALESCE(t.level,''),COALESCE(t.forms,'[]'),COALESCE(t.node_id,''),t.seq,
+			COALESCE(t.completed_at,''),COALESCE(t.accepted_at,'')
+			FROM tasks t
+			WHERE t.project_id=?
+			  AND NOT EXISTS (SELECT 1 FROM script_nodes n WHERE n.id=t.node_id AND n.deleted_at IS NOT NULL)
+			ORDER BY t.seq`, id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询任务失败"})
 			return
@@ -299,11 +307,11 @@ func GetProjectTasks(database *db.DB) gin.HandlerFunc {
 
 		// 可用性：检查 deps 是否全部完成
 		type nodeInfo struct {
-			deps []string
+			deps     []string
 			flowType string
 		}
 		nodeMap := make(map[string]nodeInfo)
-		nodeRows, _ := database.Query(`SELECT id,COALESCE(deps,'[]'),COALESCE(flow_type,'correct') FROM script_nodes WHERE scenario_id=?`, scenarioID)
+		nodeRows, _ := database.Query(`SELECT id,COALESCE(deps,'[]'),COALESCE(flow_type,'correct') FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL`, scenarioID)
 		defer nodeRows.Close()
 		for nodeRows.Next() {
 			var nid, depsStr, ft string
@@ -339,7 +347,7 @@ func GetProjectTasks(database *db.DB) gin.HandlerFunc {
 						if !doneSet[depID] {
 							available = false
 							var depTitle string
-							database.QueryRow(`SELECT title FROM script_nodes WHERE id=?`, depID).Scan(&depTitle)
+							database.QueryRow(`SELECT title FROM script_nodes WHERE id=? AND deleted_at IS NULL`, depID).Scan(&depTitle)
 							blockedBy = append(blockedBy, gin.H{"id": depID, "title": depTitle})
 						}
 					}
@@ -391,7 +399,7 @@ func SkipTask(database *db.DB) gin.HandlerFunc {
 		isDistractor := false
 		if nodeID != "" {
 			var ft string
-			_ = database.QueryRow(`SELECT COALESCE(flow_type,'correct') FROM script_nodes WHERE id=?`, nodeID).Scan(&ft)
+			_ = database.QueryRow(`SELECT COALESCE(flow_type,'correct') FROM script_nodes WHERE id=? AND deleted_at IS NULL`, nodeID).Scan(&ft)
 			isDistractor = (ft == "distractor")
 		}
 		if isDistractor && reason == "" {
@@ -409,14 +417,26 @@ func SkipTask(database *db.DB) gin.HandlerFunc {
 		var scenarioID string
 		_ = database.QueryRow(`SELECT COALESCE(scenario_id,'') FROM projects WHERE id=?`, projectID).Scan(&scenarioID)
 		now := nowSec()
-		_, _ = database.Exec(`INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,correct,found_at,flow_type,score,skipped,skip_reason,created_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		res, err := database.Exec(`INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,correct,found_at,flow_type,score,skipped,skip_reason,created_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			ON DUPLICATE KEY UPDATE id=id`,
 			projectID, scenarioID, roleIDFromContext(c), userNameFromContext(c),
-			"跳过任务", "", "", hhmm(), nodeID, 0, 0, 0, now, "correct", 0, 1, reason, now)
+			"跳过任务", "", "", hhmm(), nullableMatchedNode(nodeID), 0, 0, 0, now, "correct", 0, 1, reason, now)
+		if err == nil {
+			if n, _ := res.RowsAffected(); n == 0 {
+				c.JSON(http.StatusConflict, gin.H{"error": "该节点已有处置记录，不可重复跳过"})
+				return
+			}
+		}
 
 		_, _ = database.Exec(`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
 			projectID, hhmm(), userNameFromContext(c), roleIDFromContext(c), "跳过任务",
-			"任务 "+id+" 跳过"+func() string { if reason != "" { return "，原因：" + reason }; return "" }(), "P1", nil)
+			"任务 "+id+" 跳过"+func() string {
+				if reason != "" {
+					return "，原因：" + reason
+				}
+				return ""
+			}(), "P1", nil)
 
 		c.JSON(http.StatusOK, gin.H{"ok": true, "taskId": id, "status": "已跳过", "skipReason": reason})
 	}
@@ -502,9 +522,10 @@ func CompleteTask(database *db.DB) gin.HandlerFunc {
 			var scenarioID string
 			database.QueryRow(`SELECT scenario_id FROM projects WHERE id=?`, projectID).Scan(&scenarioID)
 			_, _ = database.Exec(`INSERT INTO drill_steps (project_id,scenario_id,role_id,user,action,title,descr,step_time,matched_node,matched,ontime,correct,found_at,flow_type,score,skipped,created_at)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+				ON DUPLICATE KEY UPDATE id=id`,
 				projectID, scenarioID, roleIDFromContext(c), userNameFromContext(c),
-				"任务完成", taskTitle, "", hhmm(), nodeID.String, 1, 1, 1, now, "correct", 0, 0, nowSec())
+				"任务完成", taskTitle, "", hhmm(), nullableMatchedNode(nodeID.String), 1, 1, 1, now, "correct", 0, 0, nowSec())
 		}
 
 		_, _ = database.Exec(`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
@@ -545,11 +566,13 @@ func UploadEvidence(database *db.DB) gin.HandlerFunc {
 		if reqKey == "" {
 			reqKey = strings.TrimSpace(body.NodeID)
 		}
-		if _, err := database.Exec(`INSERT INTO evidence (id,type,name,size,time,role_id,uploader,user_id,auto,task_id,project_id,file_path,node_id,req_key,created_at,note)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		actor := userNameFromContext(c)
+		if _, err := database.Exec(`INSERT INTO evidence (id,type,name,size,time,role_id,uploader,user_id,auto,task_id,project_id,file_path,node_id,req_key,created_at,note,sha256,custodian,sealed_at,chain_of_custody)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			evID, strings.TrimSpace(body.Type), strings.TrimSpace(body.Name), "", hhmm(),
-			roleIDFromContext(c), userNameFromContext(c), nil, 1, nil, id,
-			strings.TrimSpace(body.FileName), strings.TrimSpace(body.NodeID), reqKey, now, strings.TrimSpace(body.Note)); err != nil {
+			roleIDFromContext(c), actor, nil, 1, nil, id,
+			strings.TrimSpace(body.FileName), strings.TrimSpace(body.NodeID), reqKey, now, strings.TrimSpace(body.Note),
+			nil, actor, now, evidenceChainJSON(actor, "归档", now, body.Note)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "上传证据失败：" + err.Error()})
 			return
 		}
@@ -557,12 +580,12 @@ func UploadEvidence(database *db.DB) gin.HandlerFunc {
 	}
 }
 
-
 // ========== GET /api/drill/projects/:id/score — 直接取评分 ==========
 func GetProjectScore(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		sc := Score(database, id)
+		// 历史项目展示口径：已封存读快照，未封存读实时评分。
+		sc := displayScore(database, id)
 		if sc == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
 			return
@@ -594,9 +617,25 @@ func RecalcProjectScore(database *db.DB) gin.HandlerFunc {
 			ON DUPLICATE KEY UPDATE score=VALUES(score),max=VALUES(max),note=VALUES(note),updated_at=VALUES(updated_at)`,
 			"MODE", id, sc.Score, 100, sc.Formula, 1, now)
 
+		detail := fmt.Sprintf("综合得分 %.1f 分（%s）", sc.Score, sc.Grade)
+
+		// 已封存项目：重算生成 version+1 快照，旧快照与封存版本保留，不回写。
+		if p := drillV1ProjectOf(database, id); p != nil && (p.Status == "已结束" || p.Status == "已归档") {
+			if seal := loadSeal(database, id); seal != nil {
+				actor := userNameFromContext(c)
+				if v := resealProjectSnapshot(database, p, sc, seal, actor, "重新考评"); v > 0 {
+					detail += fmt.Sprintf("；已生成重算快照 v%d（封存版本 v%d 保留）", v, seal.SnapshotVersion)
+				} else {
+					detail += "；重算快照写入失败"
+				}
+			} else {
+				detail += "；项目已结束但没有评分封存，报告仍读实时评分，需补封存后才能生成正式版本"
+			}
+		}
+
 		_, _ = database.Exec(`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
 			id, hhmm(), userNameFromContext(c), roleIDFromContext(c), "重新自动考评",
-			fmt.Sprintf("综合得分 %.1f 分（%s）", sc.Score, sc.Grade), "P1", nil)
+			detail, "P1", nil)
 
 		c.JSON(http.StatusOK, sc)
 	}
