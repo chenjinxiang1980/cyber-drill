@@ -1,4 +1,4 @@
-# 安装指南（0.6.0）
+# 安装指南（0.8.3）
 
 本文面向 **首次部署** 的运维人员，按推荐顺序覆盖以下路径：
 
@@ -8,7 +8,7 @@
 4. **镜像仓库对照**：GHCR 与华为 SWR 的公开状态、登录方式与实测结果；
 5. **从源码自主编译安装**：Linux 交叉编译优先，含签名校验、systemd 安装与 Docker 最小构建命令。
 
-> 版本固定为 **0.6.0**，镜像 tag 与 git 标签 `v0.6.0` 均不随安装器变化。
+> 版本固定为 **0.8.3**，镜像 tag 与 git 标签 `v0.8.3` 均不随安装器变化。
 
 > **为什么推荐 Linux 部署**：Linux 是本项目的原生目标形态（ELF 二进制或 Linux 容器镜像），运行稳定、无终端安全软件干扰。
 > Windows 原生编译产物（`.exe`）容易被杀毒软件与安全管控终端（如 360 等）判定为可疑文件并拦截、隔离甚至删除，导致服务无法稳定运行，升级后也可能再次被拦截。这不是“Windows 不能用”，而是原生二进制在企业终端上的误报与运维成本较高。
@@ -124,7 +124,7 @@ bash install/install-linux.sh --dry-run --source gitee --registry ghcr
 | Docker 检测 | `docker` 命令 + `docker info`；区分“未安装 / 已安装未启动 / 无权限” |
 | Docker 安装 | 按 `/etc/os-release` 识别：Debian/Ubuntu 走官方脚本，RHEL/CentOS/UOS/Kylin 走 `dnf/yum install docker`；**先展示命令，确认后执行** |
 | Compose 检测 | `docker compose version`；缺失时提示安装 `docker-compose-plugin` |
-| 源码 | `git clone --depth 1 --branch main`（版本仍为 0.6.0；可用 `DRILL_REF` 覆盖分支/标签）；无 git 时回退归档下载 |
+| 源码 | `git clone --depth 1 --branch main`（版本仍为 0.8.3；可用 `DRILL_REF` 覆盖分支/标签）；无 git 时回退归档下载 |
 | 镜像 | GHCR 与 SWR 均公开匿名可拉；SWR 先做匿名 token 协商，失败再提示 AK |
 | 配置 | 从 `.env.example` 生成 `drill.env`，缺失密钥随机生成（见 1.5） |
 | 启动 | `docker compose -p <project> -f deploy/docker-dist/docker-compose.yml --env-file drill.env up -d` |
@@ -134,7 +134,7 @@ bash install/install-linux.sh --dry-run --source gitee --registry ghcr
 
 ```bash
 curl http://127.0.0.1:8090/api/health
-# {"ok":true,"service":"cyber-drill-system","version":"0.6.0",...}
+# {"ok":true,"service":"cyber-drill-system","version":"0.8.3",...}
 
 # 停止（保留数据卷）
 docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file deploy/docker-dist/drill.env down
@@ -143,7 +143,7 @@ docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file depl
 docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file deploy/docker-dist/drill.env down -v
 ```
 
-默认访问地址 `http://localhost:8090`；管理员账号 `admin`，初始密码首次安装时打印（只显示一次）并写入 `deploy/docker-dist/drill.env`（含数据库密码、`JWT_SECRET`、`SESSION_SECRET`，务必离线备份且不要提交仓库）。
+默认访问地址 `http://localhost:8090`；管理员账号 `admin` 与 `platformadmin`，初始口令由安装器随机生成、在安装输出中打印一次，并写入 `deploy/docker-dist/drill.env`（含数据库密码、`JWT_SECRET`、`SESSION_SECRET`，务必离线备份且不要提交仓库）。首次登录必须修改初始口令，改密成功后服务端会自动把 `.env` 中对应的口令置空并标注失效。
 
 ### 1.3 Windows：Docker Desktop 容器方式（降级推荐）
 
@@ -207,12 +207,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install\install-windows.ps
 
 ```
 [成功] 服务已启动。
-  健康检查：{"ok":true,"service":"cyber-drill-system","version":"0.6.0",...}
+  健康检查：{"ok":true,"service":"cyber-drill-system","version":"0.8.3",...}
   访问地址：http://localhost:8090
-  管理员账号：admin
-  管理员初始密码（只显示这一次，请立即保存）：<随机值>
+  管理员账号：admin / platformadmin
+  管理员初始口令（只显示这一次，已写入环境文件，首次登录必须改密）：
+    admin          <随机值>
+    platformadmin  <随机值>
   环境文件：...\deploy\docker-dist\drill.env（务必备份）
 ```
+
+**首次登录与交付**
+
+1. 用安装输出中的账号 + 初始口令登录，系统会强制跳转修改密码页；未改密前除改密接口外一律拒绝。
+2. 改密成功后，服务端会把 `.env` 中对应的 `ADMIN_INIT_PASSWORD` / `PLATFORMADMIN_INIT_PASSWORD` 置空，并追加一行“已失效”注释。
+3. 交付客户前建议：先以客户管理员身份完成首次改密，再确认 `.env` 中这两项为空；`drill.env` 仍含数据库密码与 JWT/Session 密钥，必须通过安全通道交付（不要随源码包、聊天工具或邮件明文分发），并在交付后提醒客户离线备份、妥善保管。
+4. 若客户自行完成首次登录，交付时只需交付 `.env` 并明确告知初始口令；客户改密后同样会自动置空。**不要**把仍含有效初始口令的 `.env` 长期留在交付介质上。
 
 **第 4 步：验证**
 
@@ -261,7 +270,9 @@ Invoke-WebRequest http://127.0.0.1:8090/api/health -UseBasicParsing
 - 首次生成时自动填充：
   - `JWT_SECRET` / `SESSION_SECRET`：32 字节随机（64 位十六进制）
   - `DB_PASSWORD` / `MYSQL_ROOT_PASSWORD`：16 字节随机
-  - `ADMIN_INIT_PASSWORD`：交互输入，或直接回车随机生成（**只打印一次**）
+  - `ADMIN_INIT_PASSWORD` / `PLATFORMADMIN_INIT_PASSWORD`：安装器为 `admin` / `platformadmin` 各生成独立随机口令（**只在安装输出打印一次**，同时写入本文件；不会使用统一口令）
+- 权限：Linux 为 `600`，并尝试 `chown 10001:10001` 让容器用户能在首次改密后回写清空口令；Windows 用 `icacls` 仅保留当前用户访问。手工部署若未做这一步，改密后会记录告警但无法清空 `.env`，请自行按 `chown 10001:10001 drill.env` 处理。
+- 手工部署（不经过安装器）：若这两项为空或仍是 `__REPLACE_WITH__` 占位符，`drill-seed` 会为每个账号随机生成口令，并仅在启动日志中输出一次（兜底路径）。
 - **已存在 drill.env 时绝不覆盖**：交互模式可选“沿用 / 备份后重建 / 退出”；`--yes` 默认沿用。
 - **不删除任何数据卷**：重复执行不会执行 `down -v`。
 - 脚本内零硬编码凭据；SWR 登录口令只经 `docker login --password-stdin` 传入。
@@ -276,7 +287,7 @@ Invoke-WebRequest http://127.0.0.1:8090/api/health -UseBasicParsing
 | 剧本 | `INSERT IGNORE` 补齐 **8 个标准场景、268 个剧本节点**（S01 共 52 条：18 主流 + 34 混淆）；不覆盖用户已编辑内容 |
 | 流程字典 | `INSERT IGNORE` 补齐 **19 个键**（`notif_templates` 站内消息模板、`chat_channels`、`drill_action_meta`、`role_feed_mapping` 等）；只补缺失键，**不覆盖用户已修改的值** |
 | 表单模板 | 补齐 8 类模板 |
-| 管理员账号 | `admin`、`platformadmin` 不存在时创建，初始密码为 `ADMIN_INIT_PASSWORD`；已存在则保留原密码 |
+| 管理员账号 | `admin`、`platformadmin` 不存在时创建，初始口令分别取安装器写入的 `ADMIN_INIT_PASSWORD` / `PLATFORMADMIN_INIT_PASSWORD`；已存在则保留原密码。两项缺失时随机生成并写入启动日志 |
 | 删除范围 | **仅测试账号**；初始化本身不执行任何 `DELETE` / `TRUNCATE` |
 
 **账号清理的正确用法**
@@ -312,11 +323,11 @@ bash install/install-linux.sh --source local --bundle ./drill-linux-bundle.tar.g
 
 ```bash
 # 有网机器导出
-docker save drill-server:0.6.0 | gzip > drill-server-0.6.0.tar.gz
+docker save drill-server:0.8.3 | gzip > drill-server-0.8.3.tar.gz
 
 # 离线机器导入并安装
 bash install/install-linux.sh --source local --registry local \
-  --image-tar ./drill-server-0.6.0.tar.gz --dir /opt/cyber-drill --yes
+  --image-tar ./drill-server-0.8.3.tar.gz --dir /opt/cyber-drill --yes
 ```
 
 ---
@@ -325,9 +336,9 @@ bash install/install-linux.sh --source local --registry local \
 
 | 仓库 | 地址 | 可见性 | 登录 | 适用网络 |
 |------|------|--------|------|----------|
-| GHCR | `ghcr.io/chenjinxiang1980/cyber-drill:0.6.0` | **公开，匿名可拉** | 不需要 | 境外 / 有代理 |
-| SWR 华为云 | `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:0.6.0` | **公开，匿名可拉**（2026-11-05 实测） | 不需要；仅在匿名失败时才需 AK | 国内 |
-| 本地 | `drill-server:0.6.0` | 本机镜像 | 不需要 | 离线 |
+| GHCR | `ghcr.io/chenjinxiang1980/cyber-drill:0.8.3` | **公开，匿名可拉** | 不需要 | 境外 / 有代理 |
+| SWR 华为云 | `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:0.8.3` | **公开，匿名可拉**（2026-11-05 实测） | 不需要；仅在匿名失败时才需 AK | 国内 |
+| 本地 | `drill-server:0.8.3` | 本机镜像 | 不需要 | 离线 |
 
 **实测记录（2026-11-05，VM 内标准通道）**
 
@@ -350,7 +361,7 @@ printf '%s' "$SWR_PASS" | docker login swr.cn-east-3.myhuaweicloud.com \
 |------|------|------|
 | 连接超时 / DNS 失败 | 网络不通 | 检查代理、安全组、DNS |
 | 401 / 403 且换不到匿名 token | 未公开或需鉴权 | 输入 AK 登录，或等仓库公开 |
-| HTTP 404 | tag 不存在 | 核对 tag（应为 `0.6.0`） |
+| HTTP 404 | tag 不存在 | 核对 tag（应为 `0.8.3`） |
 
 ---
 
@@ -418,7 +429,7 @@ docker compose -p drill -f deploy/docker-dist/docker-compose.yml --env-file depl
 ```bash
 cd server
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-  -ldflags "-s -w -X drill-system/internal/version.Version=0.6.0" \
+  -ldflags "-s -w -X drill-system/internal/version.Version=0.8.3" \
   -o deploy-linux/drill-server .
 ```
 
@@ -487,8 +498,8 @@ curl http://127.0.0.1:8090/api/health
 ```bash
 DOCKER_BUILDKIT=1 docker build \
   -f deploy/docker-dist/Dockerfile \
-  --build-arg VERSION=0.6.0 \
-  -t drill-server:0.6.0 .
+  --build-arg VERSION=0.8.3 \
+  -t drill-server:0.8.3 .
 ```
 
 如需构建代理：
@@ -498,19 +509,19 @@ DOCKER_BUILDKIT=1 docker build \
   -f deploy/docker-dist/Dockerfile \
   --build-arg HTTP_PROXY=http://<proxy>:<port> \
   --build-arg HTTPS_PROXY=http://<proxy>:<port> \
-  --build-arg VERSION=0.6.0 \
-  -t drill-server:0.6.0 .
+  --build-arg VERSION=0.8.3 \
+  -t drill-server:0.8.3 .
 ```
 
 ### 4.6 构建后自检清单
 
 ```bash
 # 1) 版本注入
-docker run --rm drill-server:0.6.0 /opt/drill/bin/drill-server --version || true
-curl http://127.0.0.1:8090/api/health   # version 应为 0.6.0
+docker run --rm drill-server:0.8.3 /opt/drill/bin/drill-server --version || true
+curl http://127.0.0.1:8090/api/health   # version 应为 0.8.3
 
 # 2) 入口脚本可执行（容器内）
-docker run --rm --entrypoint /bin/sh drill-server:0.6.0 -c \
+docker run --rm --entrypoint /bin/sh drill-server:0.8.3 -c \
   'ls -l /opt/drill/docker-entrypoint.sh; head -1 /opt/drill/docker-entrypoint.sh | od -c'
 # 首行必须是 #!/bin/sh\n，不能出现 \r
 ```
@@ -518,12 +529,12 @@ docker run --rm --entrypoint /bin/sh drill-server:0.6.0 -c \
 ### 4.7 镜像分发
 
 ```bash
-docker tag drill-server:0.6.0 <registry>/<org>/cyber-drill:0.6.0
+docker tag drill-server:0.8.3 <registry>/<org>/cyber-drill:0.8.3
 printf '%s' "$REGISTRY_PASS" | docker login <registry> -u <user> --password-stdin
-docker push <registry>/<org>/cyber-drill:0.6.0
+docker push <registry>/<org>/cyber-drill:0.8.3
 ```
 
-> 不要覆盖已发布的 `0.6.0` 标签，除非明确要替换该版本；常规发版请用新 tag。
+> 不要覆盖已发布的 `0.8.3` 标签，除非明确要替换该版本；常规发版请用新 tag。
 
 ---
 
@@ -533,6 +544,8 @@ docker push <registry>/<org>/cyber-drill:0.6.0
 - [Linux 部署](linux-deployment.md)
 - [VMware 虚拟机部署](vmware-vm-deployment.md)
 - [安全部署指南](security-guide.md)
+- [0.7.1 发版说明](release-0.7.1.md)
+- [0.7.0 发版说明](release-0.7.0.md)
 - [0.6.0 发版说明](release-0.6.0.md)
 - [0.5.1 发版说明](release-0.5.1.md)
 - [0.5.0 发版说明](release-0.5.0.md)

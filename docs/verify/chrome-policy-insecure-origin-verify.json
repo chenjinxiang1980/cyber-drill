@@ -1,0 +1,113 @@
+{
+  "title": "OverrideSecurityRestrictionsOnInsecureOrigin 实测记录",
+  "date": "2026-11-07",
+  "machine": "CHENJINXIANG-HO / Windows / 普通用户会话 + UAC 提权写入 HKLM",
+  "browsers": {
+    "chrome": "156.0.8078.80 (C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe)",
+    "edge": "157.0.4341.42 (C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe)"
+  },
+  "target": "http://192.168.97.131:8090/login.html",
+  "origin": "http://192.168.97.131:8090",
+  "runs": [
+    {
+      "id": "baseline-no-policy",
+      "browser": "chrome",
+      "args": [],
+      "isSecureContext": false,
+      "navigator.mediaDevices": "undefined",
+      "getDisplayMedia": "undefined",
+      "crypto.subtle": false,
+      "policyStatusOnPage": "未设置。",
+      "screenshot": "docs/verify/policy-chrome-unset-before.png"
+    },
+    {
+      "id": "commandline-flag",
+      "browser": "chrome",
+      "args": ["--unsafely-treat-insecure-origin-as-secure=http://192.168.97.131:8090"],
+      "isSecureContext": true,
+      "navigator.mediaDevices": "object",
+      "getDisplayMedia": "function",
+      "crypto.subtle": true,
+      "note": "策略文档声明两者等价；该轮仅验证运行结果，抓屏在 policy 轮完成"
+    },
+    {
+      "id": "policy-chrome",
+      "browser": "chrome",
+      "source": "HKLM\\SOFTWARE\\Policies\\Google\\Chrome\\OverrideSecurityRestrictionsOnInsecureOrigin",
+      "args": ["--use-fake-ui-for-media-stream", "--auto-select-desktop-capture-source=Entire screen"],
+      "isSecureContext": true,
+      "navigator.mediaDevices": "object",
+      "getDisplayMedia": "function",
+      "crypto.subtle": true,
+      "policyStatusOnPage": "正常（OK）",
+      "policyValueOnPage": "[\"http://192.168.97.131:8090\"]",
+      "capture": {
+        "ok": true,
+        "tracks": 1,
+        "trackLabel": "screen:0:0",
+        "trackState": "live",
+        "width": 1920,
+        "height": 1080,
+        "tookMs": 287,
+        "frameBytesApprox": 675804,
+        "frameSHA1": "953611d619e4efb895a523d19057366c094534b9"
+      },
+      "screenshot": "docs/verify/policy-chrome-ok.png"
+    },
+    {
+      "id": "policy-chrome-no-extra-flags",
+      "browser": "chrome",
+      "args": [],
+      "isSecureContext": true,
+      "getDisplayMedia": "function",
+      "policyStatusOnPage": "正常（OK）",
+      "note": "除 Playwright 自动化自带参数外未传任何 Chromium 参数，排除命令行干扰；策略页可见的手动 flag 列表中不含 unsafely-treat-insecure-origin-as-secure",
+      "screenshot": "docs/verify/policy-chrome-ok-noflags.png"
+    },
+    {
+      "id": "policy-edge",
+      "browser": "edge",
+      "source": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\OverrideSecurityRestrictionsOnInsecureOrigin",
+      "isSecureContext": true,
+      "getDisplayMedia": "function",
+      "policyStatusOnPage": "确定（Edge 的 OK）",
+      "capture": {
+        "ok": true,
+        "tracks": 1,
+        "trackLabel": "screen:0:0",
+        "trackState": "live",
+        "width": 1920,
+        "height": 1080,
+        "tookMs": 260,
+        "frameBytesApprox": 896529,
+        "frameSHA1": "3d069fbc08dcb0e9c815b0827b01b1c09e4f2710"
+      },
+      "screenshot": "docs/verify/policy-edge-ok.png"
+    },
+    {
+      "id": "after-remove",
+      "browser": "chrome",
+      "action": "Enable-DrillsInsecureOrigin.ps1 -Remove",
+      "isSecureContext": false,
+      "getDisplayMedia": "undefined",
+      "policyStatusOnPage": "未设置。",
+      "note": "撤销后重新启动浏览器即恢复非安全上下文",
+      "screenshot": "docs/verify/policy-chrome-unset-after-remove.png"
+    },
+    {
+      "id": "re-applied",
+      "browser": "chrome",
+      "action": "重新执行 Enable-DrillsInsecureOrigin.ps1",
+      "isSecureContext": true,
+      "getDisplayMedia": "function",
+      "capture": {
+        "ok": true,
+        "trackLabel": "screen:0:0",
+        "trackState": "live",
+        "width": 1920,
+        "height": 1080,
+        "frameSHA1": "fedfb20bc6119096e10417e053309ed2b7e36674"
+      }
+    }
+  ]
+}

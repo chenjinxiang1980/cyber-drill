@@ -732,6 +732,13 @@ services:
 ```
 然后 `docker compose up -d --force-recreate app` 让挂载生效。**以后改 public/ 里的文件，浏览器刷新就能看到**（Ctrl+Shift+R 强制刷新避开缓存）。
 
+> **挂载前确认宿主权限**（重新解压 bundle 后也要执行一次，非 root 解压会受 umask 影响）：
+> ```bash
+> find bundle/public -type d -exec chmod 755 {} +
+> find bundle/public -type f -exec chmod 644 {} +
+> ```
+> 容器以 uid 10001 运行，静态文件若是 640/600，非属主读不到会整站 403。
+
 > **生产可改回内置**：bind mount 方便迭代，但如果要交付纯镜像（不依赖外部目录），把这行 volumes 删掉、重建镜像即可。
 
 ### Q14：前端改动必须同步到 VM（唯一通道说明）
@@ -756,7 +763,8 @@ powershell -ExecutionPolicy Bypass -File scripts\sync-public-to-vm.ps1 -Apply
 2. 差异文件先备份到 VM `bundle/public.bak-<HHMMSS>/`
 3. SFTP 上传覆盖
 4. 自动 strip UTF-8 BOM（浏览器渲染不需要，保留也无害）
-5. 回读校验 md5 三方一致（仓库 = VM bundle = 容器内 mount）
+5. **权限归一化：目录 755、文件 644**（SFTP/解压受远端 umask 027 影响会产生 640，容器 uid 10001 非文件属主时页面 403）
+6. 回读校验 md5 三方一致（仓库 = VM bundle = 容器内 mount）
 
 **同步后不需要重启容器**——bind mount 是 live 的，Ctrl+Shift+R 强制刷新浏览器即可看到改动。
 

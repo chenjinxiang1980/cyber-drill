@@ -203,7 +203,7 @@ image: ghcr.io/your-org/drill-server:1.0.0
 | 访问控制 | 需使用者配置 | compose 里建议注释掉 MySQL 端口暴露；生产建议用 docker network + 内部 DNS |
 | 镜像签名 | 未启用 | 可配合 cosign 或 Docker Content Trust（未来） |
 | 扫描 | 未默认集成 | 建议部署前用 trivy / grype 扫描 |
-| 备份 | 需使用者配置 | `docker run --rm drill-server:local /opt/drill/bin/drill-migrate reset` 有破坏性，生产前先 `docker run --rm -v drill-mysql-data:/var/lib/mysql mysql:8.0.42 mysqldump ...` |
+| 备份 | 需使用者配置 | `docker run --rm drill-server:local /opt/drill/bin/drill-migrate reset` 有破坏性（0.7.2 起必须同时设置 `DRILL_ALLOW_RESET=1` 并追加 `-yes`），生产前先 `docker run --rm -v drill-mysql-data:/var/lib/mysql mysql:8.0.42 mysqldump ...` |
 
 ---
 
@@ -265,8 +265,10 @@ compose 里 MySQL 官方镜像通过 `MYSQL_ROOT_PASSWORD` / `MYSQL_USER` / `MYS
 
 ```bash
 # compose 里临时给 mysql 加一个 init 卷，手工跑 bootstrap
+# 旧版 bootstrap 路径若要求管理员初始口令，请临时传入自行生成的随机值，
+# 不要在文档、脚本或镜像中写入固定口令。
 docker compose run --rm -e DB_ROOT_PASSWORD=your_root_pw \
-    -e ADMIN_INIT_PASSWORD=StrongPass123 \
+    -e ADMIN_INIT_PASSWORD="$(openssl rand -hex 16)" \
     app /opt/drill/bin/drill-server-bootstrap -root=/opt/drill
 ```
 

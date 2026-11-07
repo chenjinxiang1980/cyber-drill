@@ -33,14 +33,13 @@ openssl rand -hex 32
 
 ### 1.3 默认账号密码策略（开源红线）
 
-> **仓库不预置任何可用凭证**。所有账号的初始密码必须由部署方自行设置后写入数据库。
+> **仓库不预置任何可用凭证**。管理员初始口令由安装器随机生成；其余账号由服务端随机生成一次性口令后写入数据库，首次登录强制改密。
 
 **密码来源**：
 - `.env.example` 中仅出现 `__REPLACE_WITH__` 占位符，不含任何真实口令
-- 部署方在本地 `.env` 中设置 `ADMIN_INIT_PASSWORD`（admin 初始密码）和 `DRILL_INIT_PWD`（新建用户默认密码）
-- 密码写入由以下两种方式完成：
-  - bootstrap 初始化脚本首次建库时自动写入
-  - `scripts\reset_default_passwords.ps1` 统一重置所有账号密码（含 admin）
+- 管理员初始口令由安装器为 `admin` / `platformadmin` **各生成独立随机值**，写入本地 `.env`（不提交仓库）并在安装输出打印一次；手工部署缺失时由 `drill-seed` 随机生成并写入启动日志
+- 后台新建/重置账号：服务端随机生成一次性口令，仅在响应中返回一次
+- 所有账号 `must_change=1`，首次登录必须改密；未改密前除改密接口外一律拒绝。`DRILL_INIT_PWD` 统一默认口令已移除
 
 **安全要求**：
 - 口令必须 ≥ 16 字符，含大小写 + 数字 + 符号，不含字典词
@@ -400,11 +399,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, REFERENCES
 | 脚本内置硬编码默认密码 | 脚本从参数或环境变量读取口令，缺失则报错退出 |
 | 迁移 SQL 中 `INSERT INTO users ... VALUES ('admin', ..., 'admin123')` | 迁移 SQL 只插入用户名和角色，密码列留 NULL 或占位符 |
 
-**密码来源优先级**（所有脚本统一遵循）：
+**初始口令来源**（现行实现）：
 ```
-1. 命令行 -Password 参数
-2. DRILL_DEFAULT_PASSWORD / ADMIN_INIT_PASSWORD 环境变量
-3. ↓ 两者都缺失 → 直接报错退出，绝不使用内置默认值
+1. 管理员：安装器写入 .env 的 ADMIN_INIT_PASSWORD / PLATFORMADMIN_INIT_PASSWORD（随机、每账号独立）
+2. 手工部署兜底：drill-seed 随机生成，仅写入启动日志一次
+3. 后台新建/重置账号：服务端随机生成，仅响应返回一次
+4. 任何路径都不使用统一口令或内置默认值；首次登录强制改密
 ```
 
 **密码哈希算法**（所有写入路径统一遵循）：
