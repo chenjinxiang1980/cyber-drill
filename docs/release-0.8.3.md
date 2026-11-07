@@ -84,7 +84,7 @@
 | 产物 | 说明 |
 |------|------|
 | 源码 | GitHub / Gitee `main` + `v0.8.3` 标签 |
-| Docker 镜像 | `drill-server:0.8.3` / `latest`（VM 侧构建） |
+| Docker 镜像 | `drill-server:0.8.3` / `latest`（VM 侧构建，149,895,938 B） |
 | GHCR | `ghcr.io/chenjinxiang1980/cyber-drill:0.8.3` / `:latest` |
 | SWR | `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:0.8.3` / `:latest` |
 | 迁移 | `migrations/` 共 47 个 `.up.sql`，末位 `0090_distractor_rewrite_v2` |
@@ -92,11 +92,12 @@
 镜像 manifest digest（GHCR 与 SWR 一致）
 
 ```
-sha256:44650726accc1fef6a415044ea2672fd03b74cb294931cbce17f3e49e0cf31cc
+sha256:2464321a90d00570c51417154ae5c1961a048b8b79b78b8d8dba6e8aab4be91c
 ```
 
-镜像内 `/opt/drill/bin/drill-server`：12,062,880 B，静态链接（`CGO_ENABLED=0`，Alpine/musl
-可直接运行），SHA-256
+镜像大小 149,895,938 B（Alpine 3.20 干净运行时，含 `tini` / `wget` / `mariadb-client` /
+`tzdata`），镜像 ID `sha256:4f9ca9eed17a…`。镜像内 `/opt/drill/bin/drill-server`：12,062,880 B，
+静态链接（`CGO_ENABLED=0`，Alpine/musl 可直接运行），SHA-256
 `436811089bd382955269dec1172ec9adeab6fd4342aec66113de1f471915bf37`；启动日志中
 `version=0.8.3`、`buildTime=2026-11-08T02:29:00+08:00`、`gitCommit=bf98c80`。
 `server/deploy-linux/drill-server.sha256.txt` 已按该实测值重签；镜像内 `public/` 6 个核心文件
@@ -121,5 +122,5 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 | 现网 `schema_migrations` | 47 行，末位 `0090_distractor_rewrite_v2` |
 | 现网前端 | `public/` 6 个核心文件 SHA-256 与仓库一致 |
 | 镜像内容 | 含全部 47 个迁移与现网一致的 `public/`，静态资源 644 / 目录与二进制 755 |
-| 两个镜像仓库 | `0.8.3` 与 `latest` 均已推送，匿名可拉，digest 一致 `sha256:44650726…` |
+| 两个镜像仓库 | `0.8.3` 与 `latest` 均已推送，匿名可拉，digest 一致 `sha256:2464321a…` |
 | 隔离冒烟 | 临时 MySQL + 应用容器（端口 18093），`/api/health` 返回 `0.8.3`，新建库迁移 47 条、末位 `0090`，验后容器与网络已清理 |
