@@ -1,4 +1,4 @@
-﻿// verify_tls — 自动化 TLS 行为断言（全进程实测）
+// verify_tls — 自动化 TLS 行为断言（全进程实测）
 // 1. TLS_ENABLED=false  → 真启动 HTTP server，GET /api/health → 200
 // 2. TLS_ENABLED=true + 证书缺失 → 真启动，断言 exit code=2，stderr 含证书路径
 // 3. TLS_ENABLED=true + 真证书   → 真启动 HTTPS，GET /api/health → 200
@@ -93,16 +93,16 @@ func genSelfSigned() ([]byte, []byte) {
 		panic(err)
 	}
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "localhost"},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(1 * time.Hour),
-		IPAddresses:   []net.IP{net.IPv4(127, 0, 0, 1)},
-		DNSNames:     []string{"localhost"},
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "localhost"},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(1 * time.Hour),
+		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1)},
+		DNSNames:              []string{"localhost"},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		IsCA:        true,
+		IsCA:                  true,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
 	if err != nil {
@@ -122,14 +122,14 @@ func main() {
 	// ⚠️ DB_USER/DB_PASSWORD 不在此设置，让子进程从 .env 或父进程环境继承 —— 仓库内零凭证字面量
 	baseEnv := func(httpAddr string) map[string]string {
 		return map[string]string{
-			"DB_NAME":         "drill_system",
-			"DB_HOST":         "127.0.0.1",
-			"DB_PORT":         "3306",
-			"JWT_SECRET":      hexPad("deadbeef", 64),
-			"SESSION_SECRET":  hexPad("cafebabe", 64),
-			"APP_ENV":         "test",
-			"TLS_ENABLED":     "false",   // 每个断言里会覆盖
-			"HTTP_ADDR":       httpAddr,
+			"DB_NAME":        "drill_system",
+			"DB_HOST":        "127.0.0.1",
+			"DB_PORT":        "3306",
+			"JWT_SECRET":     hexPad("deadbeef", 64),
+			"SESSION_SECRET": hexPad("cafebabe", 64),
+			"APP_ENV":        "test",
+			"TLS_ENABLED":    "false", // 每个断言里会覆盖
+			"HTTP_ADDR":      httpAddr,
 		}
 	}
 

@@ -326,8 +326,10 @@ func projectProgress(database *db.DB, projectID, scenarioID, mode, status string
 	if mode == "基础版" {
 		var total, done sql.NullInt64
 		_ = database.QueryRow(
-			`SELECT COUNT(*), COALESCE(SUM(CASE WHEN status='已完成' THEN 1 ELSE 0 END),0)
-			 FROM tasks WHERE project_id=?`, projectID,
+			`SELECT COUNT(*), COALESCE(SUM(CASE WHEN t.status='已完成' THEN 1 ELSE 0 END),0)
+			 FROM tasks t
+			 WHERE t.project_id=?
+			   AND NOT EXISTS (SELECT 1 FROM script_nodes n WHERE n.id=t.node_id AND n.deleted_at IS NOT NULL)`, projectID,
 		).Scan(&total, &done)
 		if !total.Valid || total.Int64 == 0 {
 			return 0
@@ -340,7 +342,7 @@ func projectProgress(database *db.DB, projectID, scenarioID, mode, status string
 	}
 	var correct sql.NullInt64
 	_ = database.QueryRow(
-		`SELECT COUNT(*) FROM script_nodes WHERE scenario_id=? AND type!='end' AND COALESCE(flow_type,'correct')!='distractor'`,
+		`SELECT COUNT(*) FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL AND type!='end' AND COALESCE(flow_type,'correct')!='distractor'`,
 		scenarioID,
 	).Scan(&correct)
 	if !correct.Valid || correct.Int64 == 0 {
@@ -350,6 +352,7 @@ func projectProgress(database *db.DB, projectID, scenarioID, mode, status string
 	_ = database.QueryRow(
 		`SELECT COUNT(DISTINCT ds.matched_node) FROM drill_steps ds
 		 JOIN script_nodes n ON n.id=ds.matched_node AND n.scenario_id=?
+		   AND n.deleted_at IS NULL
 		   AND COALESCE(n.flow_type,'correct')!='distractor' AND n.type!='end'
 		 WHERE ds.project_id=?`,
 		scenarioID, projectID,
@@ -360,7 +363,14 @@ func projectProgress(database *db.DB, projectID, scenarioID, mode, status string
 // --- scenarios ---
 
 func queryScenarios(database *db.DB) []gin.H {
-	rows, err := database.Query(`SELECT id,name,type,level,difficulty,status,version,updated,nodes,descr,alert FROM scenarios ORDER BY id DESC`)
+	// nodes 为 scenarios 表存储的全量计数（含混淆节点），用于保存与一致性校验；
+	// displayNodes 为展示口径（排除混淆节点、含终止节点），distractors 为混淆节点数。
+	rows, err := database.Query(`SELECT s.id,s.name,s.type,s.level,s.difficulty,s.status,s.version,s.updated,s.nodes,s.descr,s.alert,
+		(SELECT COUNT(*) FROM script_nodes n WHERE n.scenario_id=s.id AND n.deleted_at IS NULL
+			AND COALESCE(n.flow_type,'correct')!='distractor') AS display_nodes,
+		(SELECT COUNT(*) FROM script_nodes n WHERE n.scenario_id=s.id AND n.deleted_at IS NULL
+			AND COALESCE(n.flow_type,'correct')='distractor') AS distractors
+		FROM scenarios s ORDER BY s.id DESC`)
 	if err != nil {
 		slog.Warn("queryScenarios 失败", "err", err)
 		return []gin.H{}
@@ -369,25 +379,40 @@ func queryScenarios(database *db.DB) []gin.H {
 	out := make([]gin.H, 0)
 	for rows.Next() {
 		var id, name, typ, level, difficulty, status, version, updated sql.NullString
-		var nodes sql.NullInt64
+		var nodes, displayNodes, distractors sql.NullInt64
 		var descr, alert sql.NullString
-		if err := rows.Scan(&id, &name, &typ, &level, &difficulty, &status, &version, &updated, &nodes, &descr, &alert); err != nil {
+		if err := rows.Scan(&id, &name, &typ, &level, &difficulty, &status, &version, &updated, &nodes,
+			&descr, &alert, &displayNodes, &distractors); err != nil {
 			continue
 		}
 		out = append(out, gin.H{
-			"id":      util.ScanNullableString(id),
-			"name":    util.ScanNullableString(name),
-			"type":    util.ScanNullableString(typ),
-			"level":   util.ScanNullableString(level),
-			"status":  util.ScanNullableString(status),
-			"version": util.ScanNullableString(version),
-			"updated": util.ScanNullableString(updated),
-			"nodes":   nullInt(nodes),
-			"desc":    util.ScanNullableString(descr),
-			"alert":   util.ScanNullableString(alert),
+			"id":           util.ScanNullableString(id),
+			"name":         util.ScanNullableString(name),
+			"type":         util.ScanNullableString(typ),
+			"level":        util.ScanNullableString(level),
+			"status":       util.ScanNullableString(status),
+			"version":      util.ScanNullableString(version),
+			"updated":      util.ScanNullableString(updated),
+			"nodes":        nullInt(nodes),
+			"displayNodes": nullInt(displayNodes),
+			"distractors":  nullInt(distractors),
+			"desc":         util.ScanNullableString(descr),
+			"alert":        util.ScanNullableString(alert),
 		})
 	}
 	return out
+}
+
+// queryScenarioNodeCounts 返回单个剧本的展示口径节点数（排除混淆节点）与混淆节点数。
+// 与 queryScenarios 的子查询保持同一谓词，供保存响应与后续详情接口复用。
+func queryScenarioNodeCounts(database *db.DB, scenarioID string) (displayNodes, distractors int) {
+	_ = database.QueryRow(
+		`SELECT
+			COALESCE(SUM(CASE WHEN COALESCE(flow_type,'correct')!='distractor' THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN COALESCE(flow_type,'correct')='distractor' THEN 1 ELSE 0 END),0)
+		 FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL`, scenarioID,
+	).Scan(&displayNodes, &distractors)
+	return displayNodes, distractors
 }
 
 // --- script nodes ---
@@ -395,7 +420,7 @@ func queryScenarios(database *db.DB) []gin.H {
 func queryScriptNodes(database *db.DB) []gin.H {
 	rows, err := database.Query(`SELECT id,scenario_id,type,title,short_title,target,time,timeout,form,att,descr,
 		branches,seq,guide,keywords,action,wrong,evidence_req,required,flow_type,score,receiver,deps,
-		pos_x,pos_y,anchor_id,release_timing,parallel_desc,quality_rules FROM script_nodes ORDER BY scenario_id,seq`)
+		pos_x,pos_y,anchor_id,release_timing,parallel_desc,quality_rules FROM script_nodes WHERE deleted_at IS NULL ORDER BY scenario_id,seq`)
 	if err != nil {
 		slog.Warn("queryScriptNodes 失败", "err", err)
 		return []gin.H{}
@@ -524,7 +549,7 @@ func basicNodeAvailability(database *db.DB, projectID string) map[string]nodeAva
 	byID := map[string]*availNode{}
 	order := make([]*availNode, 0)
 	rows, err := database.Query(
-		`SELECT id,COALESCE(title,''),COALESCE(deps,'[]'),COALESCE(flow_type,'correct'),COALESCE(type,'') FROM script_nodes WHERE scenario_id=?`, sid)
+		`SELECT id,COALESCE(title,''),COALESCE(deps,'[]'),COALESCE(flow_type,'correct'),COALESCE(type,'') FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL`, sid)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -635,8 +660,10 @@ func queryTasks(database *db.DB, u *auth.User) []gin.H {
 	}
 
 	rows, err := database.Query(
-		`SELECT id,project_id,role_id,title,descr,deadline,status,level,forms,node_id,seq,completed_at,accepted_at
-		 FROM tasks ORDER BY seq`,
+		`SELECT t.id,t.project_id,t.role_id,t.title,t.descr,t.deadline,t.status,t.level,t.forms,t.node_id,t.seq,t.completed_at,t.accepted_at
+		 FROM tasks t
+		 WHERE NOT EXISTS (SELECT 1 FROM script_nodes n WHERE n.id=t.node_id AND n.deleted_at IS NOT NULL)
+		 ORDER BY t.seq`,
 	)
 	if err != nil {
 		slog.Warn("queryTasks 失败", "err", err)
@@ -857,13 +884,25 @@ func normalizeFields(raw []any) []any {
 			} else {
 				finalOpts = []any{}
 			}
-			out = append(out, map[string]any{
+			// 默认值：与 hint（字段说明）/ 输入框 placeholder 区分，是真正回填到输入框的值。
+			// 留空表示不配置默认值（前端走模拟数据兜底），因此空串不下发该键。
+			defaultVal := ""
+			if x, ok := v["default"].(string); ok {
+				defaultVal = clipStr(strings.TrimSpace(x), 300)
+			} else if x, ok := v["defaultValue"].(string); ok {
+				defaultVal = clipStr(strings.TrimSpace(x), 300)
+			}
+			item := map[string]any{
 				"label":    label,
 				"hint":     hint,
 				"required": required,
 				"type":     typeStr,
 				"options":  finalOpts,
-			})
+			}
+			if defaultVal != "" {
+				item["default"] = defaultVal
+			}
+			out = append(out, item)
 		default:
 			continue
 		}
@@ -1108,7 +1147,7 @@ var externalEvidenceTypes = []string{"表单文书", "上报材料", "报案材�
 var externalEvidenceRoles = map[string]bool{"itlead": true, "commander": true}
 
 func queryEvidence(database *db.DB, u *auth.User) []gin.H {
-	rows, err := database.Query(`SELECT id,type,name,size,time,role_id,uploader,auto,task_id,project_id,note,file_path,created_at FROM evidence ORDER BY created_at,id`)
+	rows, err := database.Query(`SELECT id,type,name,size,time,role_id,uploader,auto,task_id,project_id,note,file_path,created_at,node_id,req_key FROM evidence ORDER BY created_at,id`)
 	if err != nil {
 		slog.Warn("queryEvidence 失败", "err", err)
 		return []gin.H{}
@@ -1125,8 +1164,8 @@ func queryEvidence(database *db.DB, u *auth.User) []gin.H {
 	for rows.Next() {
 		var id, tp, name, size, tm, roleID, uploader sql.NullString
 		var auto sql.NullInt64
-		var taskID, projectID, note, filePath, createdAt sql.NullString
-		if err := rows.Scan(&id, &tp, &name, &size, &tm, &roleID, &uploader, &auto, &taskID, &projectID, &note, &filePath, &createdAt); err != nil {
+		var taskID, projectID, note, filePath, createdAt, nodeID, reqKey sql.NullString
+		if err := rows.Scan(&id, &tp, &name, &size, &tm, &roleID, &uploader, &auto, &taskID, &projectID, &note, &filePath, &createdAt, &nodeID, &reqKey); err != nil {
 			continue
 		}
 		typeV := util.ScanNullableString(tp)
@@ -1153,6 +1192,8 @@ func queryEvidence(database *db.DB, u *auth.User) []gin.H {
 			"auto":      auto.Valid && auto.Int64 == 1,
 			"taskId":    util.ScanNullableString(taskID),
 			"projectId": util.ScanNullableString(projectID),
+			"nodeId":    util.ScanNullableString(nodeID),
+			"reqKey":    util.ScanNullableString(reqKey),
 			"note":      util.ScanNullableString(note),
 			"hasFile":   fp != "",
 			"url":       url,

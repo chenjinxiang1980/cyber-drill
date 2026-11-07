@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	"drill-system/internal/auth"
+	"drill-system/internal/config"
 	"drill-system/internal/db"
 	"drill-system/internal/util"
 
@@ -14,7 +15,8 @@ import (
 
 // --- auth 补充接口 ---
 
-// GetAccounts GET /api/auth/accounts —— 免登录，读取账号列表供前端选择
+// GetAccounts GET /api/auth/accounts —— 账号列表（仅平台管理员）
+// 登录页不再匿名获取账号姓名/单位/角色；该接口仅供 admin.html 维护用户时使用。
 // 返回 [{username,name,org,role,roles:[{id,name,short,color,external}]}]
 func GetAccounts(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -54,7 +56,7 @@ func GetAccounts(database *db.DB) gin.HandlerFunc {
 
 		// 查 user_roles JOIN roles（只取启用的角色）
 		urRows, err := database.Query(
-			`SELECT ur.user_id, ur.role_id, r.name, r.short, r.color, r.`+"`external`"+`
+			`SELECT ur.user_id, ur.role_id, r.name, r.short, r.color, r.` + "`external`" + `
 			 FROM user_roles ur
 			 JOIN roles r ON ur.role_id=r.id
 			 WHERE r.status='启用'
@@ -109,7 +111,7 @@ func GetAccounts(database *db.DB) gin.HandlerFunc {
 func GetRoles(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rows, err := database.Query(
-			`SELECT id,name,short,icon,color,descr,nav,`+"`external`"+`
+			`SELECT id,name,short,icon,color,descr,nav,` + "`external`" + `
 			 FROM roles WHERE status='启用' ORDER BY seq`,
 		)
 		if err != nil {
@@ -150,8 +152,9 @@ var (
 )
 
 // ChangePassword POST /api/auth/change-password —— 修改当前用户密码
-// 路由层已挂 RequireAuth，handler 内用 auth.CurrentUser(c)
-func ChangePassword(database *db.DB, authSvc *auth.Service) gin.HandlerFunc {
+// 路由层已挂 RequireAuth；待改密受限令牌也放行本接口。
+// 成功后吊销该用户全部旧会话，签发正式 token 并写 /uploads 媒体 Cookie。
+func ChangePassword(database *db.DB, authSvc *auth.Service, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := auth.CurrentUser(c)
 		if u == nil {
@@ -203,7 +206,7 @@ func ChangePassword(database *db.DB, authSvc *auth.Service) gin.HandlerFunc {
 
 		// 4. 更新密码 + 清除 must_change
 		if _, err := database.Exec(
-			`UPDATE users SET pwd_salt=?, pwd_hash=?, must_change=0 WHERE id=?`,
+			`UPDATE users SET pwd_salt=?, pwd_hash=?, must_change=0, login_attempts=0, locked_until=NULL WHERE id=?`,
 			newSalt, newHash, u.ID,
 		); err != nil {
 			slog.Warn("ChangePassword UPDATE 失败", "err", err, "uid", u.ID)
@@ -211,7 +214,19 @@ func ChangePassword(database *db.DB, authSvc *auth.Service) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(200, gin.H{"ok": true, "time": util.NowSec()})
+		// 5. 吊销全部旧会话（含当前受限会话），随后签发正式 token
+		database.Exec(`DELETE FROM sessions WHERE user_id=?`, u.ID)
+		// 安装期生成的一次性初始口令已使用，清空部署 .env 中的明文（尽力而为）。
+		invalidateInitialPassword(u.Username)
+		token, err := authSvc.Issue(u.ID, u.Role.ID)
+		if err != nil {
+			slog.Warn("ChangePassword 重新签发会话失败", "err", err, "uid", u.ID)
+			c.JSON(200, gin.H{"ok": true, "time": util.NowSec()})
+			return
+		}
+		setMediaCookie(c, token, cfg)
+		writeAudit(database, u, c, "修改登录密码")
+		c.JSON(200, gin.H{"ok": true, "time": util.NowSec(), "token": token})
 	}
 }
 

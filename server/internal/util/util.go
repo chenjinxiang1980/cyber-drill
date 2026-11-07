@@ -154,9 +154,10 @@ func SecBetween(a, b string) float64 {
 
 // ElapsedSec 项目真实计时（started_at → paused_at/ended_at），与 Node drill_clock.elapsedSec 一致
 // 规则：
-//   status 未开始 或 started_at 为空/解析失败 → nil（JSON null）
-//   结束时刻优先级：ended_at → paused_at（仅 status=暂停）→ 当前时间
-//   结果 = 结束 − 开始 − paused_sec，负数按 0
+//
+//	status 未开始 或 started_at 为空/解析失败 → nil（JSON null）
+//	结束时刻优先级：ended_at → paused_at（仅 status=暂停）→ 当前时间
+//	结果 = 结束 − 开始 − paused_sec，负数按 0
 func ElapsedSec(startedAt, pausedAt, endedAt string, pausedSec int64, status string) any {
 	if status == "未开始" {
 		return nil

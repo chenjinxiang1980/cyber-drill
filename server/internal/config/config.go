@@ -28,8 +28,8 @@ type Config struct {
 	AppEnv string // development | production
 
 	// HTTP
-	HTTPAddr    string
-	PublicBase  string
+	HTTPAddr   string
+	PublicBase string
 
 	// MySQL
 	DBHost     string
@@ -47,10 +47,10 @@ type Config struct {
 	SessionSecret string
 
 	// HTTPS/TLS
-	TLSEnabled         bool
-	TLSAddr            string // ":8443" — 显式开关时使用，覆盖 HTTPAddr
-	HTTPSCertFile      string
-	HTTPSKeyFile       string
+	TLSEnabled          bool
+	TLSAddr             string // ":8443" — 显式开关时使用，覆盖 HTTPAddr
+	HTTPSCertFile       string
+	HTTPSKeyFile        string
 	HTTPRedirectToHTTPS bool // true = 同时起 HTTP 做 301 跳转
 
 	// 上传
@@ -61,19 +61,20 @@ type Config struct {
 	DataDir string
 
 	// 限流
-	RateLimitGlobal int // req/min（仅 /api/*）
-	RateLimitAuth   int
-	RateLimitScreen int // req/min（大屏匿名只读接口，单独计数）
+	RateLimitGlobal  int // req/min（仅 /api/*）
+	RateLimitAuth    int
+	RateLimitScreen  int // req/min（大屏匿名只读接口，单独计数）
+	RateLimitCaptcha int // req/min（验证码接口，单独限流）
 
 	// 大屏免登录观摩：true = 未登录可只读访问 /api/screen/*，false = 恢复必须登录
 	ScreenPublicView bool
 
 	// 登录失败锁定
-	LoginMaxFailures  int  // 连续失败次数阈值
-	LoginLockMinutes  int  // 锁定时长（分钟）
+	LoginMaxFailures int // 连续失败次数阈值
+	LoginLockMinutes int // 锁定时长（分钟）
 
 	// 验证码
-	CaptchaEnabled   bool
+	CaptchaEnabled    bool
 	CaptchaTTLSeconds int
 
 	// CORS
@@ -115,36 +116,38 @@ func Load(projectRoot string) *Config {
 	}
 
 	c := &Config{
-		AppEnv:          getEnv("APP_ENV", "development"),
-		HTTPAddr:        getEnv("HTTP_ADDR", "0.0.0.0:8090"),
-		PublicBase:      strings.TrimRight(getEnv("PUBLIC_BASE_URL", ""), "/"),
-		DBHost:          getEnv("DB_HOST", "127.0.0.1"),
-		DBPort:          getEnvInt("DB_PORT", 3306),
-		DBName:          getEnv("DB_NAME", "drill_system"),
-		DBUser:          getEnv("DB_USER", ""),
-		DBPassword:      getEnv("DB_PASSWORD", ""),
-		DBSSLMode:       getEnv("DB_SSLMODE", "disable"),
-		JWTSecret:       getEnv("JWT_SECRET", ""),
-		JWTTTL:          time.Duration(getEnvInt("JWT_TTL", 480)) * time.Minute,
-		SessionSecret:   getEnv("SESSION_SECRET", ""),
-		TLSEnabled:      getEnvBool("TLS_ENABLED", false),
-		TLSAddr:         getEnv("TLS_ADDR", ":8443"),
-		HTTPSCertFile:   getEnv("HTTPS_CERT_FILE", ""),
-		HTTPSKeyFile:    getEnv("HTTPS_KEY_FILE", ""),
+		AppEnv:              getEnv("APP_ENV", "development"),
+		HTTPAddr:            getEnv("HTTP_ADDR", "0.0.0.0:8090"),
+		PublicBase:          strings.TrimRight(getEnv("PUBLIC_BASE_URL", ""), "/"),
+		DBHost:              getEnv("DB_HOST", "127.0.0.1"),
+		DBPort:              getEnvInt("DB_PORT", 3306),
+		DBName:              getEnv("DB_NAME", "drill_system"),
+		DBUser:              getEnv("DB_USER", ""),
+		DBPassword:          getEnv("DB_PASSWORD", ""),
+		DBSSLMode:           getEnv("DB_SSLMODE", "disable"),
+		JWTSecret:           getEnv("JWT_SECRET", ""),
+		JWTTTL:              time.Duration(getEnvInt("JWT_TTL", 480)) * time.Minute,
+		SessionSecret:       getEnv("SESSION_SECRET", ""),
+		TLSEnabled:          getEnvBool("TLS_ENABLED", false),
+		TLSAddr:             getEnv("TLS_ADDR", ":8443"),
+		HTTPSCertFile:       getEnv("HTTPS_CERT_FILE", ""),
+		HTTPSKeyFile:        getEnv("HTTPS_KEY_FILE", ""),
 		HTTPRedirectToHTTPS: getEnvBool("HTTP_REDIRECT_TO_HTTPS", false),
-		UploadRoot:      getEnv("UPLOAD_ROOT", "uploads"),
-		DataDir:         getEnv("DATA_DIR", "data"),
-		UploadMaxMB:     getEnvInt("UPLOAD_MAX_MB", 20),
-		RateLimitGlobal: getEnvInt("RATE_LIMIT_GLOBAL", 300),
-		RateLimitAuth:   getEnvInt("RATE_LIMIT_AUTH", 30),
-		RateLimitScreen: getEnvInt("RATE_LIMIT_SCREEN", 60),
-		ScreenPublicView: getEnvBool("SCREEN_PUBLIC_VIEW", true),
-		LoginMaxFailures: getEnvInt("LOGIN_MAX_FAILURES", 5),
-		LoginLockMinutes: getEnvInt("LOGIN_LOCK_MINUTES", 15),
-		CaptchaEnabled:    getEnvBool("CAPTCHA_ENABLED", true),
-		CaptchaTTLSeconds: getEnvInt("CAPTCHA_TTL_SECONDS", 120),
-		AllowOrigins:    splitCSV(getEnv("ALLOW_ORIGINS", "*")),
-		TrustedProxies:  splitCSV(getEnv("TRUSTED_PROXIES", "")),
+		UploadRoot:          getEnv("UPLOAD_ROOT", "uploads"),
+		DataDir:             getEnv("DATA_DIR", "data"),
+		UploadMaxMB:         getEnvInt("UPLOAD_MAX_MB", 20),
+		RateLimitGlobal:     getEnvInt("RATE_LIMIT_GLOBAL", 300),
+		RateLimitAuth:       getEnvInt("RATE_LIMIT_AUTH", 30),
+		RateLimitScreen:     getEnvInt("RATE_LIMIT_SCREEN", 60),
+		RateLimitCaptcha:    getEnvInt("RATE_LIMIT_CAPTCHA", 20),
+		ScreenPublicView:    getEnvBool("SCREEN_PUBLIC_VIEW", true),
+		LoginMaxFailures:    getEnvInt("LOGIN_MAX_FAILURES", 5),
+		LoginLockMinutes:    getEnvInt("LOGIN_LOCK_MINUTES", 15),
+		CaptchaEnabled:      getEnvBool("CAPTCHA_ENABLED", true),
+		CaptchaTTLSeconds:   getEnvInt("CAPTCHA_TTL_SECONDS", 120),
+		// 默认不允许跨域：前后端同源部署；确需跨域时显式配置 ALLOW_ORIGINS。
+		AllowOrigins:   splitCSV(getEnv("ALLOW_ORIGINS", "")),
+		TrustedProxies: splitCSV(getEnv("TRUSTED_PROXIES", "")),
 	}
 
 	// 2. 校验必填项

@@ -37,6 +37,8 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.CORS(cfg))
 	r.Use(middleware.BodyLimit(int64(cfg.UploadMaxMB)))
+	// 服务端审计：非只读 /api 请求在响应后落库，字段全部来自服务端上下文。
+	r.Use(handler.AuditWrites(database))
 
 	// 全局限流只覆盖 /api/*，不覆盖 /public/*、/uploads/*、SPA 兜底页。
 	// 先创建一个共享的 limiter（store 跨请求持久化），再用闭包按路径分发。
@@ -132,13 +134,17 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 		slog.Warn("public/ 目录不存在，未挂载前端", "path", publicDir)
 	}
 
-	// ---- 静态：uploads/ ----
+	// ---- 附件目录：不再匿名静态暴露 ----
+	// 浏览器 <img>/<a> 无法带自定义 Header，因此同时接受 Authorization /
+	// X-Drill-Token / ?t= 与登录时下发的 HttpOnly 媒体 Cookie。
 	uploadDir := filepath.Join(projectRoot, cfg.UploadRoot)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
 		slog.Error("创建 uploads 目录失败", "path", uploadDir, "err", err)
 	} else {
-		slog.Info("挂载静态 uploads/ 目录", "path", uploadDir)
-		r.Static("/uploads", uploadDir)
+		slog.Info("挂载鉴权 uploads/ 目录", "path", uploadDir)
+		mediaAuth := uploadAuth(authSvc)
+		r.GET("/uploads/*filepath", mediaAuth, serveUpload(uploadDir))
+		r.HEAD("/uploads/*filepath", mediaAuth, serveUpload(uploadDir))
 	}
 
 	// ---- /api ----
@@ -170,24 +176,24 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 		// ---- api/auth 组 ----
 		authg := api.Group("/auth")
 		{
-			// 免登录
-			authg.GET("/accounts", handler.GetAccounts(database))
+			// 免登录（账号列表已关闭匿名访问，改为仅平台管理员维护时使用）
 			authg.GET("/roles", handler.GetRoles(database))
-			authg.GET("/captcha", handler.Captcha(cfg.CaptchaTTLSeconds))
+			authg.GET("/captcha", middleware.RateLimit(cfg.RateLimitCaptcha), handler.Captcha(cfg.CaptchaTTLSeconds))
 			authg.POST("/login",
 				middleware.RateLimitByGroup("/api/auth", cfg.RateLimitAuth),
 				handler.Login(authSvc, database, cfg))
-			// logout 可不带 auth（delete token 尽力而为）
-			authg.POST("/logout", handler.Logout(authSvc))
+			// logout 可不带 auth（delete token 尽力而为），同时清理媒体 Cookie
+			authg.POST("/logout", handler.Logout(authSvc, cfg))
 		}
 		// 需认证
+		api.GET("/auth/accounts", authSvc.RequireAuth(), authSvc.RequireAdmin(), handler.GetAccounts(database))
 		api.GET("/auth/me", authSvc.RequireAuth(), handler.Me())
-		api.POST("/auth/change-password", authSvc.RequireAuth(), handler.ChangePassword(database, authSvc))
+		api.POST("/auth/change-password", authSvc.RequireAuth(), handler.ChangePassword(database, authSvc, cfg))
 
 		// ---- api/bootstrap 聚合 DTO ----
 		api.GET("/bootstrap", authSvc.RequireAuth(), handler.BootstrapHandler(database))
-		api.POST("/projects/:id/activate", authSvc.RequireAuth(), handler.PostProjectActivate(database))
-		api.PATCH("/projects/:id/status", authSvc.RequireAuth(), handler.PatchProjectStatus(database))
+		api.POST("/projects/:id/activate", authSvc.RequireAuth(), authSvc.RequirePlatformBoard(), handler.PostProjectActivate(database))
+		api.PATCH("/projects/:id/status", authSvc.RequireAuth(), authSvc.RequirePlatformBoard(), handler.PatchProjectStatus(database))
 
 		// ---- 备份目录（admin + system reset 共用）----
 		backupDir := filepath.Join(projectRoot, cfg.DataDir, "backups")
@@ -236,16 +242,21 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			adm.POST("/restore", handler.AdminRestore(database, backupDir, cfg))
 			adm.POST("/restore-upload", handler.AdminRestoreUpload(database))
 			adm.GET("/sysinfo", handler.AdminSysInfo(database))
-			adm.GET("/report/:projectId", handler.AdminReport(database))
-			adm.POST("/report/:projectId/export", handler.AdminReportExport(database))
 		}
 
-		// ---- api/content — 全部 RequireAuth ----
-		cnt := api.Group("/content", authSvc.RequireAuth())
+		// ---- 演练报告：平台管理员 / 指挥部 / 信息科负责人（与复盘评估同权）----
+		rpt := api.Group("/admin", authSvc.RequireAuth(), authSvc.RequirePlatformBoard())
 		{
-			cnt.GET("/monitor", handler.MonitorContentHandler(database))           // 大屏监视聚合（screen.html 依赖）
-			cnt.GET("/evaluation", handler.GetEvaluation(database))                // 评分项模板 + 当前项目 scores 明细
-			cnt.POST("/evaluation/scores", handler.PostEvaluationScores(database)) // 手动/自动考评 K1-K9 分项写入
+			rpt.GET("/report/:projectId", handler.AdminReport(database))
+			rpt.POST("/report/:projectId/export", handler.AdminReportExport(database))
+		}
+
+		// ---- api/content — 全部 RequireAuth；外部单位任何写操作统一 403 ----
+		cnt := api.Group("/content", authSvc.RequireAuth(), authSvc.RequireNotExternalWrite())
+		{
+			cnt.GET("/monitor", handler.MonitorContentHandler(database))                                           // 大屏监视聚合（screen.html 依赖）
+			cnt.GET("/evaluation", handler.GetEvaluation(database))                                                // 评分项模板 + 当前项目 scores 明细
+			cnt.POST("/evaluation/scores", authSvc.RequirePlatformBoard(), handler.PostEvaluationScores(database)) // 手动/自动考评 K1-K9 分项写入
 			cnt.GET("/scenarios", handler.GetScenarios(database))
 			cnt.GET("/script-nodes", handler.GetScriptNodes(database))
 			cnt.GET("/projects", handler.GetProjects(database))
@@ -262,32 +273,39 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			cnt.GET("/seqflow", handler.GetSeqFlow(database))
 
 			// ---- P2-3 写操作 ----
-			cnt.POST("/scenarios", handler.PostScenario(database))
-			cnt.PATCH("/scenarios/:id", handler.PatchScenario(database))
-			cnt.DELETE("/knowledge/:id", handler.DeleteKnowledge(database))
-			cnt.POST("/knowledge", handler.PostKnowledge(database, uploadDir, cfg.UploadMaxMB))
-			cnt.POST("/script-nodes", handler.PostScriptNodes(database))
+			cnt.POST("/scenarios", authSvc.RequireScenariosWrite(), handler.PostScenario(database))
+			cnt.PATCH("/scenarios/:id", authSvc.RequireScenariosWrite(), handler.PatchScenario(database))
+			cnt.DELETE("/knowledge/:id", authSvc.RequirePlatformBoard(), handler.DeleteKnowledge(database))
+			cnt.POST("/knowledge", authSvc.RequirePlatformBoard(), handler.PostKnowledge(database, uploadDir, cfg.UploadMaxMB))
+			cnt.POST("/script-nodes", authSvc.RequireScenariosAdmin(), handler.PostScriptNodes(database))
+			// 剧本节点软删：回收站与恢复
+			cnt.GET("/scenarios/:id/nodes/deleted", handler.GetDeletedScriptNodes(database))
+			cnt.POST("/scenarios/:id/nodes/:nodeId/restore", authSvc.RequireScenariosAdmin(), handler.PostScriptNodeRestore(database))
+			// P1-3 剧本版本历史：查看与回滚
+			cnt.GET("/scenarios/:id/revisions", handler.GetScriptRevisions(database))
+			cnt.GET("/scenarios/:id/revisions/:version", handler.GetScriptRevision(database))
+			cnt.POST("/scenarios/:id/revisions/:version/restore", authSvc.RequireScenariosAdmin(), handler.PostScriptRevisionRestore(database))
 
 			// ---- P2-4 Drill Core ----
-			cnt.POST("/projects", handler.PostProject(database))
+			cnt.POST("/projects", authSvc.RequirePlatformBoard(), handler.PostProject(database))
 			cnt.GET("/projects/:id/script", handler.GetProjectScript(database))
-			cnt.POST("/projects/:id/script/force", handler.PostProjectScriptForceView(database))
+			cnt.POST("/projects/:id/script/force", authSvc.RequirePlatformBoard(), handler.PostProjectScriptForceView(database))
 			cnt.GET("/projects/:id/script/export", handler.GetProjectScriptExport(database))
-			cnt.POST("/projects/:id/notify", handler.PostProjectNotify(database))
+			cnt.POST("/projects/:id/notify", authSvc.RequirePlatformBoard(), handler.PostProjectNotify(database))
 			cnt.GET("/projects/:id/notify/export", handler.GetProjectNotifyExport(database))
-			cnt.PATCH("/projects/:id/members", handler.PatchProjectMembers(database))
-			cnt.DELETE("/projects/:id", handler.DeleteProject(database, uploadDir))
+			cnt.PATCH("/projects/:id/members", authSvc.RequirePlatformBoard(), handler.PatchProjectMembers(database))
+			cnt.DELETE("/projects/:id", authSvc.RequirePlatformBoard(), handler.DeleteProject(database, uploadDir))
 
 			// ---- content 写操作补齐 ----
-			cnt.POST("/messages", handler.PostMessages(database))
+			cnt.POST("/messages", authSvc.RequireMessagePublisher(), handler.PostMessages(database))
 			cnt.POST("/notifs/read", handler.PostNotifsRead(database))
-			cnt.POST("/snapshots", handler.PostSnapshots(database))
-			cnt.POST("/seqflow", handler.PostSeqFlow(database))
+			cnt.POST("/snapshots", authSvc.RequirePlatformBoard(), handler.PostSnapshots(database))
+			cnt.POST("/seqflow", authSvc.RequirePlatformBoard(), handler.PostSeqFlow(database))
 			cnt.POST("/audit", handler.PostAudit(database))
 			cnt.GET("/audit", handler.GetContentAudit(database))
-			cnt.POST("/opinion", handler.PostOpinion(database))
-			cnt.PATCH("/opinion/:id", handler.PatchOpinion(database))
-			cnt.PATCH("/impact/:sys", handler.PatchImpact(database))
+			cnt.POST("/opinion", authSvc.RequirePlatformBoard(), handler.PostOpinion(database))
+			cnt.PATCH("/opinion/:id", authSvc.RequirePlatformBoard(), handler.PatchOpinion(database))
+			cnt.PATCH("/impact/:sys", authSvc.RequirePlatformBoard(), handler.PatchImpact(database))
 			cnt.GET("/users", handler.GetContentUsers(database))
 			cnt.GET("/roles", handler.GetContentRoles(database))
 			cnt.GET("/dashboard", handler.GetDashboard(database))
@@ -300,7 +318,7 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			cnt.POST("/chat/:group/upload", handler.PostChatUpload(database))
 
 			// ---- /api/drill v1 旧路径（前端仍在调用，v2 新路径无调用方已删除） ----
-			drill := api.Group("/drill", authSvc.RequireAuth())
+			drill := api.Group("/drill", authSvc.RequireAuth(), authSvc.RequireNotExternalWrite())
 			{
 				drill.GET("/workbench/:projectId", handler.GetDrillWorkbench(database))
 				drill.POST("/nodes/:nodeId/start", handler.PostDrillNodesStart(database))
@@ -316,25 +334,25 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			}
 		}
 
-		// ---- api/tasks 旧版路径（前端仍在调用） ----
-		tasks := api.Group("/tasks", authSvc.RequireAuth())
+		// ---- api/tasks 旧版路径（前端仍在调用）；外部单位任何写操作 403 ----
+		tasks := api.Group("/tasks", authSvc.RequireAuth(), authSvc.RequireNotExternalWrite())
 		{
 			tasks.GET("", handler.GetTasksLegacy(database))
 			tasks.GET("/", handler.GetTasksLegacy(database))
-			tasks.POST("/reset-all", handler.PostTaskResetAll(database))
+			tasks.POST("/reset-all", authSvc.RequireCommanderOrAdmin(), handler.PostTaskResetAll(database))
 			tasks.POST("/:id/accept", handler.PostTaskAccept(database))
 			tasks.POST("/:id/submit", handler.PostTaskSubmit(database))
 			tasks.POST("/:id/complete", handler.PostTaskComplete(database))
 			tasks.DELETE("/:id", handler.DeleteTaskLegacy(database))
 			tasks.GET("/:id/attachments", handler.GetTaskAttachments(database))
-			tasks.POST("/:id/attachments", handler.PostTaskAttachments(database))
-			tasks.DELETE("/:id/attachments/:attId", handler.DeleteTaskAttachment(database))
+			tasks.POST("/:id/attachments", handler.PostTaskAttachments(database, uploadDir, cfg.UploadMaxMB))
+			tasks.DELETE("/:id/attachments/:attId", handler.DeleteTaskAttachment(database, uploadDir))
 			tasks.POST("/:id/forms", handler.PostTaskForms(database))
 			tasks.GET("/:id/forms", handler.GetTaskForms(database))
 		}
 
-		// ---- api/evidence 旧版路径（前端仍在调用） ----
-		evd := api.Group("/evidence", authSvc.RequireAuth())
+		// ---- api/evidence 旧版路径（前端仍在调用）；外部单位只读 ----
+		evd := api.Group("/evidence", authSvc.RequireAuth(), authSvc.RequireNotExternalWrite())
 		{
 			evd.GET("", handler.GetEvidenceLegacy(database))
 			evd.GET("/", handler.GetEvidenceLegacy(database))
@@ -345,10 +363,83 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			evd.POST("/upload", handler.PostEvidenceUpload(database))
 			evd.GET("/requirements", handler.GetEvidenceRequirements(database))
 			evd.GET("/:id/download", handler.GetEvidenceDownload(database))
+			evd.DELETE("/:id", handler.DeleteEvidence(database, uploadDir))
 		}
 	}
 
 	return r
+}
+
+// uploadAuth /uploads 目录鉴权：
+//  1. 优先使用 Authorization / X-Drill-Token / ?t=；
+//  2. 浏览器直接请求（<img>、<a>）无法带 Header，回退到登录时下发的
+//     HttpOnly 媒体 Cookie；
+//  3. 待改密受限会话不允许读取附件。
+func uploadAuth(svc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := auth.TokenOf(c)
+		if token == "" {
+			if ck, err := c.Cookie(auth.MediaCookieName); err == nil {
+				token = ck
+			}
+		}
+		if token == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "未登录或会话已过期，请重新登录"})
+			return
+		}
+		u, err := svc.UserByToken(token)
+		if err != nil || u == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "未登录或会话已过期，请重新登录"})
+			return
+		}
+		if u.MustChange || u.Scope == auth.ScopePasswordChange {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "首次登录需先修改初始密码"})
+			return
+		}
+		// 写入上下文，供全局审计中间件记录附件读取
+		c.Set(auth.ContextKey, u)
+		c.Next()
+	}
+}
+
+// serveUpload 安全地提供 uploads 目录下的文件：
+// 拒绝目录、隐藏文件与路径穿越，响应禁止缓存（避免鉴权内容被代理缓存）。
+func serveUpload(root string) gin.HandlerFunc {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		absRoot = root
+	}
+	return func(c *gin.Context) {
+		raw := strings.TrimPrefix(c.Param("filepath"), "/")
+		if raw == "" {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		cleaned := filepath.Clean(raw)
+		if cleaned == "." || strings.HasPrefix(cleaned, "..") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		for _, seg := range strings.FieldsFunc(cleaned, func(r rune) bool { return r == '/' || r == '\\' }) {
+			if seg == "" || seg == ".." || strings.HasPrefix(seg, ".") {
+				c.Status(http.StatusNotFound)
+				return
+			}
+		}
+		abs := filepath.Join(absRoot, cleaned)
+		rel, err := filepath.Rel(absRoot, abs)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		fi, err := os.Stat(abs)
+		if err != nil || fi.IsDir() {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Header("Cache-Control", "private, no-store")
+		http.ServeFile(c.Writer, c.Request, abs)
+	}
 }
 
 // screenDenyWrite 大屏只读接口的写方法兜底：直接 403，不进入任何业务逻辑。

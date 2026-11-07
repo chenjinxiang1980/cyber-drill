@@ -1,7 +1,9 @@
 // Package auth —— JWT 签发校验 + scrypt 密码散列 + 三重令牌来源。
 //
 // 设计说明：
-//  1. 令牌是 JWT（满足用户要求），payload 含 userId/roleId/exp。
+//  1. 令牌是 JWT（满足用户要求），payload 含 userId/roleId/exp/jti。
+//     jti 为 128 位随机值：同一用户同一秒内多次登录也必须签发不同令牌，
+//     否则 sessions.token 主键冲突（0.7.0 改密后同秒重登报 500）。
 //  2. 签发后在 sessions 表写一条（sessions.token = JWT 字符串），用于吊销、
 //     过期清理、userByToken 查用户信息——与 Node 版 sessions 表保持语义一致。
 //  3. 三重来源按优先级：Authorization Bearer > X-Drill-Token header > ?t= query。
@@ -17,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -31,15 +34,25 @@ import (
 
 // User 当前会话绑定的用户信息（从 sessions JOIN users JOIN roles 读取）
 type User struct {
-	ID         int64  `json:"id"`
-	Username   string `json:"username"`
-	Name       string `json:"name"`
-	Org        string `json:"org"`
-	Status     string `json:"status"`
-	MustChange bool   `json:"mustChange"`
+	ID         int64    `json:"id"`
+	Username   string   `json:"username"`
+	Name       string   `json:"name"`
+	Org        string   `json:"org"`
+	Status     string   `json:"status"`
+	MustChange bool     `json:"mustChange"`
+	Scope      string   `json:"-"`     // 令牌作用域（password_change = 仅允许改密）
 	Roles      []string `json:"roles"` // 全部角色 id 列表
-	Role       Role   `json:"role"` // 当前会话角色
+	Role       Role     `json:"role"`  // 当前会话角色
 }
+
+// ScopePasswordChange 首次登录/重置口令后的受限令牌作用域：
+// 服务端只放行改密、查询自身信息与退出登录，其余接口一律 403。
+const ScopePasswordChange = "password_change"
+
+// MediaCookieName /uploads 静态资源的会话 Cookie 名。
+// 登录/改密成功后写入 HttpOnly Cookie，保证 <img src="/uploads/..."> 等
+// 无自定义 Header 的浏览器请求也能通过鉴权。
+const MediaCookieName = "drill_media"
 
 // Role 角色视图（与 Node 版返回字段对齐）
 type Role struct {
@@ -116,27 +129,92 @@ func VerifyPassword(pwd, saltHex, hashHex string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
+// ---- 初始口令 ----
+
+const (
+	tempPasswordLetters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+	tempPasswordDigits  = "23456789"
+	tempPasswordAll     = tempPasswordLetters + tempPasswordDigits
+	tempPasswordLen     = 14
+)
+
+func randomCharFrom(set string) (byte, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(set))))
+	if err != nil {
+		return 0, err
+	}
+	return set[n.Int64()], nil
+}
+
+// GenerateTempPassword 生成满足“至少 8 位且含字母+数字”策略的一次性随机口令。
+// 账号创建/重置时必须使用，且明文只在响应/日志中出现一次。
+func GenerateTempPassword() (string, error) {
+	buf := make([]byte, tempPasswordLen)
+	for i := range buf {
+		ch, err := randomCharFrom(tempPasswordAll)
+		if err != nil {
+			return "", err
+		}
+		buf[i] = ch
+	}
+	// 强制包含字母与数字，避免小概率不满足复杂度策略
+	letter, err := randomCharFrom(tempPasswordLetters)
+	if err != nil {
+		return "", err
+	}
+	digit, err := randomCharFrom(tempPasswordDigits)
+	if err != nil {
+		return "", err
+	}
+	buf[0], buf[1] = letter, digit
+	return string(buf), nil
+}
+
 // ---- JWT ----
+
+// newJTI 生成 128 位随机 JWT ID（32 个十六进制字符）。
+// 同一用户同一秒内多次签发时，exp/iat/sub 完全相同，仅靠 jti 保证令牌唯一；
+// 每次签发都重新生成，绝不复用既有令牌。
+func newJTI() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
 
 // tokenClaims JWT payload
 type tokenClaims struct {
 	jwt.RegisteredClaims
 	UserID int64  `json:"uid"`
 	RoleID string `json:"rid"`
+	Scope  string `json:"scp,omitempty"`
 }
 
-// Issue 签发 JWT + 写 sessions 表。返回 (JWT token, error)
+// Issue 签发正式 JWT（不受限作用域）。
 func (s *Service) Issue(userID int64, roleID string) (string, error) {
+	return s.IssueScoped(userID, roleID, "")
+}
+
+// IssueScoped 签发带作用域的 JWT + 写 sessions 表。
+// scope=password_change 时，中间件只放行改密相关接口。
+func (s *Service) IssueScoped(userID int64, roleID, scope string) (string, error) {
+	jti, err := newJTI()
+	if err != nil {
+		return "", fmt.Errorf("生成 JWT jti 失败: %w", err)
+	}
 	now := time.Now()
 	exp := now.Add(s.cfg.JWTTTL)
 	claims := tokenClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(exp),
 			Subject:   fmt.Sprintf("%d:%s", userID, roleID),
 		},
 		UserID: userID,
 		RoleID: roleID,
+		Scope:  scope,
 	}
 	tokenStr := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := tokenStr.SignedString([]byte(s.cfg.JWTSecret))
@@ -175,9 +253,9 @@ func (s *Service) Parse(tokenStr string) (*tokenClaims, error) {
 // ---- 令牌来源解析 ----
 
 // TokenOf 按 Node 版 auth.tokenOf 优先级从 gin.Context 取令牌
-//   1. Authorization: Bearer X
-//   2. X-Drill-Token: X
-//   3. Query ?t=X  （文件下载场景用这个，因为 <a download> 无 header）
+//  1. Authorization: Bearer X
+//  2. X-Drill-Token: X
+//  3. Query ?t=X  （文件下载场景用这个，因为 <a download> 无 header）
 func TokenOf(c *gin.Context) string {
 	if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimSpace(h[7:])
@@ -198,8 +276,8 @@ func (s *Service) UserByToken(tokenStr string) (*User, error) {
 	if tokenStr == "" {
 		return nil, errors.New("empty token")
 	}
-	// JWT 签名与 exp 校验（claims 结果已足够，不往下用）
-	_, err := s.Parse(tokenStr)
+	// JWT 签名与 exp 校验，同时读取受限作用域
+	claims, err := s.Parse(tokenStr)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +345,8 @@ func (s *Service) UserByToken(tokenStr string) (*User, error) {
 		return nil, errors.New("角色不存在")
 	}
 	u.Role = *r
-	if (r.Status != "" && r.Status != "启用") {
+	u.Scope = claims.Scope
+	if r.Status != "" && r.Status != "启用" {
 		s.db.Exec(`DELETE FROM sessions WHERE token=?`, tokenStr)
 		return nil, errors.New("角色已停用")
 	}
@@ -367,6 +446,7 @@ func (s *Service) CleanExpired() {
 // ---- Gin 中间件 ----
 
 // RequireAuth 强制认证。失败返回 401。
+// 若用户 must_change=1 或令牌作用域为 password_change，则只放行改密闭环接口。
 func (s *Service) RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := TokenOf(c)
@@ -379,18 +459,44 @@ func (s *Service) RequireAuth() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "未登录或会话已过期，请重新登录"})
 			return
 		}
+		if u.MustChange || u.Scope == ScopePasswordChange {
+			if !isPasswordChangeAllowed(c.Request.Method, c.Request.URL.Path) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+					"error": "首次登录需先修改初始密码",
+					"code":  "PASSWORD_CHANGE_REQUIRED",
+				})
+				return
+			}
+		}
 		c.Set(ContextKey, u)
 		c.Next()
 	}
 }
 
+// isPasswordChangeAllowed 受限令牌白名单：只允许确认身份、改密、退出登录。
+func isPasswordChangeAllowed(method, path string) bool {
+	switch {
+	case method == http.MethodGet && path == "/api/auth/me":
+		return true
+	case method == http.MethodPost && path == "/api/auth/change-password":
+		return true
+	case method == http.MethodPost && path == "/api/auth/logout":
+		return true
+	case method == http.MethodGet && path == "/api/health":
+		return true
+	}
+	return false
+}
+
 // OptionalAuth 可选认证：带有效令牌则写入当前用户，未带/无效令牌不拦截。
-// 仅用于大屏免登录只读接口；其他页面/接口仍使用 RequireAuth，行为不变。
+// 仅用于大屏免登录只读接口；受限令牌（待改密）不注入用户，按匿名视图处理。
 func (s *Service) OptionalAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if token := TokenOf(c); token != "" {
 			if u, err := s.UserByToken(token); err == nil {
-				c.Set(ContextKey, u)
+				if !u.MustChange && u.Scope != ScopePasswordChange {
+					c.Set(ContextKey, u)
+				}
 			}
 		}
 		c.Next()

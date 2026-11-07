@@ -1,7 +1,8 @@
 // verify_static —— 目录穿越防御 + 正常静态资源回归测试（自动化）
 // 启动 drill-server.exe 后用 HTTP client 打 14 条载荷：
-//   7 条穿越载荷 → 必须 404，响应体不含敏感内容
-//   7 条正常资源 → 必须 200
+//
+//	7 条穿越载荷 → 必须 404，响应体不含敏感内容
+//	7 条正常资源 → 必须 200
 //
 // 用法：PROBE_DB_NAME=drill_system go run ./cmd/verify_static
 // 依赖：同目录有 deploy/drill-server.exe + public/ + .env

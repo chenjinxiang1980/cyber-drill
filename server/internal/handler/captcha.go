@@ -19,12 +19,15 @@ import (
 type captchaEntry struct {
 	code    string    // 答案
 	expires time.Time // TTL 过期时间
+	ip      string    // 绑定的客户端 IP，防止验证码被跨终端复用
 }
 
+const captchaStoreMax = 10000
+
 var (
-	captchaStore   = make(map[string]*captchaEntry)
-	captchaMu      sync.Mutex
-	captchaMaxTTL  = 300 * time.Second // 实际最长存活上限（秒）
+	captchaStore  = make(map[string]*captchaEntry)
+	captchaMu     sync.Mutex
+	captchaMaxTTL = 300 * time.Second // 实际最长存活上限（秒）
 )
 
 func init() {
@@ -55,7 +58,7 @@ func generateCaptchaID() string {
 }
 
 // newCaptcha 生成一道简单算术题（≤100 的加法/减法），返回 id、答案、SVG image
-func newCaptcha(ttlSec int) (id, code, imageB64 string) {
+func newCaptcha(ttlSec int, ip string) (id, code, imageB64 string) {
 	id = generateCaptchaID()
 
 	// 生成题目：简单加法 a + b 或减法 a - b（保证正数结果）
@@ -89,7 +92,22 @@ func newCaptcha(ttlSec int) (id, code, imageB64 string) {
 		ttlSec = 120
 	}
 	captchaMu.Lock()
-	captchaStore[id] = &captchaEntry{code: code, expires: time.Now().Add(time.Duration(ttlSec) * time.Second)}
+	now := time.Now()
+	if len(captchaStore) >= captchaStoreMax {
+		// 先清过期，再按 map 随机淘汰，保证内存占用有上限
+		for k, v := range captchaStore {
+			if v.expires.Before(now) {
+				delete(captchaStore, k)
+			}
+		}
+		for k := range captchaStore {
+			if len(captchaStore) < captchaStoreMax {
+				break
+			}
+			delete(captchaStore, k)
+		}
+	}
+	captchaStore[id] = &captchaEntry{code: code, expires: now.Add(time.Duration(ttlSec) * time.Second), ip: ip}
 	captchaMu.Unlock()
 	return id, code, imageB64
 }
@@ -156,7 +174,7 @@ func captchaSVG(expr string) string {
 	dyOff, _ := rand.Int(rand.Reader, big.NewInt(7)) // 0-6px 上移
 	rotate := 0
 	if r, _ := rand.Int(rand.Reader, big.NewInt(3)); r.Int64() == 1 {
-		rotate = int(r.Int64()) * 2 - 3 // -3 或 3 度
+		rotate = int(r.Int64())*2 - 3 // -3 或 3 度
 	}
 
 	svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="44" viewBox="0 0 120 44">
@@ -190,6 +208,10 @@ func verifyCaptcha(c *gin.Context, captchaID, captchaCode string) bool {
 	if e.expires.Before(time.Now()) {
 		return false
 	}
+	// 绑定 IP 校验：防止验证码被批量抓取后在别的终端复用
+	if e.ip != "" && e.ip != c.ClientIP() {
+		return false
+	}
 
 	// 比对（字符串即算术题的结果字符串）
 	if strings.TrimSpace(captchaCode) != e.code {
@@ -201,11 +223,11 @@ func verifyCaptcha(c *gin.Context, captchaID, captchaCode string) bool {
 // ---- GET /api/auth/captcha ----
 func Captcha(ttlSec int) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id, _, img := newCaptcha(ttlSec)
+		id, _, img := newCaptcha(ttlSec, c.ClientIP())
 		c.JSON(http.StatusOK, gin.H{
-			"id":   id,
+			"id":    id,
 			"image": img,
-			"ttl":  ttlSec,
+			"ttl":   ttlSec,
 		})
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -217,6 +216,7 @@ func AdminGetAuditExport(database *db.DB) gin.HandlerFunc {
 		}
 		defer rows.Close()
 
+		writeAudit(database, auth.CurrentUser(c), c, "导出审计日志（CSV）")
 		filename := "audit_export_" + time.Now().Format("20060102_150405") + ".csv"
 		c.Header("Content-Type", "text/csv; charset=utf-8")
 		c.Header("Content-Disposition",
@@ -311,12 +311,11 @@ func AdminPostUsers(database *db.DB) gin.HandlerFunc {
 				return
 			}
 		}
-		pwd := body.Password
-		if pwd == "" {
-			pwd = os.Getenv("DRILL_INIT_PWD")
-			if pwd == "" {
-				pwd = "CHANGE_ME"
-			}
+		// 初始口令：一律随机生成，明文只在本次响应中返回一次；首次登录强制改密。
+		pwd, err := auth.GenerateTempPassword()
+		if err != nil {
+			util.Fail(c, 500, "生成初始口令失败")
+			return
 		}
 		salt, hash, err := auth.HashPassword(pwd)
 		if err != nil {
@@ -342,7 +341,8 @@ func AdminPostUsers(database *db.DB) gin.HandlerFunc {
 				database.Exec(`INSERT INTO user_roles (user_id,role_id) VALUES (?,?)`, newID, rid)
 			}
 		}
-		util.OK(c, gin.H{"ok": true, "id": newID, "username": body.Username})
+		writeAudit(database, u, c, "新建用户："+body.Username+"（角色 "+primaryRole+"）")
+		util.OK(c, gin.H{"ok": true, "id": newID, "username": body.Username, "initialPassword": pwd, "mustChange": true})
 	}
 }
 
@@ -438,6 +438,7 @@ func AdminPatchUsers(database *db.DB) gin.HandlerFunc {
 		if body.Status == "停用" {
 			database.Exec(`DELETE FROM sessions WHERE user_id=?`, id)
 		}
+		writeAudit(database, u, c, "修改用户："+curUsername)
 		util.OK(c, gin.H{"ok": true, "id": id})
 	}
 }
@@ -469,9 +470,12 @@ func AdminDeleteUsers(database *db.DB) gin.HandlerFunc {
 			util.Forbidden(c, "至少保留 1 个平台管理员")
 			return
 		}
+		var uname string
+		_ = database.QueryRow(`SELECT username FROM users WHERE id=?`, id).Scan(&uname)
 		database.Exec(`DELETE FROM sessions WHERE user_id=?`, id)
 		database.Exec(`DELETE FROM user_roles WHERE user_id=?`, id)
 		database.Exec(`DELETE FROM users WHERE id=?`, id)
+		writeAudit(database, u, c, "删除用户："+uname)
 		util.OK(c, gin.H{"ok": true})
 	}
 }
@@ -490,12 +494,11 @@ func AdminResetPassword(database *db.DB) gin.HandlerFunc {
 			Password string `json:"password"`
 		}
 		c.ShouldBindJSON(&body)
-		pwd := body.Password
-		if pwd == "" {
-			pwd = os.Getenv("DRILL_INIT_PWD")
-			if pwd == "" {
-				pwd = "CHANGE_ME"
-			}
+		// 重置口令：忽略客户端提交值，一律随机生成并只返回一次
+		pwd, err := auth.GenerateTempPassword()
+		if err != nil {
+			util.Fail(c, 500, "生成初始口令失败")
+			return
 		}
 		salt, hash, err := auth.HashPassword(pwd)
 		if err != nil {
@@ -514,7 +517,10 @@ func AdminResetPassword(database *db.DB) gin.HandlerFunc {
 		}
 		// 重置后 sessions 失效
 		database.Exec(`DELETE FROM sessions WHERE user_id=?`, id)
-		util.OK(c, gin.H{"ok": true, "mustChange": true})
+		var uname string
+		_ = database.QueryRow(`SELECT username FROM users WHERE id=?`, id).Scan(&uname)
+		writeAudit(database, auth.CurrentUser(c), c, "重置用户口令："+uname)
+		util.OK(c, gin.H{"ok": true, "mustChange": true, "initialPassword": pwd})
 	}
 }
 
@@ -563,6 +569,7 @@ func AdminPostRoles(database *db.DB) gin.HandlerFunc {
 			util.Fail(c, 500, "新增角色失败: "+err.Error())
 			return
 		}
+		writeAudit(database, u, c, "新建角色："+body.Name)
 		util.OK(c, gin.H{"ok": true, "id": newID})
 	}
 }
@@ -621,6 +628,7 @@ func AdminPutRoles(database *db.DB) gin.HandlerFunc {
 				return
 			}
 		}
+		writeAudit(database, u, c, "编辑角色："+id)
 		util.OK(c, gin.H{"ok": true})
 	}
 }
@@ -653,6 +661,7 @@ func AdminPatchRolesStatus(database *db.DB) gin.HandlerFunc {
 			// 该 role 绑定的所有会话立即失效（真实 sessions 表）
 			database.Exec(`DELETE FROM sessions WHERE role_id=?`, id)
 		}
+		writeAudit(database, u, c, "角色状态变更："+id+"→"+body.Status)
 		util.OK(c, gin.H{"ok": true})
 	}
 }
@@ -679,6 +688,7 @@ func AdminDeleteRoles(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		database.Exec(`DELETE FROM roles WHERE id=?`, id)
+		writeAudit(database, u, c, "删除角色："+id)
 		util.OK(c, gin.H{"ok": true})
 	}
 }

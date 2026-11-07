@@ -2,10 +2,11 @@
 // 用 root 连接 MySQL server 建库建账号，然后切到业务账号跑 migrations。
 //
 // 关键配置拆分（.env 里）：
-//   DB_ROOT_USER / DB_ROOT_PASSWORD —— MySQL root（或有 CREATE USER/GRANT 权限的高权限账号）
-//       默认 root / 空（本机无密码 root 连接场景）。仅 bootstrap 需要，服务启动不需要。
-//   DB_USER / DB_PASSWORD —— 业务账号（drill_app 这类，仅 grant drill_system.*）
-//       DB_PASSWORD 必须从 "CHANGE_ME" 哨兵替换为真实值，否则 bootstrap 拒绝执行。
+//
+//	DB_ROOT_USER / DB_ROOT_PASSWORD —— MySQL root（或有 CREATE USER/GRANT 权限的高权限账号）
+//	    默认 root / 空（本机无密码 root 连接场景）。仅 bootstrap 需要，服务启动不需要。
+//	DB_USER / DB_PASSWORD —— 业务账号（drill_app 这类，仅 grant drill_system.*）
+//	    DB_PASSWORD 必须从 "CHANGE_ME" 哨兵替换为真实值，否则 bootstrap 拒绝执行。
 //
 // 用法：go run ./cmd/bootstrap（从 server/ 目录）
 package main
@@ -162,7 +163,9 @@ func writeTestSeed(db *sql.DB) {
 	// admin 初始密码散列值 → 读取 .env 的 ADMIN_INIT_PASSWORD
 	// 注意：salt+hash 是固定的，密码变了必须改 .env 并手动算 hash（或重跑 bootstrap）
 	initPwd := os.Getenv("ADMIN_INIT_PASSWORD")
-	if initPwd == "" { initPwd = "REPLACE_WITH_STRONG_PASSWORD" }
+	if initPwd == "" {
+		initPwd = "REPLACE_WITH_STRONG_PASSWORD"
+	}
 	if initPwd == "REPLACE_WITH_STRONG_PASSWORD" {
 		fmt.Println("❌ .env 里 ADMIN_INIT_PASSWORD 未设置，请填写一个强密码后重试")
 		os.Exit(1)

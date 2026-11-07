@@ -15,28 +15,34 @@ import (
 
 // ---- CORS ----
 
-// CORS 简单实现。allowOrigins = ["*"] 时通配。
+// CORS 简单实现。默认不允许跨域（AllowOrigins 为空），仅对显式配置的来源放行。
+// 通配 "*" 时不发送 Allow-Credentials（浏览器规范禁止二者同时使用）。
 func CORS(cfg *config.Config) gin.HandlerFunc {
 	allowAll := len(cfg.AllowOrigins) == 1 && cfg.AllowOrigins[0] == "*"
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
+		allowed := false
 		if origin != "" {
 			if allowAll {
 				c.Header("Access-Control-Allow-Origin", "*")
+				allowed = true
 			} else {
 				for _, o := range cfg.AllowOrigins {
 					if o == origin {
 						c.Header("Access-Control-Allow-Origin", origin)
+						c.Header("Access-Control-Allow-Credentials", "true")
+						allowed = true
 						break
 					}
 				}
 			}
 		}
 		c.Header("Vary", "Origin")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Drill-Token")
-		c.Header("Access-Control-Expose-Headers", "Content-Disposition, X-Total-Count")
-		c.Header("Access-Control-Allow-Credentials", "true")
+		if allowed {
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Drill-Token")
+			c.Header("Access-Control-Expose-Headers", "Content-Disposition, X-Total-Count")
+		}
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
@@ -162,12 +168,17 @@ func hasToken(c *gin.Context) bool {
 func BodyLimit(maxMB int64) gin.HandlerFunc {
 	maxBytes := maxMB * 1024 * 1024
 	return func(c *gin.Context) {
-		if c.Request.ContentLength > maxBytes {
+		limit := maxBytes
+		// 备份恢复上传的是整库 .sql 快照，体积与普通附件上限无关（P0-2）
+		if c.Request.URL.Path == "/api/admin/restore-upload" {
+			limit = 2 * 1024 * 1024 * 1024
+		}
+		if c.Request.ContentLength > limit {
 			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge,
-				gin.H{"error": "请求体过大，超过 " + itoa(maxMB) + "MB 限制"})
+				gin.H{"error": "请求体过大，超过 " + itoa(limit/1024/1024) + "MB 限制"})
 			return
 		}
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		c.Next()
 	}
 }

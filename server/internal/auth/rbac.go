@@ -12,21 +12,22 @@ import (
 
 // ---- 12 个真实角色常量（以 roles 表为准，硬编码在 Go 里，避免运行时查库）----
 // 与数据库实际 12 条记录一致：
-//   院内：platformadmin, commander, itlead, duty, netsec, sysadmin, medlead, clinical
-//   院外：healthbureau, cac, cyberpolice
-//   自定义：role_mvnaewi63am  (用户创建的自定义角色，external=false)
+//
+//	院内：platformadmin, commander, itlead, duty, netsec, sysadmin, medlead, clinical
+//	院外：healthbureau, cac, cyberpolice
+//	自定义：role_mvnaewi63am  (用户创建的自定义角色，external=false)
 const (
 	RolePlatformAdmin = "platformadmin" // 平台管理员
-	RoleCommander     = "commander"      // 院应急指挥部
-	RoleITLead        = "itlead"         // 信息科负责人
-	RoleDuty          = "duty"           // 信息科值班
-	RoleNetSec        = "netsec"         // 网络安全
-	RoleSysAdmin      = "sysadmin"       // 系统管理员
-	RoleMedLead       = "medlead"        // 医务科负责人
-	RoleClinical      = "clinical"       // 临床科室
-	RoleHealthBureau  = "healthbureau"   // 卫健局（外部）
-	RoleCAC           = "cac"            // CAC/网信办（外部）
-	RoleCyberPolice   = "cyberpolice"    // 公安网安（外部）
+	RoleCommander     = "commander"     // 院应急指挥部
+	RoleITLead        = "itlead"        // 信息科负责人
+	RoleDuty          = "duty"          // 信息科值班
+	RoleNetSec        = "netsec"        // 网络安全
+	RoleSysAdmin      = "sysadmin"      // 系统管理员
+	RoleMedLead       = "medlead"       // 医务科负责人
+	RoleClinical      = "clinical"      // 临床科室
+	RoleHealthBureau  = "healthbureau"  // 卫健局（外部）
+	RoleCAC           = "cac"           // CAC/网信办（外部）
+	RoleCyberPolice   = "cyberpolice"   // 公安网安（外部）
 )
 
 // IsExternal 外部单位角色判定（3 个院外单位）
@@ -145,6 +146,45 @@ func (s *Service) RequireNotExternal() gin.HandlerFunc {
 		}
 		if u.Role.External {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "外部单位仅可查看医院上报材料（分级权限隔离）"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// RequireNotExternalWrite 外部单位只读：GET/HEAD/OPTIONS 放行，其余方法一律 403。
+// 用于 content / tasks / evidence / drill 等业务分组，避免逐个写路由漏挂导致
+// 卫健/网信/网安账号可以改分、启停任务、删任务或变更项目状态。
+func (s *Service) RequireNotExternalWrite() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			c.Next()
+			return
+		}
+		u := CurrentUser(c)
+		if u == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.External {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "外部单位仅可查看医院上报材料（分级权限隔离）"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// RequireCommanderOrAdmin 仅 platformadmin / commander（任务全量重置等高风险操作）。
+func (s *Service) RequireCommanderOrAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := CurrentUser(c)
+		if u == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			return
+		}
+		if u.Role.ID != RolePlatformAdmin && u.Role.ID != RoleCommander {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "仅平台管理员/指挥部可重置任务状态"})
 			return
 		}
 		c.Next()
