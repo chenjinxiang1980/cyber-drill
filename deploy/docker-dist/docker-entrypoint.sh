@@ -113,7 +113,7 @@ if [ -x "${SEED_BIN}" ]; then
     else
         rc=$?
         log_error "配置种子执行失败（exit=${rc}，已回滚，旧数据保留）"
-        log_error "首次部署请检查 drill.env 中的 ADMIN_INIT_PASSWORD"
+        log_error "首次部署请检查 drill.env 中的数据库/密钥配置与管理员初始口令"
         exit "${rc}"
     fi
 else

@@ -15,8 +15,8 @@
 param(
     [ValidateSet("amd64", "arm64")]
     [string]$Arch = "amd64",
-    [string]$Tag  = "drill-server:0.6.0",
-    [string]$Version = "0.6.0"
+    [string]$Tag  = "drill-server:0.8.3",
+    [string]$Version = "0.8.3"
 )
 
 $ErrorActionPreference = "Stop"

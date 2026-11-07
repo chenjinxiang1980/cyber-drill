@@ -20,7 +20,7 @@ var brandDefaults = gin.H{
 	"systemName": "网络安全应急演练系统",
 	"unitName":   "示例医院",
 	"logo":       "img/logo.png",
-	"version":    "v0.6.0",
+	"version":    "v0.8.3",
 	"github":     "https://github.com/chenjinxiang1980/cyber-drill",
 	"gitee":      "https://gitee.com/habeas/cyber-drill",
 }
@@ -141,7 +141,8 @@ func isEmptyDictPayload(v any) bool {
 
 // GetStatus GET /api/system/status —— 聚合计数
 // Node 版 seed.status() 返回 {initialized, userCount, roleCount, scenarioCount,
-//   nodeCount, projectCount, brand_version, initialized_at, seedVersion, hasBaseline}
+//
+//	nodeCount, projectCount, brand_version, initialized_at, seedVersion, hasBaseline}
 func GetStatus(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		count := func(table string) int64 {
@@ -243,10 +244,10 @@ func GetDrillDict(database *db.DB) gin.HandlerFunc {
 
 // notifSourceOptions 站内消息来源合法取值。与各 pushNotif 调用点实际写入 notifs.source 的值一致。
 var notifSourceOptions = map[string]bool{
-	"演练调度":     true,
-	"角色工作台":   true,
+	"演练调度":   true,
+	"角色工作台":  true,
 	"演练导调中心": true,
-	"复盘评估":     true,
+	"复盘评估":   true,
 }
 
 // validateNotifTemplatesDict 校验 notif_templates：必填标题/正文/来源，来源必须在合法枚举内。

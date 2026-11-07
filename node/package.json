@@ -1,6 +1,6 @@
 {
   "name": "cyber-drill-system",
-  "version": "0.6.0",
+  "version": "0.8.3",
   "description": "示例医院网络安全应急演练系统（局域网部署版）",
   "main": "server.js",
   "private": true,

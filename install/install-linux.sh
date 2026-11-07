@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Cyber-Drill（应急演练指挥系统）0.6.0 —— Linux 一键安装脚本
+# Cyber-Drill（应急演练指挥系统）0.8.3 —— Linux 一键安装脚本
 #
 # 功能：
 #   1) 检测 Docker / Docker Compose v2；未装则按发行版给出安装命令（需确认）
@@ -33,9 +33,9 @@
 # =============================================================================
 set -u
 
-VERSION="0.6.0"
-# 安装器随 main 分支发布（v0.6.0 标签与安装器同源），
-# 源码版本固定为 0.6.0；可用 DRILL_REF 覆盖分支/标签。
+VERSION="0.8.3"
+# 安装器随 main 分支发布（v0.8.3 标签与安装器同源），
+# 源码版本固定为 0.8.3；可用 DRILL_REF 覆盖分支/标签。
 REF="${DRILL_REF:-main}"
 GITHUB_REPO="https://github.com/chenjinxiang1980/cyber-drill.git"
 GITEE_REPO="https://gitee.com/habeas/cyber-drill.git"
@@ -60,6 +60,7 @@ BUNDLE=""
 UPDATE_POLICY="${DRILL_UPDATE:-check}"
 FORCE_RESET=0
 GENERATED_ADMIN_PW=""
+GENERATED_PLATFORM_PW=""
 DOCKER_STATE="unknown"
 COMPOSE_FILE=""
 ENV_PATH=""
@@ -76,7 +77,7 @@ step()  { printf '\n=== %s ===\n' "$*"; }
 
 usage() {
     cat <<'EOF'
-Cyber-Drill 0.6.0 Linux 一键安装
+Cyber-Drill 0.8.3 Linux 一键安装
 
 用法：
   bash install-linux.sh [参数]
@@ -893,18 +894,14 @@ write_env_file() {
     dbpw=$(gen_hex 16) || return 1
     rootpw=$(gen_hex 16) || return 1
 
-    if [ -n "${ADMIN_INIT_PASSWORD:-}" ]; then
-        adminpw="$ADMIN_INIT_PASSWORD"
-    elif [ "$ASSUME_YES" = "1" ]; then
-        adminpw=$(gen_hex 16) || return 1
-    else
-        printf '管理员初始密码（留空则自动生成，输入不回显）: '
-        read -r -s adminpw || adminpw=""
-        printf '\n'
-        [ -z "$adminpw" ] && adminpw=$(gen_hex 16)
-    fi
+    # 管理员初始口令由安装器为每个账号独立随机生成（前缀保证同时含字母与数字），
+    # 只写入 .env 并在安装输出打印一次；首次登录强制改密。
+    adminpw="Ad7$(gen_hex 16)" || return 1
+    platformpw="Pd7$(gen_hex 16)" || return 1
     [ -n "$adminpw" ] || return 1
+    [ -n "$platformpw" ] || return 1
     GENERATED_ADMIN_PW="$adminpw"
+    GENERATED_PLATFORM_PW="$platformpw"
 
     cp "$template" "$target" || return 1
     sed -i \
@@ -913,7 +910,8 @@ write_env_file() {
         -e "s/__REPLACE_WITH_ROOT_PW__/${rootpw}/g" \
         -e "s/__REPLACE_WITH_HEX32_JWT_SECRET__/${jwt}/g" \
         -e "s/__REPLACE_WITH_HEX32_SESSION_SECRET__/${sess}/g" \
-        -e "s/__REPLACE_WITH_STRONG_ADMIN_PASSWORD__/${adminpw}/g" \
+        -e "s/__REPLACE_WITH_ADMIN_INIT_PASSWORD__/${adminpw}/g" \
+        -e "s/__REPLACE_WITH_PLATFORMADMIN_INIT_PASSWORD__/${platformpw}/g" \
         -e "s/^VERSION=.*/VERSION=${VERSION}/" \
         "$target" || return 1
 
@@ -928,6 +926,9 @@ write_env_file() {
     } >> "$target"
 
     chmod 600 "$target" 2>/dev/null || true
+    # 容器以 uid 10001 运行；首次改密成功后需要回写本文件清空初始口令。
+    # chown 失败时该能力自动跳过，不影响安装与改密。
+    chown 10001:10001 "$target" 2>/dev/null || true
     return 0
 }
 
@@ -977,6 +978,10 @@ prepare_env() {
         info "已生成环境文件：$ENV_PATH（权限 600）"
     fi
 
+    # 兼容已存在的环境文件：确保容器用户可在首次改密后回写清空初始口令。
+    chmod 600 "$ENV_PATH" 2>/dev/null || true
+    chown 10001:10001 "$ENV_PATH" 2>/dev/null || true
+
     file_port=$(sed -n 's/^APP_HOST_PORT=//p' "$ENV_PATH" | tail -n 1)
     if [ -n "$file_port" ]; then
         PORT="$file_port"
@@ -1022,11 +1027,13 @@ deploy() {
         printf '\n[成功] 服务已启动。\n'
         printf '  健康检查：%s\n' "$body"
         printf '  访问地址：http://localhost:%s\n' "$PORT"
-        printf '  管理员账号：admin\n'
+        printf '  管理员账号：admin / platformadmin\n'
         if [ -n "$GENERATED_ADMIN_PW" ]; then
-            printf '  管理员初始密码（只显示这一次，请立即保存）：%s\n' "$GENERATED_ADMIN_PW"
+            printf '  管理员初始口令（只显示这一次，已写入环境文件，首次登录必须改密）：\n'
+            printf '    admin          %s\n' "$GENERATED_ADMIN_PW"
+            printf '    platformadmin  %s\n' "$GENERATED_PLATFORM_PW"
         else
-            printf '  管理员密码：沿用 drill.env 中的 ADMIN_INIT_PASSWORD（未重新生成）\n'
+            printf '  管理员初始口令：沿用 drill.env 中已有值；若为空，首次创建时会随机生成并写入启动日志\n'
         fi
         printf '  环境文件：%s（权限 600，务必备份）\n' "$ENV_PATH"
         printf '\n注意：首次启动会自动创建 12 个角色、8 个场景/剧本节点与管理员账号（admin / platformadmin），无需手工 bootstrap。\n'

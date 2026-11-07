@@ -89,10 +89,20 @@ data/server.err.log
 # uploads
 uploads/
 
-# ---- 安全的默认：只允许 .env.example，任何真实 .env / .env.* 一律不入库 ----
+# ---- 本机发布备份 / 临时验证留存（不入库）----
+.backup*/
+.backups/
+backups/
+temp/
+/docs/verify/
+
+# ---- 安全的默认：只允许 .env.example，任何真实 .env / .env.* / *.env 一律不入库 ----
 .env
 .env.*
+*.env
+*.env.bak.*
 !.env.example
+!*.env.example
 
 # ---- 证书 / 私钥（永不入库）----
 *.pem

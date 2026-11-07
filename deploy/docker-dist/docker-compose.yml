@@ -36,9 +36,10 @@ services:
       MYSQL_USER:          ${DB_USER:-__REPLACE_WITH_DB_USER__}
       MYSQL_PASSWORD:      ${DB_PASSWORD:-__REPLACE_WITH_DB_PASSWORD__}
       TZ:                  Asia/Shanghai
-    # 端口暴露 —— 仅调试时需要。生产建议注释掉，让 app 只用内部 DNS。
+    # 端口仅绑定宿主机回环地址：容器网络内 app 仍可通过 mysql:3306 访问，
+    # 外部主机无法直连数据库。确需远程调试时再显式改为指定网卡 IP。
     ports:
-      - "${MYSQL_HOST_PORT:-3306}:3306"
+      - "127.0.0.1:${MYSQL_HOST_PORT:-3306}:3306"
     volumes:
       - drill-mysql-data:/var/lib/mysql
     command: >
@@ -67,8 +68,8 @@ services:
       context: ../..
       dockerfile: deploy/docker-dist/Dockerfile
       args:
-        VERSION: ${VERSION:-0.6.0}
-    image: drill-server:${VERSION:-0.6.0}
+        VERSION: ${VERSION:-0.8.3}
+    image: drill-server:${VERSION:-0.8.3}
     # 容器名可用 APP_CONTAINER_NAME 覆盖（同一宿主并行测试时避免冲突）
     container_name: ${APP_CONTAINER_NAME:-drill-app}
     restart: unless-stopped
@@ -81,12 +82,18 @@ services:
       APP_ENV: production
       HTTP_ADDR: 0.0.0.0:8090
       TRUSTED_PROXIES: "172.17.0.0/16,127.0.0.1/32"
+      # 部署环境文件在容器内的路径。首次改密成功后，服务端会把其中
+      # ADMIN_INIT_PASSWORD / PLATFORMADMIN_INIT_PASSWORD 置空并标注失效。
+      DRILL_ENV_FILE_PATH: /opt/drill/etc/drill.env
     ports:
       - "${APP_HOST_PORT:-8090}:8090"
     volumes:
       # 持久化数据（上传文件 / 运行时 data 目录）
       - drill-app-data:/opt/drill/data
       - drill-app-uploads:/opt/drill/uploads
+      # 与 env_file 同一份部署文件，仅用于清空一次性初始口令明文。
+      # 文件不存在时 compose 会报错（env_file 本身也要求存在）。
+      - ${DRILL_ENV_FILE:-.env}:/opt/drill/etc/drill.env
     depends_on:
       mysql:
         condition: service_healthy

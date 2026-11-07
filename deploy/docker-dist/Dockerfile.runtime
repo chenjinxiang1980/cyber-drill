@@ -5,7 +5,7 @@
 #   DOCKER_BUILDKIT=1 docker build \
 #       --build-arg HTTP_PROXY=http://<代理地址>:7890 \
 #       --build-arg HTTPS_PROXY=http://<代理地址>:7890 \
-#       -f deploy/docker-dist/Dockerfile.runtime -t drill-server:0.6.0-smoke .
+#       -f deploy/docker-dist/Dockerfile.runtime -t drill-server:0.8.3-smoke .
 #
 # 假设：构建上下文根目录下有：
 #   dist_local/drill-server   dist_local/drill-migrate  （本地交叉编译好的 ELF）
@@ -31,8 +31,8 @@ ENV NO_PROXY=${NO_PROXY}
 ENV TZ=Asia/Shanghai
 ENV APP_ROOT=/opt/drill
 
-# apk add 运行时依赖
-RUN apk add --no-cache tini wget ca-certificates tzdata \
+# apk add 运行时依赖（mariadb-client 提供 mysqldump / mysql 客户端，备份恢复必需）
+RUN apk add --no-cache tini wget ca-certificates tzdata mariadb-client \
  && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
  && echo "Asia/Shanghai" > /etc/timezone \
  && addgroup -S -g 10001 drill \

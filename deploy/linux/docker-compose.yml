@@ -53,8 +53,9 @@ services:
       MYSQL_PASSWORD:   __REPLACE_WITH_DB_PASSWORD__
       TZ:               Asia/Shanghai
     ports:
-      # 暴露 MySQL 到宿主（仅调试用）。生产建议注释掉，只让 compose 内部访问。
-      - "${MYSQL_HOST_PORT:-3306}:3306"
+      # 仅绑定宿主机回环地址，容器内 app 仍通过 mysql:3306 访问；
+      # 生产环境不建议对外开放数据库端口。
+      - "127.0.0.1:${MYSQL_HOST_PORT:-3306}:3306"
     volumes:
       - drill-mysql-data:/var/lib/mysql
       # migrations 首次启动时自动执行（mysql 官方镜像特性）
@@ -83,8 +84,8 @@ services:
       context: ../..
       dockerfile: deploy/linux/Dockerfile
       args:
-        VERSION: ${VERSION:-0.6.0}
-    image: drill-server:${VERSION:-0.6.0}
+        VERSION: ${VERSION:-0.8.3}
+    image: drill-server:${VERSION:-0.8.3}
     container_name: drill-bootstrap
     env_file:
       - .env
@@ -105,8 +106,8 @@ services:
       context: ../..
       dockerfile: deploy/linux/Dockerfile
       args:
-        VERSION: ${VERSION:-0.6.0}
-    image: drill-server:${VERSION:-0.6.0}
+        VERSION: ${VERSION:-0.8.3}
+    image: drill-server:${VERSION:-0.8.3}
     container_name: drill-app
     restart: unless-stopped
     env_file:

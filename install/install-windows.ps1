@@ -1,5 +1,5 @@
-﻿# =============================================================================
-# Cyber-Drill（应急演练指挥系统）0.6.0 —— Windows 一键安装脚本
+# =============================================================================
+# Cyber-Drill（应急演练指挥系统）0.8.3 —— Windows 一键安装脚本
 #
 # 功能：
 #   1) 检测 Docker Desktop（区分"没装"与"装了没启动"），未装则给出 winget /
@@ -32,9 +32,9 @@
 # 这里用 Continue，并显式检查 $LASTEXITCODE。
 $ErrorActionPreference = 'Continue'
 
-$Version      = '0.6.0'
-# 安装器随 main 分支发布（v0.6.0 标签与安装器同源），
-# 源码版本固定为 0.6.0；可用环境变量 DRILL_REF 覆盖分支/标签。
+$Version      = '0.8.3'
+# 安装器随 main 分支发布（v0.8.3 标签与安装器同源），
+# 源码版本固定为 0.8.3；可用环境变量 DRILL_REF 覆盖分支/标签。
 $Ref          = if ($env:DRILL_REF) { $env:DRILL_REF } else { 'main' }
 $GithubRepo   = 'https://github.com/chenjinxiang1980/cyber-drill.git'
 $GiteeRepo    = 'https://gitee.com/habeas/cyber-drill.git'
@@ -67,7 +67,7 @@ function Write-Step([string]$msg) { Write-Host "`n=== $msg ===" -ForegroundColor
 
 function Show-Usage {
     Write-Host @'
-Cyber-Drill 0.6.0 Windows 一键安装
+Cyber-Drill 0.8.3 Windows 一键安装
 
 用法：
   powershell -NoProfile -ExecutionPolicy Bypass -File install-windows.ps1 [参数]
@@ -695,15 +695,12 @@ function Write-EnvFile([string]$template, [string]$target) {
     $dbpw = New-RandomHex 16
     $rootpw = New-RandomHex 16
 
-    if ($env:ADMIN_INIT_PASSWORD) {
-        $adminpw = $env:ADMIN_INIT_PASSWORD
-    } elseif ($Opts.Yes) {
-        $adminpw = New-RandomHex 16
-    } else {
-        $adminpw = Read-Host "管理员初始密码（直接回车则自动生成）"
-        if ([string]::IsNullOrWhiteSpace($adminpw)) { $adminpw = New-RandomHex 16 }
-    }
+    # 管理员初始口令由安装器为每个账号独立随机生成（前缀保证同时含字母与数字），
+    # 只写入环境文件并在安装输出打印一次；首次登录强制改密。
+    $adminpw = 'Ad7' + (New-RandomHex 16)
+    $platpw  = 'Pd7' + (New-RandomHex 16)
     $script:GeneratedAdminPw = $adminpw
+    $script:GeneratedPlatformPw = $platpw
 
     $text = Get-Content -Path $template -Raw -Encoding UTF8
     $text = $text.Replace('__REPLACE_WITH_DB_USER__', 'drill')
@@ -711,7 +708,8 @@ function Write-EnvFile([string]$template, [string]$target) {
     $text = $text.Replace('__REPLACE_WITH_ROOT_PW__', $rootpw)
     $text = $text.Replace('__REPLACE_WITH_HEX32_JWT_SECRET__', $jwt)
     $text = $text.Replace('__REPLACE_WITH_HEX32_SESSION_SECRET__', $sess)
-    $text = $text.Replace('__REPLACE_WITH_STRONG_ADMIN_PASSWORD__', $adminpw)
+    $text = $text.Replace('__REPLACE_WITH_ADMIN_INIT_PASSWORD__', $adminpw)
+    $text = $text.Replace('__REPLACE_WITH_PLATFORMADMIN_INIT_PASSWORD__', $platpw)
     $text = $text -replace '(?m)^VERSION=.*$', "VERSION=$Version"
 
     $append = @"
@@ -726,6 +724,17 @@ PUBLIC_BASE_URL=http://localhost:$($Opts.Port)
 "@
     $text = $text + $append
     [IO.File]::WriteAllText($target, $text, (New-Object Text.UTF8Encoding($false)))
+    Restrict-EnvFileAcl $target
+}
+
+# 环境文件仅保留当前用户访问（等价于 Unix 600），避免明文扩散。
+function Restrict-EnvFileAcl([string]$path) {
+    try {
+        & icacls.exe $path /inheritance:r /grant:r "$($env:USERNAME):(F)" *> $null
+        if ($LASTEXITCODE -ne 0) { Write-Warn "无法收紧环境文件权限，请手工检查：$path" }
+    } catch {
+        Write-Warn "无法收紧环境文件权限，请手工检查：$path"
+    }
 }
 
 function Prepare-Env {
@@ -767,6 +776,9 @@ function Prepare-Env {
         Write-EnvFile $template $script:EnvPath
         Write-Info "已生成环境文件：$($script:EnvPath)"
     }
+
+    # 兼容已存在的环境文件：收紧权限，供首次改密后回写清空初始口令。
+    Restrict-EnvFileAcl $script:EnvPath
 
     $filePort = (Get-Content $script:EnvPath | Where-Object { $_ -match '^APP_HOST_PORT=' } | Select-Object -Last 1)
     if ($filePort) {
@@ -813,11 +825,13 @@ function Invoke-Deploy {
         Write-Host "[成功] 服务已启动。" -ForegroundColor Green
         Write-Host "  健康检查：$body"
         Write-Host "  访问地址：http://localhost:$($Opts.Port)"
-        Write-Host "  管理员账号：admin"
+        Write-Host "  管理员账号：admin / platformadmin"
         if ($script:GeneratedAdminPw) {
-            Write-Host "  管理员初始密码（只显示这一次，请立即保存）：$($script:GeneratedAdminPw)" -ForegroundColor Yellow
+            Write-Host "  管理员初始口令（只显示这一次，已写入环境文件，首次登录必须改密）：" -ForegroundColor Yellow
+            Write-Host "    admin          $($script:GeneratedAdminPw)" -ForegroundColor Yellow
+            Write-Host "    platformadmin  $($script:GeneratedPlatformPw)" -ForegroundColor Yellow
         } else {
-            Write-Host "  管理员密码：沿用 drill.env 中的 ADMIN_INIT_PASSWORD（未重新生成）"
+            Write-Host "  管理员初始口令：沿用 drill.env 中已有值；若为空，首次创建时会随机生成并写入启动日志"
         }
         Write-Host "  环境文件：$($script:EnvPath)（务必备份）"
         Write-Host ""

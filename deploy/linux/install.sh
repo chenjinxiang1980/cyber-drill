@@ -13,6 +13,10 @@
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
+# 固定 umask，避免 cp/mkdir 在严格 umask（027）下生成 640/750：
+# 静态资源需对容器 uid 10001 可读（bind mount 时容器用户不是文件属主）。
+umask 022
+
 # ---------- 可调参数（需要换路径/用户时改这里）----------
 APP_NAME="drill-server"
 APP_USER="drill"
@@ -80,6 +84,9 @@ if [[ -d "${PUBLIC_SRC}" ]]; then
     info "同步 public/ → ${APP_HOME}/public"
     # 只更新更新时间比目标新的文件，保留用户可能的本地修改
     cp -ru "${PUBLIC_SRC}/." "${APP_HOME}/public/"
+    # 固化静态资源权限：容器 uid 10001 非文件属主，需 other-read 才能返回页面。
+    find "${APP_HOME}/public" -type d -exec chmod 0755 {} +
+    find "${APP_HOME}/public" -type f -exec chmod 0644 {} +
 else
     warn "未找到 public/ 源目录（${PUBLIC_SRC}），请手动把前端拷到 ${APP_HOME}/public"
 fi

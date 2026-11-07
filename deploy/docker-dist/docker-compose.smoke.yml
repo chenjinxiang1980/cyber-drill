@@ -20,7 +20,7 @@ services:
       MYSQL_PASSWORD:      ${DB_PASSWORD:-smoke_pw_42}
       TZ:                  Asia/Shanghai
     ports:
-      - "13306:3306"
+      - "127.0.0.1:13306:3306"
     volumes:
       - S99_mysql_data:/var/lib/mysql
     command: >
@@ -45,7 +45,7 @@ services:
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
-    image: drill-server:0.6.0-smoke
+    image: drill-server:0.8.3-smoke
     container_name: s99-dockerdist-app
     restart: unless-stopped
     environment:

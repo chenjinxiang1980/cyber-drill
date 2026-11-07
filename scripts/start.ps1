@@ -125,7 +125,7 @@ if ($ok) {
     Write-Host ""
     Write-Host "==========================================" -ForegroundColor Green
     Write-Host "  RUNNING:  http://127.0.0.1:$PORT"         -ForegroundColor Green
-    Write-Host "  CRED:     see .env (ADMIN_INIT_PASSWORD / DRILL_INIT_PWD)" -ForegroundColor DarkGray
+    Write-Host "  CRED:     .env 的 ADMIN_INIT_PASSWORD / PLATFORMADMIN_INIT_PASSWORD（缺失时见 seed 日志），首次登录强制改密" -ForegroundColor DarkGray
     Write-Host "  MONITOR:  /public/screen.html"             -ForegroundColor Green
     Write-Host "  PID:      $drillPid"                       -ForegroundColor Green
     if ($Detach) {

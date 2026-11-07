@@ -1,0 +1,31 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================
+;  Cyber-Drill drill system
+;  Allow screen capture (getDisplayMedia) over plain HTTP
+; ------------------------------------------------------------
+;  Policy : OverrideSecurityRestrictionsOnInsecureOrigin
+;  Type   : List of strings
+;           -> one registry VALUE per entry, named "1", "2", "3" ...
+;           -> semicolon/space combined lists are NOT valid here
+;  Scope  : HKLM = all users of this machine (needs administrator)
+;  Effect : the listed ORIGINS are treated as secure contexts
+;  Restart: the browser must be closed COMPLETELY (all windows and
+;           background/tray processes) before it takes effect
+;  Verify : chrome://policy  or  edge://policy
+;           -> OverrideSecurityRestrictionsOnInsecureOrigin : OK
+;  Remove : install\windows\Enable-DrillsInsecureOrigin.ps1 -Remove
+;           (or delete the two subkeys below)
+;  Docs   : docs\抓屏HTTP安全上下文客户端策略.md
+; ============================================================
+
+; Google Chrome
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\OverrideSecurityRestrictionsOnInsecureOrigin]
+"1"="http://192.168.97.131:8090"
+; Additional origins, keep them exact (scheme + host + port), e.g.:
+; "2"="http://drill.example.local:8090"
+
+; Microsoft Edge
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\OverrideSecurityRestrictionsOnInsecureOrigin]
+"1"="http://192.168.97.131:8090"
+; "2"="http://drill.example.local:8090"
