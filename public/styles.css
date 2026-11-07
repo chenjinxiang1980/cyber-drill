@@ -355,7 +355,6 @@ table.table{width:100%;border-collapse:collapse;font-size:13px}
 .role-cell{border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 6px;text-align:center;font-size:11.5px;color:var(--text2);cursor:pointer;transition:.15s;background:var(--elev)}
 .role-grid.dense .role-cell{padding:6px 4px;font-size:11px}
 .role-cell:hover{border-color:var(--border2);color:var(--text)}
-.role-cell.sel{border-color:var(--accent);color:#fff;background:var(--accent-dim)}
 .role-cell .r-ic{display:flex;align-items:center;justify-content:center;margin-bottom:2px}
 .role-cell .r-ic svg{width:18px;height:18px}
 .role-grid.dense .role-cell .r-ic{margin-bottom:1px}
@@ -743,7 +742,11 @@ table.table{width:100%;border-collapse:collapse;font-size:13px}
     overflow:visible;
   }
   .login-card{ width:100%; max-width:440px; margin:0 auto; grid-template-columns:1fr; }
-  .login-left{ display:none; }
+  /* 左栏不再整块隐藏：仅保留功能简介与职责说明，按 简介 → 职责 → 角色卡 → 登录表单 堆叠 */
+  .login-left{ display:contents; }
+  .login-left > .flex, .login-left .l-title, .login-left .l-sub, .login-left .l-foot{ display:none; }
+  .login-left .l-features{ margin:0 20px 12px; }
+  .login-left .role-duty{ margin:0 20px 16px; }
   .login-right{ padding:24px 20px; }
   .role-grid{ grid-template-columns:repeat(3,1fr); gap:6px; }
   .captcha-row{ flex-wrap:nowrap; gap:6px; }

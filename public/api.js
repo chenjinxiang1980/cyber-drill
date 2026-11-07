@@ -245,17 +245,19 @@ window.API = (function () {
       (MOCK.SCENARIOS = MOCK.SCENARIOS || []).push({
         id: r.id, name: s.name, type: s.type || '', level: s.level || '一般',
         status: '草稿', version: 'v1.0',
-        updated: new Date().toISOString().slice(0, 10), nodes: 0, desc: s.desc || '', alert: s.alert || ''
+        updated: new Date().toISOString().slice(0, 10), nodes: 0, displayNodes: 0, distractors: 0, desc: s.desc || '', alert: s.alert || ''
       });
       return r;
     });
   }
-  function saveScriptNodes(scenarioId, nodes, alert, name, versionBump) {
-    return DRILL.post('/content/script-nodes', { scenarioId: scenarioId, nodes: nodes, alert: alert, name: name, versionBump: versionBump || 'minor' }).then(function (r) {
+  function saveScriptNodes(scenarioId, nodes, alert, name, versionBump, expectedVersion) {
+    return DRILL.post('/content/script-nodes', { scenarioId: scenarioId, nodes: nodes, alert: alert, name: name, versionBump: versionBump || 'minor', expectedVersion: expectedVersion || '' }).then(function (r) {
       var s = (MOCK.SCENARIOS || []).filter(function (x) { return x.id === scenarioId; })[0];
       if (s) {
         s.version = r.version;
         s.nodes = r.count;
+        if (r.displayNodes !== undefined) s.displayNodes = r.displayNodes;
+        if (r.distractors !== undefined) s.distractors = r.distractors;
         s.updated = r.updated;
         if (r.alert !== undefined) s.alert = r.alert;
         if (r.name) s.name = r.name;
@@ -270,7 +272,20 @@ window.API = (function () {
   }
 
   /* ---------- 取证 / 快照 / 回放 ---------- */
-  function getEvidence() { return DRILL.get('/evidence'); }
+  /* 基础版“一键完成”落库的引导材料名称带“(模拟)”，服务端未置 auto 标记。
+     在统一出口归一化：模拟材料一律视为系统生成，避免被统计为人工取证。 */
+  var SIM_EVIDENCE_RE = /[（(]模拟[）)]\s*$/;
+  function normalizeEvidence(rows) {
+    (rows || []).forEach(function (e) {
+      if (!e) return;
+      if (e.simulated || SIM_EVIDENCE_RE.test(String(e.name || ''))) {
+        e.simulated = true;
+        e.auto = 1;
+      }
+    });
+    return rows || [];
+  }
+  function getEvidence() { return DRILL.get('/evidence').then(normalizeEvidence); }
   function addEvidence(e) {
     return DRILL.post('/evidence', e).then(function (r) {
       if (r && r.ok && !r.deduped) {
@@ -278,6 +293,18 @@ window.API = (function () {
           id: r.id, type: e.type || '文档', name: e.name || '未命名材料', size: r.size || e.size || '-',
           time: new Date().toTimeString().slice(0, 5), role: (curRole() || {}).id, uploader: curUser(), auto: !!e.auto,
           taskId: e.taskId || null, url: r.url || null
+        });
+      }
+      return r;
+    });
+  }
+  function deleteEvidence(id) {
+    var target = (MOCK.EVIDENCE || []).filter(function (e) { return String(e.id) === String(id); })[0];
+    return DRILL.del('/evidence/' + encodeURIComponent(id)).then(function (r) {
+      MOCK.EVIDENCE = (MOCK.EVIDENCE || []).filter(function (e) { return String(e.id) !== String(id); });
+      if (target && target.url) {
+        (MOCK.TASKS || []).forEach(function (t) {
+          if (t.atts) t.atts = t.atts.filter(function (a) { return a.url !== target.url; });
         });
       }
       return r;
@@ -413,7 +440,7 @@ window.API = (function () {
       return r;
     });
   }
-  function getDict() { return DRILL.get('/content/dict'); }
+  function getContentDict() { return DRILL.get('/content/dict'); }
 
   /* ---------- 模拟处置动作（统一入口，仅留痕） ---------- */
   function actSim(action, detail) {
@@ -491,7 +518,7 @@ window.API = (function () {
   function uploadBrandLogo(formData) { return DRILL.upload('/system/logo', formData); }
   function getSystemStatus() { return DRILL.api('/system/status'); }
   function resetSystem() { return DRILL.api('/system/reset', { method: 'POST', body: {} }); }
-  function getDict(key) { return DRILL.api('/system/dict/' + encodeURIComponent(key)); }
+  function getSystemDict(key) { return DRILL.api('/system/dict/' + encodeURIComponent(key)); }
   function saveDict(key, value) { return DRILL.api('/system/dict/' + encodeURIComponent(key), { method: 'PUT', body: { value: value } }); }
 
   /* ---------- 演练模式与自动考评（基础版 / 实战版） ---------- */
@@ -519,13 +546,13 @@ window.API = (function () {
     getChatChannels: getChatChannels, getChat: getChat, sendChat: sendChat, uploadChatAttachment: uploadChatAttachment, getDrillProgress: getDrillProgress, startNode: startNode, getForms: getForms,
     getScenarios: getScenarios, getScriptNodes: getScriptNodes,
     saveScenario: saveScenario, addScenario: addScenario, saveScriptNodes: saveScriptNodes,
-    getEvidence: getEvidence, addEvidence: addEvidence, uploadEvidence: uploadEvidence, prefillEvidence: prefillEvidence, downloadEvidence: downloadEvidence, getEvidenceRequirements: getEvidenceRequirements, importMockEvidence: importMockEvidence,
+    getEvidence: getEvidence, addEvidence: addEvidence, deleteEvidence: deleteEvidence, uploadEvidence: uploadEvidence, prefillEvidence: prefillEvidence, downloadEvidence: downloadEvidence, getEvidenceRequirements: getEvidenceRequirements, importMockEvidence: importMockEvidence,
     getSnapshots: getSnapshots, addSnapshot: addSnapshot,
     getTimeline: getTimeline, getSeqFlow: getSeqFlow, saveSeqFlow: saveSeqFlow,
     getScoreItems: getScoreItems, getScores: getScores, saveScore: saveScore, saveScores: saveScores,
     getLedger: getLedger,
     getKnowledge: getKnowledge, uploadKnowledge: uploadKnowledge, deleteKnowledge: deleteKnowledge, updateKnowledge: updateKnowledge, getAuditLogs: getAuditLogs, addAudit: addAudit,
-    getImpact: getImpact, updateImpact: updateImpact, getDict: getDict, actSim: actSim,
+    getImpact: getImpact, updateImpact: updateImpact, getContentDict: getContentDict, actSim: actSim,
     getUsers: getUsers, getRoles: getRoles,
     adminUsers: adminUsers, addUser: addUser, updateUser: updateUser, resetUserPassword: resetUserPassword,
     adminRoles: adminRoles, addRole: addRole, updateRole: updateRole,
@@ -535,7 +562,7 @@ window.API = (function () {
     restoreFromUpload: restoreFromUpload, deleteBackup: deleteBackup, sysinfo: sysinfo,
     getBrand: getBrand, saveBrand: saveBrand, uploadBrandLogo: uploadBrandLogo,
     getSystemStatus: getSystemStatus, resetSystem: resetSystem,
-    getDict: getDict, saveDict: saveDict,
+    getSystemDict: getSystemDict, saveDict: saveDict,
     getDrillReport: getDrillReport, markReportExported: markReportExported,
     getProjectScript: getProjectScript, forceViewProjectScript: forceViewProjectScript, exportProjectScriptUrl: exportProjectScriptUrl,
     generateProjectNotify: generateProjectNotify, exportProjectNotifyUrl: exportProjectNotifyUrl,

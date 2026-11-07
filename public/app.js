@@ -93,7 +93,6 @@ var NAV_GROUPS = [
   { title:'复盘与报送', items:[
     {key:'replay', icon:'replay', label:'演练时序回放', href:'replay.html'},
     {key:'evaluation', icon:'score', label:'复盘评估', href:'evaluation.html'},
-    {key:'report', icon:'file', label:'演练报告导出', href:'report.html'},
     {key:'ledger', icon:'ledger', label:'台账与统计', href:'ledger.html'}
   ]},
   { title:'系统管理', items:[
@@ -122,7 +121,7 @@ function mountShell(pageKey){
   var brandLogo = B.logo || 'img/logo.png';
   var brandSystem = B.systemName || '网络安全应急演练';
   var brandUnit = B.unitName || '示例医院';
-  var brandVer = B.version || 'v0.6.0';
+  var brandVer = B.version || 'v0.8.3';
   var brandGh = B.github || 'https://github.com/chenjinxiang1980/cyber-drill';
   var brandGe = B.gitee || 'https://gitee.com/habeas/cyber-drill';
   var html = '<aside class="sidebar"><div class="brand"><span class="logo brand-logo"><img src="'+brandLogo+'" alt="'+App.esc(brandUnit)+'院徽"></span><span class="bt"><div class="t1">'+App.esc(brandSystem)+'</div><div class="t2">'+App.esc(brandUnit)+' · DRILL</div></span></div><nav class="nav">';
@@ -214,6 +213,8 @@ var notifClaimTimer = null;
 var notifBusy = false;   /* 通知刷新请求进行中，避免并发响应重复入队 */
 var notifChannel = null; /* 同浏览器多标签互斥（同一消息只在一个标签播报） */
 var notifCurrent = null; /* 正在播报的队列项，用于开关关闭时立刻打断 */
+var notifCurrentAt = 0;   /* 当前条目开始播报的时刻，用于检测 onend 丢失 */
+var voiceKeeper = null;   /* 后台保活：定时 resume + 推进卡住的队列 */
 function voiceSupported(){
   return typeof window !== 'undefined' && !!window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function';
 }
@@ -403,6 +404,8 @@ function notifQueueDrain(){
   if(!item) return;
   notifSpeaking = true;
   notifCurrent = item;
+  notifCurrentAt = Date.now();
+  startVoiceKeeper();
   var synth = window.speechSynthesis;
   var finished = false;
   function done(){
@@ -491,10 +494,32 @@ function notifStopVoice(){
   notifQueued = {};
   notifSpeaking = false;
   notifCurrent = null;
+  notifCurrentAt = 0;
   if(notifWatchdog){ clearTimeout(notifWatchdog); notifWatchdog = null; }
   if(notifClaimTimer){ clearTimeout(notifClaimTimer); notifClaimTimer = null; }
   try{ if(notifChannel) notifChannel.close(); }catch(e){}
   notifChannel = null;
+}
+/* 切窗口/后台保活：浏览器在后台可能 pause() 语音合成，或丢失 onend 回调。
+   定时 resume 并把卡住的队列继续推进，保证大屏切到其他窗口后仍能连续播报；
+   只在有播报任务时做实际检查，不影响前台逻辑。 */
+function voiceKeepAlive(){
+  if(!voiceSupported()) return;
+  var synth = window.speechSynthesis;
+  try{ if(synth.paused) synth.resume(); }catch(e){}
+  if(!notifSpeaking || !notifCurrent) return;
+  var idle = !synth.speaking && !synth.pending && !synth.paused;
+  if(idle && notifCurrentAt && (Date.now() - notifCurrentAt) > 5000){
+    if(notifWatchdog){ clearTimeout(notifWatchdog); notifWatchdog = null; }
+    notifCurrent = null;
+    notifCurrentAt = 0;
+    notifSpeaking = false;
+    notifQueueDrain();
+  }
+}
+function startVoiceKeeper(){
+  if(voiceKeeper || !voiceSupported()) return;
+  voiceKeeper = setInterval(voiceKeepAlive, 2500);
 }
 function refreshNotifBadge(){
   if(notifBusy) return; /* 并发刷新只允许一个请求落地，防止同一消息重复入队 */
@@ -536,21 +561,32 @@ function startNotifPolling(){
 function stopNotifPolling(){
   if(notifPoll){ clearInterval(notifPoll); notifPoll = null; }
 }
-/* 页面卸载/进入后台缓存时释放全部定时器与跨标签通道，避免重复轮询与叠加播报 */
+/* 页面卸载/进入后台缓存时释放定时器，避免重复轮询与叠加播报。
+   bfcache（persisted=true）只是页面被挂起，不能打断正在播报的语音、也不能清空待播队列，
+   否则大屏切到其他窗口再回来时语音就断了；定时器会在 pageshow 里重建。 */
 function clearShellTimers(){
   stopNotifPolling();
   if(liveTick){ clearInterval(liveTick); liveTick = null; }
   if(shellClockTick){ clearInterval(shellClockTick); shellClockTick = null; }
+}
+window.addEventListener('pagehide', function(e){
+  clearShellTimers();
+  if(e && e.persisted) return; /* 进入 bfcache：保留语音与队列 */
   voiceStop();
   notifStopVoice();
-}
-window.addEventListener('pagehide', clearShellTimers);
+});
 window.addEventListener('pageshow', function(){
+  voiceKeepAlive(); /* 从 bfcache 恢复：若语音被暂停则续播 */
   if(!shellMounted) return; /* 登录页等非 Shell 页面不启动公共轮询 */
   initNotifChannel();
   startNotifPolling();
   if(!liveTick) liveTick = setInterval(renderLiveChip, 1000);
 });
+/* 切窗口/切后台不停止播报：可见时立刻恢复被浏览器暂停的语音合成 */
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible') voiceKeepAlive();
+});
+window.addEventListener('focus', function(){ voiceKeepAlive(); });
 
 /* 数据加载完成后刷新顶栏与徽标（bootstrap 之后调用） */
 function refreshShell(){
@@ -683,6 +719,15 @@ function boot(pageKey){
   if(!g) return;
   mountShell(pageKey);
 
+  /* 改密页只依赖当前会话与角色，不加载 bootstrap：
+   * 首登受限令牌访问 /api/bootstrap 会被服务端 403（强制改密闭环），
+   * 若仍走 bootstrap，页面会卡在“数据加载失败”而无法改密。 */
+  if(pageKey === 'password'){
+    DRILL.loadBrand().then(function(b){ if(b) DRILL.applyBrand(b); });
+    document.dispatchEvent(new CustomEvent('app:ready',{detail:{role:curRole(), data:MOCK.META}}));
+    return;
+  }
+
   var page = document.getElementById('page');
   if(page && !page.innerHTML.trim()){
     page.innerHTML = '<div class="loading-block"><div class="spinner"></div><span>正在加载演练数据…</span></div>';
@@ -696,6 +741,11 @@ function boot(pageKey){
     refreshShell();
     document.dispatchEvent(new CustomEvent('app:ready',{detail:{role:curRole(), data:MOCK.META}}));
   }).catch(function(e){
+    // 首登强制改密：受限令牌访问其他接口会被服务端 403，直接引导到改密页
+    if(pageKey !== 'password' && e && e.status === 403 && String(e.message || '').indexOf('修改初始密码') >= 0){
+      location.href = 'password.html';
+      return;
+    }
     var p = document.getElementById('page');
     if(p){
       p.innerHTML = '<div class="empty" style="padding:48px 20px"><div class="e-ic">'+icon('alert')+'</div>'

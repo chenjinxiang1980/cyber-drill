@@ -123,6 +123,7 @@ document.addEventListener('app:ready', function(e){
   }
 
   function sourceOf(x){
+    if(x.simulated) return '模拟数据（不计人工）';
     if(x.auto) return '系统自动采集';
     if(/模拟材料|模拟取证/.test(x.note||'')) return '剧本模拟生成';
     return x.hasFile ? '真实文件上传' : '预填/记录';

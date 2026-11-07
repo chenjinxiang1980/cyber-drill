@@ -19,10 +19,15 @@ document.addEventListener('app:ready', function(e){
 
   /* ---------- 无演练项目：展示待机空态 ---------- */
   if (!proj) {
-    Promise.all([API.getScenarios(), API.getProjects(), API.getDict('chat_channels')]).then(function(r){
-      var scens = Array.isArray(r[0]) ? r[0] : [];
-      var projs = Array.isArray(r[1]) ? r[1] : [];
-      var chMeta = r[2] && r[2].value;
+    var tasks = [API.getScenarios(), API.getProjects(), API.getContentDict()];
+    var settled = Promise.allSettled ? Promise.allSettled(tasks) : Promise.all(tasks.map(function(p){
+      return p.then(function(v){ return { status:'fulfilled', value:v }; }, function(e){ return { status:'rejected', reason:e }; });
+    }));
+    settled.then(function(rs){
+      var val = function(i){ return rs[i] && rs[i].status === 'fulfilled' ? rs[i].value : null; };
+      var scens = Array.isArray(val(0)) ? val(0) : [];
+      var projs = Array.isArray(val(1)) ? val(1) : [];
+      var chMeta = val(2) && val(2).chat_channels;
       var chCount = 0;
       if (chMeta) { try { chCount = Object.keys(JSON.parse(typeof chMeta === 'string' ? chMeta : JSON.stringify(chMeta))).length; } catch(e) {} }
       page.innerHTML =
@@ -79,9 +84,9 @@ document.addEventListener('app:ready', function(e){
       });
       CHAT_ACCESS = v;
       if(Object.keys(v).length){ CHANNELS_CONFIGURED = true; return; }
-      /* 空列表时再探测字典是否真的未配置：平台管理员可读；其他角色 403 视为“未授权” */
-      return API.getDict('chat_channels').then(function(res){
-        var d = res && res.value;
+      /* 空列表时再探测内容字典是否真的未配置（内容字典对所有登录角色可读） */
+      return API.getContentDict().then(function(res){
+        var d = res && res.chat_channels;
         CHANNELS_CONFIGURED = !!(d && typeof d === 'object' && Object.keys(d).length);
       }).catch(function(){ CHANNELS_CONFIGURED = null; });
     }).catch(function(){ CHAT_ACCESS = {}; CHANNELS_CONFIGURED = null; });

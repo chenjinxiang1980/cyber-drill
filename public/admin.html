@@ -106,7 +106,7 @@ document.addEventListener('app:ready', function(e){
     + '</div>'
     + '<div class="adm-pane" id="pane-audit">'
     +   '<div class="sim-banner" style="border-color:rgba(248,81,73,.5);color:var(--err);background:var(--err-dim)">'+App.icon('lock')+'<span><b>日志仅可查看，不可删除修改（防篡改）。</b>本模块不提供任何删除/编辑入口，导出留痕同样写入审计。</span></div>'
-    +   '<div class="card"><div class="card-title">'+App.icon('eye')+'审计日志<span class="more">共 <span id="aCnt" class="mono">0</span> 条</span></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('eye')+'审计日志<span class="more"><a id="aExport" href="#" target="_blank" rel="noopener" style="margin-right:14px">导出 CSV</a>共 <span id="aCnt" class="mono">0</span> 条</span></div>'
     +   '<div class="filters" style="margin-bottom:12px"><input class="input grow" id="aKw" placeholder="搜索用户 / 操作 / 时间…"><span class="tiny dim" style="white-space:nowrap">每页</span><select class="select" id="aPageSize" style="width:auto;min-width:96px" title="每页显示条数"><option value="10" selected>10 条</option><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option></select></div>'
     +   '<div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>用户</th><th>角色</th><th>操作</th><th>对象</th><th>IP</th></tr></thead><tbody id="aBody"></tbody></table></div>'
     +   '<div class="pager" id="aPager"></div></div>'
@@ -123,19 +123,19 @@ document.addEventListener('app:ready', function(e){
     +     (BRAND_ADMIN ? '<div class="card"><div class="card-title danger">'+App.icon('trash')+'系统初始化<span class="more tiny dim">慎用：清空全部业务数据</span></div>'
     +       '<div id="rsStatus" class="tiny dim" style="padding:10px;background:var(--elev);border-radius:var(--r-sm);line-height:1.7">加载中…</div>'
     +       '<div class="flex gap3 mt4"><button class="btn danger" id="rsBtn" style="width:100%">'+App.icon('trash')+'重置系统为初始状态</button></div>'
-    +       '<div class="tiny dim mt3" style="line-height:1.8">会清空：角色权限、账号、场景剧本、项目任务、会商/取证/台账/评分/审计日志、表单模板。<br><b style="color:var(--warn)">不会删除</b>：uploads/ 上传文件、data/backups/ 备份文件。<br>重置后当前登录态失效，需用初始密码重新登录。</div>'
+    +       '<div class="tiny dim mt3" style="line-height:1.8">会清空：角色权限、账号、场景剧本、项目任务、会商/取证/台账/评分/审计日志、表单模板。<br><b style="color:var(--warn)">不会删除</b>：uploads/ 上传文件、data/backups/ 备份文件。<br>重置后当前登录态失效，需重新登录。</div>'
     +     '</div>' : '')
     +     '<div class="card"><div class="card-title">'+App.icon('db')+'数据备份与恢复</div>'
     +       '<div class="kv"><span class="k">备份范围</span><span>全量数据库快照（账号 / 剧本 / 台账 / 审计日志 / 取证索引）</span>'
     +       '<span class="k">上次备份</span><span class="mono" id="bkLast">读取中…</span>'
-    +       '<span class="k">恢复来源</span><span>从备份文件恢复（或上传 .db 文件）</span></div>'
+    +       '<span class="k">恢复来源</span><span>从 .sql 备份文件恢复（mysqldump 文本，旧 .db 不再支持）</span></div>'
     +       '<div class="progress mt3" id="bkProg" style="display:none"><div class="bar" id="bkBar" style="width:0%"></div></div>'
     +       '<div class="tiny dim mt2" id="bkPct"></div>'
     +       '<div class="flex gap3 mt3" style="flex-wrap:wrap">'
     +         '<button class="btn primary" id="bkBtn">'+App.icon('archive')+'立即备份</button>'
-    +         '<label class="btn" id="bkUploadBtn">'+App.icon('upload')+'上传备份恢复<input type="file" id="bkFile" accept=".db" style="display:none"></label>'
+    +         '<label class="btn" id="bkUploadBtn">'+App.icon('upload')+'上传 .sql 恢复<input type="file" id="bkFile" accept=".sql" style="display:none"></label>'
     +       '</div>'
-    +       '<div class="tiny dim mt3" style="color:var(--warn)">恢复将覆盖当前数据库，操作前会自动备份当前状态（安全网）。恢复后所有用户需重新登录。</div>'
+    +       '<div class="tiny dim mt3" style="color:var(--warn)">恢复将覆盖当前数据库。流程：校验 .sql → 自动备份当前库 → 导入 → 校验关键表 → 写恢复日志与审计；任一步失败都会显式报错，导入失败会自动回滚。恢复后所有用户需重新登录。</div>'
     +       '<div class="mt4" style="border-top:1px solid var(--elev);padding-top:12px">'
     +         '<div class="tiny dim mb2">备份文件列表</div>'
     +         '<div id="bkList" class="bk-list"></div>'
@@ -201,20 +201,33 @@ document.addEventListener('app:ready', function(e){
     var rs = (u.roles && u.roles.length) ? u.roles : [u.role];
     return rs.map(function(id){ return '<span class="tag">'+App.esc(roleName(id))+'</span>'; }).join(' ');
   }
+  function showInitialPassword(acc, pwd){
+    if(!pwd){ App.toast('操作成功，但未获取到初始口令，请重试重置','warn'); return; }
+    App.modal({
+      title:'一次性初始口令',
+      persist:true,
+      body:'<div style="font-size:13px;line-height:1.9">账号 <b class="mono">'+App.esc(acc)+'</b> 的初始口令：'
+        +'<div class="mono" style="margin:8px 0;padding:10px 12px;background:var(--elev);border-radius:var(--r-sm);font-size:16px;letter-spacing:1px">'+App.esc(pwd)+'</div>'
+        +'<div class="tiny dim">口令仅显示一次，请通过安全渠道转交本人；首次登录必须修改密码后才能使用系统。</div></div>',
+      foot:'<button class="btn primary" id="ipOk">我已记录</button>',
+      onOpen:function(ov){ ov.querySelector('#ipOk').onclick=ov.close; }
+    });
+  }
   function renderUsers(){
     document.getElementById('uBody').innerHTML = users.map(function(u,i){
       return '<tr><td class="mono">'+App.esc(u.account)+'</td><td>'+App.esc(u.name)+'</td><td>'+roleTags(u)+'</td><td class="dim">'+App.esc(u.org)+'</td><td>'+App.statusTag(u.status)+'</td>'
         + '<td><button class="btn sm" data-ed="'+i+'">编辑</button> <button class="btn sm" data-rp="'+i+'">重置密码</button> <button class="btn sm '+(u.status==='启用'?'danger':'ok')+'" data-tg="'+i+'">'+(u.status==='启用'?'停用':'启用')+'</button></td></tr>';
     }).join('');
-    document.querySelectorAll('#uBody [data-ed]').forEach(function(b){
+
+  document.querySelectorAll('#uBody [data-ed]').forEach(function(b){
       b.onclick = function(){ openUserModal(users[+b.dataset.ed], +b.dataset.ed); };
     });
     document.querySelectorAll('#uBody [data-rp]').forEach(function(b){
       b.onclick = function(){
         var u = users[+b.dataset.rp];
-        App.confirmSim('将账号「'+u.account+'」（'+u.name+'）的密码重置为初始密码？', function(){
-          API.resetUserPassword(u.id).then(function(){
-            App.toast('已重置「'+u.account+'」的密码（新密码请从 .env 查看 DRILL_INIT_PWD）','ok');
+        App.confirmSim('将账号「'+u.account+'」（'+u.name+'）的密码重置为随机初始口令？', function(){
+          API.resetUserPassword(u.id).then(function(r){
+            showInitialPassword(u.account, r && r.initialPassword);
           }).catch(function(e){ App.toast((e&&e.message)||'重置失败','err'); });
         });
       };
@@ -273,7 +286,7 @@ document.addEventListener('app:ready', function(e){
             API.addUser({ username:acc, name:nm, roles:roles, org:org }).then(function(r){
               users.push({ id:r.id, account:acc, name:nm, role:roles[0], roles:roles, org:org, status:'启用' });
               ov.close(); renderUsers();
-              App.toast('账号「'+acc+'」已创建，初始密码见 .env 的 DRILL_INIT_PWD','ok');
+              showInitialPassword(acc, r && r.initialPassword);
             }).catch(function(e){ App.toast((e&&e.message)||'创建失败','err'); });
           }
         };
@@ -523,11 +536,13 @@ document.addEventListener('app:ready', function(e){
 
   /* ---------- c) 表单模板（字段可编辑：名称 / 说明 / 必填 / 控件类型 / 顺序） ---------- */
   function fldOf(x){
-    if(typeof x === 'string') return { label:x, hint:'', required:true, type:'auto', options:[] };
+    if(typeof x === 'string') return { label:x, hint:'', required:true, type:'auto', options:[], default:'' };
     return {
       label:(x&&x.label)||'', hint:(x&&x.hint)||'', required:!(x&&x.required===false),
       type:(x&&x.type)||'auto',
-      options:Array.isArray(x&&x.options)?x.options.slice():(typeof (x&&x.options)==='string'?x.options.split(/[、,，|｜]/).map(function(s){return s.trim();}).filter(Boolean):[])
+      options:Array.isArray(x&&x.options)?x.options.slice():(typeof (x&&x.options)==='string'?x.options.split(/[、,，|｜]/).map(function(s){return s.trim();}).filter(Boolean):[]),
+      /* 默认值：打开表单一键回填的内容；与 hint（字段说明）、输入框 placeholder 是两回事 */
+      default:String((x&&(x.default!==undefined?x.default:x.defaultValue))||'').trim()
     };
   }
   var TYPE_OPTS = [['auto','自动识别'],['text','单行文本'],['textarea','多行文本'],['select','下拉选择'],['multiselect','下拉多选'],['datetime','日期时间']];
@@ -551,8 +566,8 @@ document.addEventListener('app:ready', function(e){
         App.drawer({ title:'模板结构 · '+App.formDisplayName(f), body:
           '<div class="kv"><span class="k">模板编号</span><span class="mono">'+App.esc(f.code || f.id)+'</span><span class="k">内部标识</span><span class="mono tiny dim">'+App.esc(f.id)+'</span><span class="k">模板名称</span><span>'+App.esc(App.formDisplayName(f))+'</span><span class="k">字段数</span><span class="mono">'+nf.length+'</span></div>'
           + '<div class="section-title mt4">字段结构</div>'
-          + '<table class="table"><thead><tr><th style="width:52px">序号</th><th style="width:140px">字段名</th><th>字段说明</th><th style="width:76px">必填</th><th style="width:88px">控件</th><th style="width:160px">下拉选项</th></tr></thead><tbody>'
-          + nf.map(function(x,i){ return '<tr><td class="mono">'+(i+1)+'</td><td>'+App.esc(x.label)+'</td><td class="dim">'+(x.hint?App.esc(x.hint):'—')+'</td><td>'+(x.required?'<span class="tag green">必填</span>':'<span class="tag">选填</span>')+'</td><td class="dim">'+typeName(x.type)+'</td><td class="tiny dim">'+((x.type==='select'||x.type==='multiselect')?(x.options||[]).join('、'):'—')+'</td></tr>'; }).join('')
+          + '<table class="table"><thead><tr><th style="width:52px">序号</th><th style="width:140px">字段名</th><th>字段说明</th><th style="width:76px">必填</th><th style="width:88px">控件</th><th style="width:160px">下拉选项</th><th style="width:160px">默认值</th></tr></thead><tbody>'
+          + nf.map(function(x,i){ return '<tr><td class="mono">'+(i+1)+'</td><td>'+App.esc(x.label)+'</td><td class="dim">'+(x.hint?App.esc(x.hint):'—')+'</td><td>'+(x.required?'<span class="tag green">必填</span>':'<span class="tag">选填</span>')+'</td><td class="dim">'+typeName(x.type)+'</td><td class="tiny dim">'+((x.type==='select'||x.type==='multiselect')?(x.options||[]).join('、'):'—')+'</td><td class="tiny dim">'+(x['default']?App.esc(x['default']):'<span class="dim">未配置（走系统兜底）</span>')+'</td></tr>'; }).join('')
           + '</tbody></table>'
           + '<div class="tiny dim mt3">字段说明用于参演人员分步填表时的引导提示；下拉选择用于事件等级等标准化取值；日期时间控件支持选择或手动填写。可在「编辑」中逐项维护。</div>' });
       };
@@ -568,13 +583,13 @@ document.addEventListener('app:ready', function(e){
     var editFields = (f.fields||[]).map(fldOf);
     App.modal({ title:'编辑表单模板 · '+f.id, wide:true, body:
       '<div class="form-row"><label class="f-label">模板名称 <span class="req">*</span></label><input class="input" id="efName" maxlength="40" value="'+App.esc(f.name)+'"></div>'
-      + '<div class="flex gap3 mt3" style="align-items:center;justify-content:space-between"><div class="f-label" style="margin:0">字段明细 <span class="tiny dim">（字段说明将展示在参演人员填表引导中）</span></div><button class="btn sm" id="efAdd">'+App.icon('plus')+'添加字段</button></div>'
+      + '<div class="flex gap3 mt3" style="align-items:center;justify-content:space-between"><div class="f-label" style="margin:0">字段明细 <span class="tiny dim">（字段说明将展示在参演人员填表引导中；默认值会在打开表单时自动填入，留空则走系统兜底）</span></div><button class="btn sm" id="efAdd">'+App.icon('plus')+'添加字段</button></div>'
       + '<div id="efRows" class="mt2"></div>',
       foot:'<button class="btn" id="efNo">取消</button><button class="btn primary" id="efYes">'+App.icon('check')+'保存模板</button>',
       onOpen:function(ov){
         var rowsEl = ov.querySelector('#efRows');
         function paint(){
-          rowsEl.innerHTML = '<table class="table ef-table"><thead><tr><th style="width:38px">#</th><th style="width:140px">字段名</th><th>字段说明</th><th style="width:64px">必填</th><th style="width:100px">控件</th><th style="width:180px">下拉选项</th><th style="width:90px">操作</th></tr></thead><tbody>'
+          rowsEl.innerHTML = '<table class="table ef-table"><thead><tr><th style="width:38px">#</th><th style="width:130px">字段名</th><th>字段说明</th><th style="width:64px">必填</th><th style="width:100px">控件</th><th style="width:150px">下拉选项</th><th style="width:170px">默认值</th><th style="width:90px">操作</th></tr></thead><tbody>'
             + editFields.map(function(x,i){
                 return '<tr><td class="mono">'+(i+1)+'</td>'
                   + '<td><input class="input sm" data-lab="'+i+'" maxlength="40" value="'+App.esc(x.label)+'" placeholder="字段名"></td>'
@@ -582,6 +597,7 @@ document.addEventListener('app:ready', function(e){
                   + '<td><input type="checkbox" data-req="'+i+'"'+(x.required?' checked':'')+'></td>'
                   + '<td><select class="input sm" data-type="'+i+'">'+TYPE_OPTS.map(function(o){ return '<option value="'+o[0]+'"'+(x.type===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select></td>'
                   + '<td><input class="input sm" data-opt="'+i+'" maxlength="300" value="'+App.esc((x.options||[]).join('、'))+'" placeholder="仅下拉：选项用顿号分隔"></td>'
+                  + '<td><input class="input sm" data-def="'+i+'" maxlength="300" value="'+App.esc(x['default']||'')+'" placeholder="留空=系统兜底"></td>'
                   + '<td style="white-space:nowrap"><button class="btn sm" data-up="'+i+'"'+(i===0?' disabled':'')+' title="上移">↑</button><button class="btn sm" data-dn="'+i+'"'+(i===editFields.length-1?' disabled':'')+' title="下移">↓</button><button class="btn sm danger" data-rm="'+i+'" title="删除">'+App.icon('trash')+'</button></td></tr>';
               }).join('')
             + '</tbody></table>';
@@ -592,12 +608,13 @@ document.addEventListener('app:ready', function(e){
           rowsEl.querySelectorAll('[data-opt]').forEach(function(el){ el.oninput = function(){
             editFields[+el.dataset.opt].options = el.value.split(/[、,，|｜]/).map(function(s){ return s.trim(); }).filter(Boolean);
           }; });
+          rowsEl.querySelectorAll('[data-def]').forEach(function(el){ el.oninput = function(){ editFields[+el.dataset.def]['default'] = el.value; }; });
           rowsEl.querySelectorAll('[data-up]').forEach(function(el){ el.onclick = function(){ var i=+el.dataset.up; if(i<=0) return; var t=editFields[i-1]; editFields[i-1]=editFields[i]; editFields[i]=t; paint(); }; });
           rowsEl.querySelectorAll('[data-dn]').forEach(function(el){ el.onclick = function(){ var i=+el.dataset.dn; if(i>=editFields.length-1) return; var t=editFields[i+1]; editFields[i+1]=editFields[i]; editFields[i]=t; paint(); }; });
           rowsEl.querySelectorAll('[data-rm]').forEach(function(el){ el.onclick = function(){ var i=+el.dataset.rm; if(editFields.length<=1){ App.toast('至少保留一个字段','warn'); return; } editFields.splice(i,1); paint(); }; });
         }
         paint();
-        ov.querySelector('#efAdd').onclick = function(){ editFields.push({ label:'', hint:'', required:true, type:'auto', options:[] }); paint(); };
+        ov.querySelector('#efAdd').onclick = function(){ editFields.push({ label:'', hint:'', required:true, type:'auto', options:[], default:'' }); paint(); };
         ov.querySelector('#efNo').onclick = ov.close;
         ov.querySelector('#efYes').onclick = function(){
           var nm = ov.querySelector('#efName').value.trim();
@@ -612,7 +629,14 @@ document.addEventListener('app:ready', function(e){
             var opts = (editFields[i].options||[]).map(function(s){ return String(s||'').trim(); }).filter(Boolean);
             var hasOptsType = tp==='select' || tp==='multiselect';
             if(hasOptsType && !opts.length){ App.toast('第 '+(i+1)+' 个字段为'+(tp==='multiselect'?'下拉多选':'下拉选择')+'，请填写选项','err'); return; }
-            fs.push({ label:lb, hint:String(editFields[i].hint||'').trim(), required:editFields[i].required !== false, type:tp, options:hasOptsType?opts:[] });
+            /* 默认值可留空；下拉类必须落在选项内，配错时明确提示，不静默替换成别的值 */
+            var df = String(editFields[i]['default']||'').trim();
+            if(df && hasOptsType && opts.indexOf(df) < 0){
+              App.toast('第 '+(i+1)+' 个字段的默认值「'+df+'」不在下拉选项内，请改为选项中的值或留空','err'); return;
+            }
+            var fd = { label:lb, hint:String(editFields[i].hint||'').trim(), required:editFields[i].required !== false, type:tp, options:hasOptsType?opts:[] };
+            if(df) fd['default'] = df;
+            fs.push(fd);
           }
           if(!fs.length){ App.toast('至少保留一个字段','err'); return; }
           API.updateFormTemplate(f.id, { name:nm, fields:fs }).then(function(r){
@@ -663,6 +687,8 @@ document.addEventListener('app:ready', function(e){
     return out;
   }
   function renderAudit(){
+    var ex = document.getElementById('aExport');
+    if(ex) ex.href = '/api/admin/audit/export?t=' + encodeURIComponent(sessionStorage.getItem('pzy_token') || '');
     var kw = document.getElementById('aKw').value.trim().toLowerCase();
     var list = auditBase.filter(function(a){
       if(!kw) return true;
@@ -721,30 +747,32 @@ document.addEventListener('app:ready', function(e){
     });
   };
 
-  /* 上传 .db 备份文件恢复 */
+  /* 上传 .sql 备份文件恢复（唯一支持的备份格式） */
   var bkFileInput = document.getElementById('bkFile');
   if (bkFileInput) {
     bkFileInput.addEventListener('change', function(e){
       var file = this.files && this.files[0];
       if (!file) return;
-      if (!/\.db$/i.test(file.name)) {
-        App.toast('请选择 .db 格式的备份文件','err');
+      if (!/\.sql$/i.test(file.name)) {
+        App.toast('仅支持 .sql 备份文件（系统导出的 mysqldump 文本），旧 .db 不再支持','err');
         this.value = ''; return;
       }
       App.confirmSim(
-        '确认从上传的备份文件恢复？<br><b>'+file.name+'</b>（'+Math.round(file.size/1024)+' KB）<br><br>当前数据库将被替换为此备份版本。恢复前会自动创建当前数据库的备份。恢复后所有用户需重新登录。',
+        '确认从上传的备份文件恢复？<br><b>'+App.esc(file.name)+'</b>（'+Math.round(file.size/1024)+' KB）<br><br>当前数据库将被替换为此备份版本。恢复前会自动创建当前数据库的备份；导入失败会自动回滚。恢复后所有用户需重新登录。',
         function(){
           var prog = document.getElementById('bkProg'), bar = document.getElementById('bkBar'), pctEl = document.getElementById('bkPct');
-          prog.style.display = ''; bar.style.width = '20%'; pctEl.textContent = '正在上传备份文件…';
+          prog.style.display = ''; bar.style.width = '20%'; pctEl.textContent = '正在上传并校验备份文件…';
           var fd = new FormData(); fd.append('file', file);
           API.restoreFromUpload(fd).then(function(r){
             bar.style.width = '100%';
-            pctEl.textContent = '恢复成功：'+r.file+'（安全网：'+r.preBackup+'）';
+            pctEl.textContent = '恢复成功：'+r.file+'（安全网：'+r.preBackup+'；校验：'+(r.verified?'通过':'未通过')+'；日志：'+(r.log||'-')+'）';
             App.toast('恢复成功，请重新登录','ok');
-            setTimeout(function(){ location.href='index.html'; }, 1500);
+            setTimeout(function(){ location.href='index.html'; }, 1800);
           }).catch(function(err){
             bar.style.width = '0%';
             pctEl.textContent = '恢复失败：'+((err&&err.message)||'请检查文件完整性');
+            renderBackupList();
+            loadLastBackup();
           });
         }
       );
@@ -786,12 +814,14 @@ document.addEventListener('app:ready', function(e){
               prog.style.display = ''; bar.style.width = '20%'; pctEl.textContent = '正在恢复 '+file+'…';
               API.restoreFromBackup(file).then(function(r){
                 bar.style.width = '100%';
-                pctEl.textContent = '恢复成功：'+r.file+'（安全网：'+r.preBackup+'）';
+                pctEl.textContent = '恢复成功：'+r.file+'（安全网：'+r.preBackup+'；校验：'+(r.verified?'通过':'未通过')+'；日志：'+(r.log||'-')+'）';
                 App.toast('恢复成功，请重新登录','ok');
-                setTimeout(function(){ location.href='index.html'; }, 1500);
+                setTimeout(function(){ location.href='index.html'; }, 1800);
               }).catch(function(err){
                 bar.style.width = '0%';
                 pctEl.textContent = '恢复失败：'+((err&&err.message)||'操作失败');
+                renderBackupList();
+                loadLastBackup();
               });
             }
           );
@@ -907,7 +937,7 @@ document.addEventListener('app:ready', function(e){
           +'<div>✅ 所有会商记录、取证材料、台账、评分、审计日志</div>'
           +'<div>✅ 内置表单模板（F1–F8）</div>'
           +'<div style="margin-top:12px;color:var(--green)">不会删除：uploads/ 上传文件、data/backups/ 数据库备份</div>'
-          +'<div style="margin-top:12px;color:var(--red)">⚠️ 重置后当前登录态将失效，需用新密码（见 .env 的 DRILL_INIT_PWD）重新登录</div>'
+          +'<div style="margin-top:12px;color:var(--red)">⚠️ 重置后当前登录态将失效，需重新登录</div>'
           +'</div>',
         footer: '<button class="btn" id="rsCancel">取消</button><button class="btn danger" id="rsConfirm">确认重置</button>',
         onOpen: function(m){
@@ -1118,7 +1148,7 @@ document.addEventListener('app:ready', function(e){
     });
     function load(){
       box.innerHTML = '<span class="tiny dim">加载中…</span>';
-      API.getDict('notif_templates').then(function(res){ cur = res.value||{}; paint(); })
+      API.getSystemDict('notif_templates').then(function(res){ cur = res.value||{}; paint(); })
         .catch(function(e){ box.innerHTML='<span class="dim">加载失败：'+App.esc((e&&e.message)||'未知错误')+'</span>'; });
     }
     load();
@@ -1178,7 +1208,7 @@ document.addEventListener('app:ready', function(e){
     });
     function load(){
       box.innerHTML = '<span class="tiny dim">加载中…</span>';
-      API.getDict('chat_channels').then(function(res){ cur = res.value||{}; paint(); })
+      API.getSystemDict('chat_channels').then(function(res){ cur = res.value||{}; paint(); })
         .catch(function(e){ box.innerHTML='<span class="dim">加载失败：'+App.esc((e&&e.message)||'未知错误')+'</span>'; });
     }
     load();
@@ -1217,7 +1247,7 @@ document.addEventListener('app:ready', function(e){
     }
     function load(key){
       curKey = key; box.innerHTML = '<span class="tiny dim">加载中…</span>';
-      API.getDict(key).then(function(res){
+      API.getSystemDict(key).then(function(res){
         curVal = Array.isArray(res.value) ? res.value.slice() : [];
         loaded[key] = true; paint();
       }).catch(function(e){ box.innerHTML = '<span class="dim">加载失败：'+App.esc((e&&e.message)||'未知错误')+'</span>'; });

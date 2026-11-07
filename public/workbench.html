@@ -103,7 +103,7 @@ document.addEventListener('app:ready', function(e){
   var started = proj.status === '演练中';
   /* 实战版：可选下一节点接收角色 + 取证材料完成情况（未归档不允许结束演练） */
   var RECEIVERS = [];
-  var EV = { done:0, total:0, pending:0, pendingItems:[] };
+  var EV = { done:0, total:0, pending:0, core:0, coreDone:0, corePending:0, support:0, supportDone:0, supportPending:0, pendingItems:[] };
   /* 新任务语音提醒基线：仅在待办项新增时播报，首次加载与完成推进不播报 */
   var lastTaskSig = null;
   function announceNewTasks(ids, label){
@@ -200,13 +200,15 @@ document.addEventListener('app:ready', function(e){
 
   /* ---------- 表单字段解析与分步填写向导 ---------- */
   function fieldOf(fl){
-    if(typeof fl === 'string') return { label:String(fl||'').trim(), hint:'', required:true, type:'auto', options:[] };
+    if(typeof fl === 'string') return { label:String(fl||'').trim(), hint:'', required:true, type:'auto', options:[], 'default':'' };
     return {
       label:String((fl&&(fl.label||fl.name))||'').trim(),
       hint:String((fl&&fl.hint)||''),
       required:!(fl&&fl.required===false),
       type:(fl&&fl.type)||'auto',
-      options:Array.isArray(fl&&fl.options)?fl.options.slice():(typeof (fl&&fl.options)==='string'?fl.options.split(/[、,，|｜]/).map(function(s){return String(s).trim();}).filter(Boolean):[])
+      options:Array.isArray(fl&&fl.options)?fl.options.slice():(typeof (fl&&fl.options)==='string'?fl.options.split(/[、,，|｜]/).map(function(s){return String(s).trim();}).filter(Boolean):[]),
+      /* 模板配置的默认值（不是字段说明、也不是输入框 placeholder）：为空表示未配置 */
+      'default':String((fl&&(fl['default']!==undefined?fl['default']:fl.defaultValue))||'').trim()
     };
   }
   function wizFields(raw){
@@ -286,7 +288,12 @@ document.addEventListener('app:ready', function(e){
     s.fields = fields; s.t = t; s.node = node;
     if(!s.inited){
       fields.forEach(function(f){
-        var v = prefill ? String(simValue(f.label, t, node)||'') : '';
+        var v = '';
+        if(prefill){
+          /* 回填优先级：模板配置的默认值 > 前端模拟数据兜底（用户已手改的值存在 s.values，不会被重算） */
+          v = String(f['default']||'').trim();
+          if(!v) v = String(simValue(f.label, t, node)||'');
+        }
         if(prefill && wizType(f) === 'select' && f.options.length){
           v = fitOption(f.options, v) || f.options[0];
         }
@@ -600,15 +607,34 @@ document.addEventListener('app:ready', function(e){
       return;
     }
 
-    /* 复用现有附件查询接口，取各前置任务的证据附件清单 */
+    /* 复用现有附件查询接口，取各前置任务的证据附件清单；同时合并取证模块里的同一任务材料 */
+    function evidenceOfPred(p){
+      return ((window.MOCK && MOCK.EVIDENCE) || []).filter(function(e){
+        if(e.projectId && proj.id && String(e.projectId) !== String(proj.id)) return false;
+        if(p.taskId && String(e.taskId || '') === String(p.taskId)) return true;
+        return !e.taskId && p.nodeId && String(e.nodeId || '') === String(p.nodeId);
+      }).map(function(e){
+        return {name:e.name, url:e.url, by:e.uploader, size:e.size, time:e.time, auto:e.auto};
+      });
+    }
+    function mergeAtts(base, extra){
+      var seen = {}, out = [];
+      (base || []).concat(extra || []).forEach(function(a){
+        var key = String(a.url || '') + '|' + String(a.name || '');
+        if(seen[key]) return;
+        seen[key] = 1; out.push(a);
+      });
+      return out;
+    }
     var jobs = preds.map(function(p){
-      if(!p.taskId) return Promise.resolve(p);
+      var evs = evidenceOfPred(p);
+      if(!p.taskId){ p.attachments = mergeAtts([], evs); return Promise.resolve(p); }
       return API.getTaskAttachments(p.taskId).then(function(list){
-        p.attachments = (list||[]).map(function(a){
+        p.attachments = mergeAtts((list||[]).map(function(a){
           return {name:a.name, url:a.url, by:a.by, size:a.size, time:a.time, auto:a.auto};
-        });
+        }), evs);
         return p;
-      }).catch(function(){ return p; });
+      }).catch(function(){ p.attachments = mergeAtts([], evs); return p; });
     });
 
     Promise.all(jobs).then(function(list){
@@ -792,12 +818,14 @@ document.addEventListener('app:ready', function(e){
     if(attList.length){
       attHtml = '<div class="flex wrap gap2">' + attList.map(function(a){
         var nm = a.name || '附件';
-        var img = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(a.url||''));
-        var sub = (a.time?App.esc(a.time)+' · ':'')+(a.size?App.esc(a.size):'');
+        var hasUrl = !!a.url;
+        var img = hasUrl && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(a.url));
+        var sub = (a.time?App.esc(a.time)+' · ':'')+(a.size?App.esc(a.size):'')+(hasUrl?'':' · 无文件');
         var content = img
           ? '<img src="'+App.esc(a.url)+'" alt="" style="width:40px;height:32px;object-fit:cover;border-radius:4px;display:block;flex:none">'
           : App.icon('file');
-        return '<span class="file-chip" style="cursor:pointer" data-pred-att data-url="'+App.esc(a.url)+'" data-name="'+App.esc(nm)+'" title="点击查看/下载">'+content+App.esc(nm)+'<span class="fc-size">'+sub+'</span></span>';
+        var clickable = hasUrl ? ' style="cursor:pointer" data-pred-att data-url="'+App.esc(a.url)+'" data-name="'+App.esc(nm)+'" title="点击查看/下载"' : ' title="历史记录无关联文件"';
+        return '<span class="file-chip"'+clickable+'>'+content+App.esc(nm)+'<span class="fc-size">'+sub+'</span></span>';
       }).join('') + '</div>';
     } else if(step && String(step.evidence||'').trim()){
       attHtml = '<div class="small pred-detail-text">'+App.esc(String(step.evidence).trim())+'</div>';
@@ -908,7 +936,7 @@ document.addEventListener('app:ready', function(e){
       +       '2. 核对并提交下方表单（已自动填充模拟数据）<br>'
       +       '3. 上传证据附件（可上传文件或直接屏幕截图）</div>'
       +     '<div class="section-title mt3">'+App.icon('file')+'证据附件 <button class="btn sm outline" data-att="'+t.id+'">'+App.icon('upload')+'上传 / 截图</button></div>'
-      +     '<div class="flex wrap gap2" id="watt-'+t.id+'">'+(t.atts&&t.atts.length?attHtml(t):'<span class="small dim">暂无附件 · 上传后即时刷新</span>')+'</div>'
+      +     '<div class="flex wrap gap2" id="watt-'+t.id+'">'+attHtml(t)+'</div>'
       +     formsHtml(t, node)
       +     '<div class="divider"></div>'
       +     '<button class="btn ok" data-finish="'+t.id+'">'+App.icon('check')+'完成本流程</button>'
@@ -1004,7 +1032,6 @@ document.addEventListener('app:ready', function(e){
           ov.close();
           renderBasic(); renderScore();
         });
-        ensureAutoAtts(t, box);
         /* 异步加载前置节点处置情况 */
         if(nid && proj.id) API.getPredecessor(nid, proj.id).then(function(data){
           fillPredecessorSection('wbPred-'+t.id, data);
@@ -1079,9 +1106,22 @@ document.addEventListener('app:ready', function(e){
         });
         if(missing.length){ App.toast('《'+App.formDisplayName(f)+'》仍有必填项：'+missing.slice(0,3).join('、'),'err'); return; }
         b.disabled = true; b.textContent = '提交中…';
-        API.submitForm(t.id, f.id, data).then(function(){
+        API.submitForm(t.id, f.id, data).then(function(res){
           b.disabled = false; b.innerHTML = App.icon('upload')+'重新提交表单';
-          App.toast('《'+App.formDisplayName(f)+'》已提交并归档至取证模块','ok');
+          // 基础版：必填/质量规则只提示不阻断，后端通过 warnings 返回逐字段问题
+          var ws = (res && res.warnings) || [];
+          var oldWarn = host.querySelector('.form-warn');
+          if(oldWarn && oldWarn.parentNode) oldWarn.parentNode.removeChild(oldWarn);
+          if(ws.length){
+            var warnBox = document.createElement('div');
+            warnBox.className = 'sim-banner mt2 form-warn';
+            warnBox.innerHTML = App.icon('alert')+'<span>表单已提交，但有 '+ws.length+' 项填写提示：'
+              + ws.map(function(w){ return App.esc(w.message||''); }).join('；')+'</span>';
+            if(b.parentNode) b.parentNode.insertBefore(warnBox, b);
+            App.toast('表单已提交，存在填写提示，请查看提示条','warn');
+          } else {
+            App.toast('《'+App.formDisplayName(f)+'》已提交并归档至取证模块','ok');
+          }
         }).catch(function(err){
           b.disabled = false; b.innerHTML = App.icon('upload')+'提交表单（模拟）';
           App.toast((err&&err.message)||'表单提交失败','err');
@@ -1094,6 +1134,35 @@ document.addEventListener('app:ready', function(e){
     });
     var attBox = host.querySelector('#watt-'+t.id);
     if(attBox) attBox.onclick = function(ev){
+      var evBtn = ev.target.closest ? ev.target.closest('[data-ev-del]') : null;
+      if(evBtn){
+        ev.stopPropagation();
+        var evId = evBtn.dataset.evDel;
+        var rec = evidenceOfTask(t).filter(function(x){ return String(x.id)===String(evId); })[0];
+        confirmRemove('确认删除附件「'+((rec&&rec.name)||evId)+'」？删除后文件与记录一并清理，不可恢复。', function(){
+          API.deleteEvidence(evId).then(function(){
+            t.atts = (t.atts||[]).filter(function(x){ return !(rec && rec.url && x.url===rec.url); });
+            refreshAtt(t, host);
+            App.toast('附件已删除','ok');
+          }).catch(function(err){ App.toast((err&&err.message)||'删除失败','err'); });
+        });
+        return;
+      }
+      var delBtn = ev.target.closest ? ev.target.closest('[data-att-del]') : null;
+      if(delBtn){
+        ev.stopPropagation();
+        var attId = delBtn.dataset.attDel;
+        var att = (t.atts||[]).filter(function(x){ return String(x.id)===String(attId); })[0];
+        confirmRemove('确认删除附件「'+((att&&att.name)||attId)+'」？删除后文件与记录一并清理，不可恢复。', function(){
+          API.deleteTaskAttachment(t.id, attId).then(function(){
+            t.atts = (t.atts||[]).filter(function(x){ return String(x.id)!==String(attId); });
+            if(att && att.url) MOCK.EVIDENCE = (MOCK.EVIDENCE||[]).filter(function(e){ return e.url!==att.url; });
+            refreshAtt(t, host);
+            App.toast('附件已删除','ok');
+          }).catch(function(err){ App.toast((err&&err.message)||'删除失败','err'); });
+        });
+        return;
+      }
       var chip = ev.target.closest ? ev.target.closest('.att-img') : null;
       if(!chip) return;
       var im = chip.querySelector('img');
@@ -1138,49 +1207,69 @@ document.addEventListener('app:ready', function(e){
     if(/\.(cfg|conf|ini|yaml|yml|json)$/.test(n)) return '配置备份';
     return '文档';
   }
+  function evidenceOfTask(t){
+    return ((window.MOCK && MOCK.EVIDENCE) || []).filter(function(e){
+      if(e.taskId && String(e.taskId) === String(t.id)) return true;
+      return !e.taskId && e.nodeId && String(e.nodeId) === String(t.nodeId);
+    }).map(function(e){
+      return { id:e.id, name:e.name, type:e.type, size:e.size, url:e.url, by:e.uploader, time:e.time, auto:!!e.auto, ev:true };
+    });
+  }
   function attHtml(t){
-    return (t.atts||[]).map(function(a){
+    var base = (t.atts||[]).map(function(a){
+      return { id:a.id, name:a.name, type:a.type, size:a.size, url:a.url, by:a.by, time:a.time, auto:a.auto, ev:false };
+    });
+    var seen = {};
+    base.forEach(function(a){ if(a.url) seen[String(a.url)] = 1; });
+    var extra = evidenceOfTask(t).filter(function(e){ return !(e.url && seen[String(e.url)]); });
+    return base.concat(extra).map(function(a){
       var auto = (a.by==='系统自动' || a.auto) ? '⚙ ' : '';
       var nm = App.esc(a.name||'附件');
       var meta = (a.time?a.time+' · ':'')+(a.by||'')+(a.size?(' · '+a.size):'');
       if(a.by==='系统自动' || a.auto) meta = '自动生成 · '+meta;
+      if(a.ev) meta += (a.url?'':' · 无文件');
+      var del = a.id ? '<button '+(a.ev?'data-ev-del':'data-att-del')+'="'+App.esc(String(a.id))+'" title="删除附件" style="border:0;background:transparent;color:var(--err,#f85149);cursor:pointer;padding:0 0 0 6px;font-size:15px;line-height:1">×</button>' : '';
       var isImg = a.url && (/^data:image/.test(a.url) || /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(a.url).split('?')[0]));
       if(isImg){
-        return '<span class="file-chip att-img" title="点击放大预览" style="padding:4px 8px 4px 4px;cursor:pointer"><img src="'+App.esc(a.url)+'" alt="" style="width:56px;height:40px;object-fit:cover;border-radius:4px;display:block;flex:none">'+auto+nm+'<span class="fc-size">'+meta+'</span></span>';
+        return '<span class="file-chip att-img" title="点击放大预览" style="padding:4px 8px 4px 4px;cursor:pointer"><img src="'+App.esc(a.url)+'" alt="" style="width:56px;height:40px;object-fit:cover;border-radius:4px;display:block;flex:none">'+auto+nm+'<span class="fc-size">'+meta+'</span>'+del+'</span>';
       }
       var dl = a.url ? ' <a href="'+App.esc(a.url)+'" target="_blank" rel="noopener" style="color:var(--accent2);margin-left:4px">下载</a>' : '';
-      return '<span class="file-chip">'+App.icon('file')+auto+nm+'<span class="fc-size">'+meta+'</span>'+dl+'</span>';
+      return '<span class="file-chip">'+App.icon('file')+auto+nm+'<span class="fc-size">'+meta+'</span>'+dl+del+'</span>';
     }).join('') || '<span class="small dim">暂无附件</span>';
   }
   function refreshAtt(t, host){
     var box = host && host.querySelector ? host.querySelector('#watt-'+t.id) : null;
     if(box) box.innerHTML = attHtml(t);
   }
-  function pushAutoAtt(t, att, host){
-    API.addEvidence({ type: att.type || '截图', name: att.name, size: att.size || '-',
-      taskId: t.id, auto: true, asAttachment: true, dataUrl: att.url }).then(function(r){
-      var rec = { id: r.attId, name: att.name, type: att.type || '截图', size: r.size || att.size || '-',
-        url: r.url || att.url, by: '系统自动', time: att.time, auto: true };
-      t.atts = t.atts || [];
-      var dup = t.atts.filter(function(x){ return x && x.name === att.name; })[0];
-      if(dup){ dup.url = rec.url; dup.size = rec.size; } else t.atts.push(rec);
-      refreshAtt(t, host);
-    }).catch(function(){});
+  function confirmRemove(msg, onOk){
+    App.modal({ title:'删除确认',
+      body:'<p style="font-size:13.5px;line-height:1.8">'+App.esc(msg)+'</p>',
+      foot:'<button class="btn" id="delNo">取消</button><button class="btn primary" id="delYes">确认删除</button>',
+      onOpen:function(ov){
+        ov.querySelector('#delNo').onclick = ov.close;
+        ov.querySelector('#delYes').onclick = function(){ ov.close(); if(onOk) onOk(); };
+      } });
   }
   function openAttUpload(t, host){
     var picked = [];
+    /* 屏幕抓取 API 仅在安全上下文（HTTPS / localhost）可用；内网 HTTP 地址下 navigator.mediaDevices 不存在 */
+    var canScreen = !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
     App.modal({ title:'上传证据附件 · '+t.id,
       body:'<div class="sim-banner">'+App.icon('alert')+'<span>真实文件上传：可选择本地证据文件，或直接<b>屏幕截图</b>取证。<b>严禁上传可执行程序/脚本/恶意样本</b>，单文件限 '+MAX_MB+'MB。</span></div>'
         + '<div class="flex wrap gap2 mb3">'
         + '<button class="btn primary" id="attPick">'+App.icon('file')+'选择文件</button>'
         + '<button class="btn" id="attShot">'+App.icon('camera')+'屏幕截图</button>'
         + '<input type="file" id="attFile" multiple style="display:none">'
+        + '<input type="file" id="attShotFile" accept="image/*" multiple style="display:none">'
         + '</div>'
+        + '<div id="attShotTip" class="tiny" style="display:none;color:#fbbf24;line-height:1.7;margin-bottom:8px"></div>'
         + '<div id="attList" class="small muted">尚未选择文件</div>',
       foot:'<button class="btn" id="attNo">取消</button><button class="btn primary" id="attYes">'+App.icon('upload')+'上传归档</button>',
       onOpen:function(ov){
         var listBox = ov.querySelector('#attList');
         var fileIn = ov.querySelector('#attFile');
+        var shotFileIn = ov.querySelector('#attShotFile');
+        var shotTip = ov.querySelector('#attShotTip');
         function renderPicked(){
           if(!picked.length){ listBox.innerHTML = '<span class="small muted">尚未选择文件</span>'; return; }
           listBox.innerHTML = picked.map(function(p){
@@ -1188,37 +1277,11 @@ document.addEventListener('app:ready', function(e){
             return '<div style="padding:6px 0;border-bottom:1px dashed var(--line)">'+App.esc(p.name)+' · '+fmtSize(p.size)+bad+'</div>';
           }).join('');
         }
-        ov.querySelector('#attPick').onclick = function(){ fileIn.click(); };
-        fileIn.onchange = function(){
-          Array.prototype.forEach.call(fileIn.files||[], function(f){ picked.push(f); });
+        function pushFiles(files){
+          Array.prototype.forEach.call(files||[], function(f){ picked.push(f); });
           renderPicked();
-        };
-        ov.querySelector('#attShot').onclick = function(){
-          if(!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)){
-            App.toast('当前浏览器不支持屏幕截图，请使用“选择文件”上传截图','err'); return;
-          }
-          navigator.mediaDevices.getDisplayMedia({video:true}).then(function(stream){
-            var video = document.createElement('video');
-            video.muted = true; video.srcObject = stream;
-            video.onloadedmetadata = function(){
-              video.play();
-              setTimeout(function(){
-                var c = document.createElement('canvas');
-                c.width = video.videoWidth || 1280; c.height = video.videoHeight || 720;
-                c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
-                stream.getTracks().forEach(function(tr){ tr.stop(); });
-                var url = c.toDataURL('image/png');
-                var nm = '屏幕截图-'+t.id+'-'+p2(new Date().getHours())+p2(new Date().getMinutes())+p2(new Date().getSeconds())+'.png';
-                pushAutoAtt(t, { name:nm, time:new Date().toTimeString().slice(0,5), type:'截图', size:fmtSize(Math.round(url.length*0.75)), url:url }, host);
-                App.toast('屏幕截图已归档为证据附件','ok');
-                ov.close();
-              }, 350);
-            };
-            video.onerror = function(){ App.toast('截图失败：无法读取屏幕画面','err'); };
-          }, function(){});
-        };
-        ov.querySelector('#attNo').onclick = ov.close;
-        ov.querySelector('#attYes').onclick = function(){
+        }
+        function commitUpload(){
           if(!picked.length){ App.toast('请先选择文件','err'); return; }
           var valid = [], rejected = 0;
           picked.forEach(function(f){
@@ -1234,95 +1297,78 @@ document.addEventListener('app:ready', function(e){
             list.forEach(function(a){ t.atts.push(a); });
             refreshAtt(t, host);
             ov.close();
+            /* 服务端已把同一份文件镜像到 evidence：回读一次，保证“证据附件”与“取证留痕”两处展示一致 */
+            API.getEvidence().then(function(ev){
+              MOCK.EVIDENCE = ev || [];
+              refreshAtt(t, host);
+            }).catch(function(){});
             App.toast(list.length+' 个附件已上传并归档至取证模块'+(rejected?('，'+rejected+' 个被拦截'):''), rejected?'warn':'ok');
           }).catch(function(err){ App.toast((err&&err.message)||'上传失败','err'); });
+        }
+        if(!canScreen){
+          shotTip.style.display = 'block';
+          shotTip.innerHTML = '当前通过 HTTP 地址访问（非安全上下文），浏览器已禁止网页直接抓屏。<br>请用系统截图（Win+Shift+S / 微信截图）后在本窗口按 <b>Ctrl+V</b> 粘贴，或点击「屏幕截图」选择本地图片。';
+        }
+        /* 粘贴截图：paste 事件在非安全上下文同样可用 */
+        var onPaste = function(e){
+          var fl = e.clipboardData && e.clipboardData.files;
+          var imgs = [];
+          if(fl) Array.prototype.forEach.call(fl, function(f){ if(/^image\//.test(f.type||'')) imgs.push(f); });
+          if(!imgs.length) return;
+          e.preventDefault();
+          var ts = p2(new Date().getHours())+p2(new Date().getMinutes())+p2(new Date().getSeconds());
+          imgs.forEach(function(f, i){
+            var nm = (f.name && f.name !== 'image.png') ? f.name : ('粘贴截图-'+t.id+'-'+ts+(imgs.length>1?('-'+i):'')+'.png');
+            try { picked.push(new File([f], nm, { type: f.type || 'image/png' })); }
+            catch(err){ picked.push(f); }
+          });
+          renderPicked();
+          App.toast('已粘贴 '+imgs.length+' 张截图，点击“上传归档”完成归档','ok');
         };
+        document.addEventListener('paste', onPaste);
+        var origClose = ov.close;
+        ov.close = function(){ document.removeEventListener('paste', onPaste); origClose(); };
+        ov.querySelector('#attPick').onclick = function(){ fileIn.click(); };
+        fileIn.onchange = function(){ pushFiles(fileIn.files); fileIn.value = ''; };
+        shotFileIn.onchange = function(){ pushFiles(shotFileIn.files); shotFileIn.value = ''; };
+        ov.querySelector('#attShot').onclick = function(){
+          if(!canScreen){
+            App.toast('当前为 HTTP 内网访问，浏览器禁止网页直接抓屏，已切换为选择图片上传','warn');
+            shotFileIn.click();
+            return;
+          }
+          navigator.mediaDevices.getDisplayMedia({video:true}).then(function(stream){
+            var video = document.createElement('video');
+            video.muted = true; video.srcObject = stream;
+            video.onloadedmetadata = function(){
+              video.play();
+              setTimeout(function(){
+                var c = document.createElement('canvas');
+                c.width = video.videoWidth || 1280; c.height = video.videoHeight || 720;
+                c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+                stream.getTracks().forEach(function(tr){ tr.stop(); });
+                c.toBlob(function(blob){
+                  if(!blob){ App.toast('截图失败：无法生成图片','err'); return; }
+                  var nm = '屏幕截图-'+t.id+'-'+p2(new Date().getHours())+p2(new Date().getMinutes())+p2(new Date().getSeconds())+'.png';
+                  picked.push(new File([blob], nm, { type:'image/png' }));
+                  renderPicked();
+                  commitUpload();
+                }, 'image/png');
+              }, 350);
+            };
+            video.onerror = function(){
+              stream.getTracks().forEach(function(tr){ tr.stop(); });
+              App.toast('截图失败：无法读取屏幕画面','err');
+            };
+          }).catch(function(err){
+            var nm = (err && err.name) || '';
+            if(nm === 'NotAllowedError' || nm === 'AbortError') App.toast('已取消屏幕共享','warn');
+            else App.toast('屏幕共享失败：'+((err && err.message) || nm || '未知原因')+'，请改用“选择文件”上传截图','err');
+          });
+        };
+        ov.querySelector('#attNo').onclick = ov.close;
+        ov.querySelector('#attYes').onclick = commitUpload;
       } });
-  }
-
-  /* ---------- 自动取证截图（canvas 本地绘制模拟界面） ---------- */
-  function wrapLines(g, text, maxW){
-    var lines = [], cur = '', chars = String(text||'').split('');
-    for(var i=0;i<chars.length;i++){
-      var trial = cur + chars[i];
-      if(g.measureText(trial).width > maxW && cur){ lines.push(cur); cur = chars[i]; }
-      else cur = trial;
-    }
-    if(cur) lines.push(cur);
-    return lines;
-  }
-  function drawSimShot(kind, t){
-    var c = document.createElement('canvas');
-    c.width = 640; c.height = 360;
-    var g = c.getContext('2d');
-    var d = new Date();
-    var ts = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());
-    var lines, i, y;
-    if(kind==='alert'){
-      g.fillStyle='#0d1117'; g.fillRect(0,0,640,360);
-      g.fillStyle='#161b22'; g.fillRect(0,0,640,40);
-      g.strokeStyle='#30363d'; g.lineWidth=1; g.strokeRect(0.5,0.5,639,359);
-      var dots = ['#f85149','#d29922','#3fb950'];
-      for(i=0;i<3;i++){ g.beginPath(); g.arc(18+i*16,20,5,0,Math.PI*2); g.fillStyle=dots[i]; g.fill(); }
-      g.fillStyle='#c9d1d9'; g.font='bold 14px "Microsoft YaHei",sans-serif';
-      g.fillText('态势感知平台（模拟） · 安全告警详情',80,25);
-      g.fillStyle='rgba(248,81,73,.15)'; g.fillRect(20,52,118,26);
-      g.strokeStyle='#f85149'; g.strokeRect(20.5,52.5,117,25);
-      g.fillStyle='#f85149'; g.font='bold 13px "Microsoft YaHei",sans-serif';
-      g.fillText((t.level||'P0')+' 高危告警',30,70);
-      g.fillStyle='#8b949e'; g.font='12px Consolas,monospace';
-      g.fillText('告警时间 '+ts,156,70);
-      g.fillStyle='#e6edf3'; g.font='13px "Microsoft YaHei",sans-serif';
-      y = 104;
-      ['告警内容：'+FACTS.alert, '可疑地址：'+FACTS.ip, '样本特征：'+FACTS.sample, '关联处置：'+FACTS.action].forEach(function(txt){
-        wrapLines(g, txt, 590).forEach(function(ln){ g.fillText(ln,22,y); y+=20; });
-      });
-      g.fillStyle='#484f58'; g.font='12px "Microsoft YaHei",sans-serif';
-      g.fillText('【模拟数据 · 系统自动取证 · 不含真实患者数据】 任务 '+t.id,22,340);
-    } else {
-      g.fillStyle='#eef1f5'; g.fillRect(0,0,640,360);
-      g.fillStyle='#2f81f7'; g.fillRect(0,0,640,36);
-      g.fillStyle='#ffffff'; g.font='bold 14px "Microsoft YaHei",sans-serif';
-      g.fillText('HIS 医院信息系统（模拟） — 门诊工作站',16,23);
-      g.fillStyle='#ffffff'; g.fillRect(0,36,640,324);
-      g.strokeStyle='#d0d7de'; g.lineWidth=1;
-      g.beginPath(); g.moveTo(0,36.5); g.lineTo(640,36.5); g.stroke();
-      g.fillStyle='#f6f8fa'; g.fillRect(60,74,520,178);
-      g.strokeStyle='#d0d7de'; g.strokeRect(60.5,74.5,519,177);
-      g.beginPath(); g.arc(96,112,16,0,Math.PI*2); g.fillStyle='#f85149'; g.fill();
-      g.strokeStyle='#ffffff'; g.lineWidth=3;
-      g.beginPath(); g.moveTo(89,105); g.lineTo(103,119); g.moveTo(103,105); g.lineTo(89,119); g.stroke();
-      g.fillStyle='#1f2328'; g.font='bold 15px "Microsoft YaHei",sans-serif';
-      g.fillText('系统连接异常（模拟故障界面）',124,117);
-      g.font='13px "Microsoft YaHei",sans-serif'; g.fillStyle='#57606a';
-      lines = wrapLines(g, FACTS.fault, 470);
-      y = 146;
-      for(i=0;i<lines.length;i++){ g.fillText(lines[i],80,y); y+=19; }
-      g.fillStyle='#2f81f7'; g.fillRect(368,214,96,28);
-      g.fillStyle='#ffffff'; g.font='13px "Microsoft YaHei",sans-serif';
-      g.fillText('重试连接',392,232);
-      g.fillStyle='#ffffff'; g.fillRect(252,214,104,28);
-      g.strokeStyle='#57606a'; g.strokeRect(252.5,214.5,103,27);
-      g.fillStyle='#57606a'; g.fillText('切换纸质流程',266,232);
-      g.strokeStyle='rgba(248,81,73,.7)'; g.lineWidth=2; g.strokeRect(20.5,296.5,330,32);
-      g.fillStyle='rgba(248,81,73,.85)'; g.font='bold 13px "Microsoft YaHei",sans-serif';
-      g.fillText('【模拟数据 · 系统自动取证 · 无真实患者数据】任务 '+t.id,30,317);
-      g.fillStyle='#8b949e'; g.font='12px Consolas,monospace';
-      g.fillText(ts,520,317);
-    }
-    return c.toDataURL('image/png');
-  }
-  var autoDone = {};
-  function ensureAutoAtts(t, host){
-    if(autoDone[t.id]) return;
-    autoDone[t.id] = true;
-    var tm = p2(new Date().getHours())+':'+p2(new Date().getMinutes());
-    [{ name:'自动取证-告警截图-'+t.id+'.png', kind:'alert' },
-     { name:'自动取证-系统故障截图-'+t.id+'.png', kind:'fault' }].forEach(function(s){
-      var url;
-      try{ url = drawSimShot(s.kind, t); }catch(err){ return; }
-      pushAutoAtt(t, { name:s.name, time:tm, type:'截图', size:fmtSize(Math.round(url.length*0.75)), url:url }, host);
-    });
   }
 
   /* ---------- 剧本故障通报：演练开始后弹窗 + 页面正上方固定告警 ---------- */
@@ -1458,7 +1504,7 @@ document.addEventListener('app:ready', function(e){
           ? '<span class="tag green">正确流程 · 得分 +'+sub.delta+'</span>'+(sub.ontime?'':' <span class="tag yellow">超出标准处置时长</span>')
           : '<span class="tag red">混淆流程 · 扣分 '+Math.abs(sub.delta)+'</span>')+'</span>'
       + '<span class="k">下一节点接收人</span><span>'+(sub.receiver?App.esc(sub.receiver):'—')
-        +(sub.correct?(sub.receiverOk?'':' <span class="tag red">选择错误 · 扣本流程30%</span>'):'')+'</span>'
+        +(sub.correct?((sub.receiverOk===0||sub.receiverOk===false)?' <span class="tag red">接收人不完整 · 扣本流程10%–30%</span>':''):'')+'</span>'
       + rows
       + '<span class="k">处置措施</span><span class="small">'+App.esc(sub.measure||'—')+'</span>'
       + '<span class="k">处置结果</span><span class="small">'+App.esc(sub.result||'—')+'</span>'
@@ -1600,11 +1646,12 @@ document.addEventListener('app:ready', function(e){
             projectId: proj.id, nodeId: d.nodeId, forms: forms, receiver: receivers,
             measure: measure, result: result, evidence: evidence, found: found
           }).then(function(r){
-            var recvTip = r.correct && r.receiverOk===0 ? '（接收人选择错误，扣本流程30%）' : '';
+            var recvBad = r.receiverOk===0 || r.receiverOk===false;
+            var recvTip = r.correct && recvBad ? '（接收人选择错误，扣本流程30%）' : '';
             App.toast(r.correct
               ? '处置记录已提交：正确流程，得分 +'+r.delta+(r.ontime?'':';超出标准处置时长')+recvTip
               : '处置记录已提交：混淆流程，扣分 '+Math.abs(r.delta),
-              r.correct && r.receiverOk!==0 ? 'ok':'warn');
+              r.correct && !recvBad ? 'ok':'warn');
             ov.close();
             App.refreshShell();
             renderPractical(); renderScore();
@@ -1659,19 +1706,111 @@ document.addEventListener('app:ready', function(e){
     });
   }
 
-  /* 完成演练按钮：取证材料未全部归档时禁用（与取证归档模块联动） */
+  /* 完成演练按钮：核心证据未齐仍可点击（走缺项说明流程），非核心缺失只扣分不阻断 */
   function updateFinishBtn(){
     var b = document.getElementById('btnFinish');
     if(!b) return;
-    if(EV.pending > 0){
-      b.disabled = true;
-      b.innerHTML = App.icon('lock')+'完成演练（取证 '+EV.done+'/'+EV.total+'）';
-      b.title = '尚有 '+EV.pending+' 项取证材料未归档，请先在取证与材料归档模块完成取证';
+    b.disabled = false;
+    if(EV.corePending > 0){
+      b.innerHTML = App.icon('alert')+'完成演练（核心证据 '+EV.coreDone+'/'+EV.core+'）';
+      b.title = '核心证据尚有 '+EV.corePending+' 项未归档，需补齐或填写缺项说明（原因/责任人/补录时限/批准人）后结束';
+    } else if(EV.supportPending > 0){
+      b.innerHTML = App.icon('check')+'完成演练';
+      b.title = '核心证据已全部归档（'+EV.coreDone+'/'+EV.core+'）；另有 '+EV.supportPending+' 项非核心证据未归档，仅扣分不阻断';
     } else {
-      b.disabled = false;
       b.innerHTML = App.icon('check')+'完成演练';
       b.title = '取证材料已全部归档（'+EV.done+'/'+EV.total+'），可结束演练';
     }
+  }
+
+  /* 结束核对清单 + 有缺项结束登记 */
+  function openFinishChecklist(){
+    var bfin = document.getElementById('btnFinish');
+    if(bfin){ bfin.disabled = true; }
+    DRILL.post('/drill/finish', { projectId: proj.id, dryRun: true }).then(function(r){
+      if(bfin){ bfin.disabled = false; }
+      showFinishModal(r && r.checklist);
+    }).catch(function(err){
+      if(bfin){ bfin.disabled = false; }
+      App.toast((err && err.message) || '结束核对失败', 'err');
+      updateFinishBtn();
+    });
+  }
+
+  function showFinishModal(ck){
+    ck = ck || {};
+    var coreMissing = ck.coreMissing || [];
+    var reqMissing = ck.requiredMissing || [];
+    var html = '<div class="tiny dim">结束前一次性核对：必做节点完成 <b>'+ck.requiredDone+'/'+ck.requiredTotal+'</b>；'
+      + '取证归档 <b>'+ck.evidenceDone+'/'+ck.evidenceTotal+'</b>（'+ck.evidenceRate+'%）；'
+      + '核心证据 <b style="color:'+(ck.corePending>0?'var(--err)':'var(--ok)')+'">'+ck.coreDone+'/'+ck.coreTotal+'</b>'
+      + (ck.supportPending>0 ? ('；非核心缺失 <b>'+ck.supportPending+'</b> 项（仅扣分）') : '') + '</div>';
+    html += '<div class="sim-banner mt2">'+App.icon('alert')+'<span>'+App.esc(ck.hint || '')+'</span></div>';
+    if(reqMissing.length){
+      html += '<div class="section-title mt4">必做节点缺项</div><div class="tiny dim">'
+        + reqMissing.map(function(n){ return App.esc(n.title)+'（'+App.esc(n.target||'—')+'）'; }).join('、') + '</div>';
+    }
+    if(coreMissing.length){
+      html += '<div class="section-title mt4">核心证据缺项</div><div class="tiny dim">'
+        + coreMissing.map(function(x){ return App.esc(x.name)+'（'+App.esc(x.nodeTitle)+' · '+App.esc(x.target||'—')+'）'; }).join('<br>') + '</div>';
+    }
+    if(ck.supportPending > 0){
+      html += '<div class="section-title mt4">非核心证据</div><div class="tiny dim">'+ck.supportPending+' 项未归档，仅扣分、不阻断结束。</div>';
+    }
+    if(ck.needsException){
+      html += '<div class="section-title mt4">有缺项结束登记（必填）</div>'
+        + '<div class="form-row"><label>缺项原因</label><textarea id="exReason" class="input" rows="2" placeholder="说明核心证据缺失原因及处置安排"></textarea></div>'
+        + '<div class="form-row"><label>补录责任人</label><input id="exOwner" class="input" placeholder="姓名/岗位"></div>'
+        + '<div class="form-row"><label>补录时限</label><input id="exDeadline" class="input" value="'+App.esc(ck.suggestedDeadline||'')+'" placeholder="YYYY-MM-DD HH:mm"></div>'
+        + '<div class="form-row"><label>批准人</label><input id="exApprover" class="input" placeholder="批准人姓名/岗位"></div>';
+    }
+    var ov = App.modal({
+      title: '结束演练核对' + (ck.needsException ? ' · 有缺项' : ''),
+      wide: true, persist: true,
+      body: html,
+      foot: '<button class="btn" id="finCancel">取消（继续演练）</button>'
+        + '<button class="btn '+(ck.needsException?'':'primary')+'" id="finOk">'+(ck.needsException?'确认有缺项结束':'确认结束演练')+'</button>',
+      onOpen: function(ovEl){
+        ovEl.querySelector('#finCancel').onclick = ovEl.close;
+        ovEl.querySelector('#finOk').onclick = function(){
+          var ex = null;
+          if(ck.needsException){
+            ex = {
+              reason: (ovEl.querySelector('#exReason').value || '').trim(),
+              owner: (ovEl.querySelector('#exOwner').value || '').trim(),
+              deadline: (ovEl.querySelector('#exDeadline').value || '').trim(),
+              approver: (ovEl.querySelector('#exApprover').value || '').trim()
+            };
+            if(ex.reason.length < 5 || !ex.owner || !ex.deadline || !ex.approver){
+              App.toast('请完整填写缺项原因（≥5字）、责任人、补录时限、批准人', 'err');
+              return;
+            }
+          }
+          ovEl.close();
+          doFinish(ex);
+        };
+      }
+    });
+    return ov;
+  }
+
+  function doFinish(exception){
+    var bfin = document.getElementById('btnFinish');
+    if(bfin){ bfin.disabled = true; bfin.textContent = '提交中…'; }
+    var payload = { projectId: proj.id };
+    if(exception) payload.exception = exception;
+    DRILL.post('/drill/finish', payload).then(function(r){
+      var s = (r && r.sealed) ? r.sealed : null;
+      App.toast('演练已结束' + (s ? ('，评级 '+s.grade+'（快照 v'+s.version+'）') : ''), 'ok');
+      if(bfin){ bfin.remove(); }
+      App.refreshShell();
+      renderPractical(); renderScore();
+    }).catch(function(err){
+      if(bfin){ bfin.disabled = false; bfin.innerHTML = App.icon('check')+'完成演练'; }
+      App.toast((err && err.message) || '结束演练失败', 'err');
+      renderPractical();
+      updateFinishBtn();
+    });
   }
 
   function renderPractical(){
@@ -1790,8 +1929,20 @@ document.addEventListener('app:ready', function(e){
         var mine = ev.filter(function(x){ return x.role===role.id || x.type==='操作日志' || x.type==='附件截图'; });
         box.innerHTML = '<div class="small muted mb3">取证留痕（技术类，本角色可见）</div>'
           + mine.map(function(d){
-              return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon(d.type==='操作日志'?'db':'file')+'<span class="grow ellip">'+App.esc(d.name)+'</span><span class="fc-size">'+fmtTime(d.time)+' · '+App.esc(d.type)+'</span></div>';
+              var open = d.url ? '<a href="'+App.esc(d.url)+'" target="_blank" rel="noopener" style="color:var(--accent2);margin-left:6px">查看</a>' : '';
+              return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon(d.type==='操作日志'?'db':'file')+'<span class="grow ellip">'+App.esc(d.name)+'</span><span class="fc-size">'+fmtTime(d.time)+' · '+App.esc(d.type)+open+'</span><button data-ev-del="'+App.esc(String(d.id))+'" title="删除取证材料" style="border:0;background:transparent;color:var(--err,#f85149);cursor:pointer;padding:0 0 0 8px;font-size:15px;line-height:1">×</button></div>';
             }).join('');
+        box.querySelectorAll('[data-ev-del]').forEach(function(b){
+          b.onclick = function(){
+            var d = mine.filter(function(x){ return String(x.id)===String(b.dataset.evDel); })[0];
+            confirmRemove('确认删除取证材料「'+((d&&d.name)||'')+'」？删除后文件与记录一并清理，不可恢复。', function(){
+              API.deleteEvidence(b.dataset.evDel).then(function(){
+                App.toast('取证材料已删除','ok');
+                renderFeed();
+              }).catch(function(err){ App.toast((err&&err.message)||'删除失败','err'); });
+            });
+          };
+        });
       });
     } else if(feed==='audit'){
       API.getAuditLogs().then(function(logs){
@@ -1820,25 +1971,7 @@ document.addEventListener('app:ready', function(e){
   var bs = document.getElementById('btnScript');
   if(bs) bs.onclick = function(){ App.openScript(proj, {canExport:false}); };
   var bfin = document.getElementById('btnFinish');
-  if(bfin) bfin.onclick = function(){
-    if(EV.pending > 0){
-      App.toast('取证材料尚未完成归档（已归档 '+EV.done+'/'+EV.total+'，待归档 '+EV.pending+' 项），不可结束演练','err');
-      return;
-    }
-    App.confirmSim('确认结束本次演练？结束前未完成的正确流程将按各自分值扣分（混淆流程误选已实时扣分），结束后不可再提交处置记录。', function(){
-      bfin.disabled = true; bfin.textContent = '提交中…';
-      API.finishDrill(proj.id).then(function(r){
-        App.toast('演练已结束，综合得分 '+(r.score&&r.score.score!=null?r.score.score:'—')+' 分','ok');
-        bfin.remove();
-        App.refreshShell();
-        renderPractical(); renderScore();
-      }).catch(function(err){
-        bfin.disabled = false; bfin.innerHTML = App.icon('check')+'完成演练';
-        App.toast((err&&err.message)||'结束演练失败','err');
-        renderPractical();
-      });
-    });
-  };
+  if(bfin) bfin.onclick = function(){ openFinishChecklist(); };
   renderFaultBanner();
   if(isPractical){ renderPractical(); renderScore(); }
   else { renderBasic(); renderScore(); }
