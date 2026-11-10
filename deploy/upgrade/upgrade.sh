@@ -711,12 +711,15 @@ do_finish() {
   state_write
   write_result "success" "$E_OK" "$PHASE" "upgraded $FROM_VER -> $TO_VER"
   backup_prune
+  # brand_version 依赖 mysql 客户端配置，必须在 mycnf_remove 之前取值
+  local bv_final
+  bv_final="$(brand_version)"
   mycnf_remove
   cleanup_tmp
   {
     printf '\n[OK] 升级完成：%s → %s\n' "$FROM_VER" "$TO_VER"
     printf '     镜像：%s\n' "$TARGET_REF"
-    printf '     health：%s   brand_version：%s\n' "$TO_VER" "$(brand_version)"
+    printf '     health：%s   brand_version：%s\n' "$TO_VER" "$bv_final"
     printf '     备份：%s\n' "$BACKUP_DIR"
     printf '     日志：%s\n' "$LOG_FILE"
   } | tee -a "$LOG_FILE"
