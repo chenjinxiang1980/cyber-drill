@@ -746,6 +746,7 @@ show_status() {
   detect_network
 
   local img health n last
+  db_init
   img="$(compose_app_image)"
   info "compose app.image：$img"
   info "app 容器：$(docker inspect "$APP_C" --format '{{.Name}}' 2>/dev/null | sed 's#^/##')"
@@ -802,6 +803,7 @@ recover_last() {
   compose_init
   pick_containers
   detect_network
+  db_init
   mycnf_install "$E_ROLLBACK_FAIL" "P0-recover"
   info "继续回滚记录：$RUN_ID（$FROM_VER → $TO_VER）"
   rollback_apply "$E_ROLLBACK_FAIL" "人工触发 --recover-last"
