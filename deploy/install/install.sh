@@ -200,6 +200,11 @@ case "${IMAGE_SOURCE}" in
     *) err "--image-source 只支持 auto|ghcr|swr，收到：${IMAGE_SOURCE}"; exit 10 ;;
 esac
 
+# 容器名跟随项目名：默认 drill 仍是 drill-mysql / drill-app，其它项目名自动隔离为 ${PROJECT}-mysql / ${PROJECT}-app，
+# 避免同一台机器上第二套安装因容器名冲突而失败
+MYSQL_CONTAINER="${PROJECT}-mysql"
+APP_CONTAINER="${PROJECT}-app"
+
 # 版本号单一来源：--version > 仓库 VERSION > 离线包 VERSION > 基线清单 > 源码默认值
 resolve_version() {
     local v=""

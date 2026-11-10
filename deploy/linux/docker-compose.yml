@@ -42,7 +42,7 @@ services:
   # ---------- MySQL 8 ----------
   mysql:
     image: mysql:8.0
-    container_name: drill-mysql
+    container_name: ${DRILL_PROJECT:-drill}-mysql
     restart: unless-stopped
     environment:
       # ⚠️ 全部 __REPLACE_WITH__ 占位符必须替换成真实值
@@ -108,7 +108,7 @@ services:
       args:
         VERSION: ${VERSION:-1.0.0}
     image: drill-server:${VERSION:-1.0.0}
-    container_name: drill-app
+    container_name: ${DRILL_PROJECT:-drill}-app
     restart: unless-stopped
     env_file:
       - .env

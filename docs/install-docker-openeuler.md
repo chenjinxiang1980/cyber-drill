@@ -209,7 +209,7 @@ Docker Hub 不可达时 MySQL 自动回退国内镜像源。
 | `--install-dir <目录>` | `/opt/cyber-drill` | 安装目录（compose、.env、日志、基线副本） |
 | `--port <端口>` | `8090` | 应用对外端口 |
 | `--mysql-port <端口>` | `3306` | MySQL 宿主机回环端口 |
-| `--project <名称>` | `drill` | compose 项目名（容器名固定 `drill-app` / `drill-mysql`） |
+| `--project <名称>` | `drill` | compose 项目名；容器名跟随项目名：默认 `drill-app` / `drill-mysql`，其它项目名为 `<项目名>-app` / `<项目名>-mysql` |
 | `--force-env` | 关 | 备份旧 `.env` 后重新生成口令（不删数据卷） |
 | `--show-secrets` | 关 | 结束时再打印一次初始口令 |
 | `--reinstall` | 关 | 已存在安装目录时删除重装（必须输入确认词） |

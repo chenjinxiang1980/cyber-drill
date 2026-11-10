@@ -50,6 +50,26 @@ sudo bash deploy/install/install.sh
 
 镜像 tag 与仓库根目录 `VERSION` 一致，可用 `--version` 覆盖。
 
+## 容器名与多实例
+
+容器名跟随 compose 项目名（`--project`）：
+
+| `--project` | 容器名 |
+|---|---|
+| `drill`（默认） | `drill-mysql` / `drill-app` |
+| 任意其它名称（如 `drilltest`） | `<项目名>-mysql` / `<项目名>-app` |
+
+同一台机器上跑第二套时，必须同时更换安装目录、项目名与端口，两套互不影响：
+
+```bash
+sudo bash deploy/install/install.sh \
+  --install-dir /home/test/cyber-drill --project drilltest \
+  --port 18090 --mysql-port 13306
+```
+
+`docker logs`、`docker exec` 等命令里的容器名请按上表替换。
+
+
 ## 初始口令
 
 安装结束时会明确打印并标注“仅显示一次”：
