@@ -62,7 +62,7 @@ stray_sql="$(find "${OUT}" -type f -name '*.sql' -print -quit)"
 [ -z "${stray_sql}" ] || die "打包目录存在 .sql 文件（疑似生产库 dump），拒绝打包：${stray_sql}"
 leaked_ip="$(grep -RIlE '192\.168\.[0-9]{1,3}\.[0-9]{1,3}' "${OUT}" \
     --include='*.md' --include='*.txt' --include='*.env' --include='*.yml' \
-    --include='*.yaml' --include='*.conf' --include='*.service' 2>/dev/null | head -n1)"
+    --include='*.yaml' --include='*.conf' --include='*.service' 2>/dev/null | head -n1 || true)"
 [ -z "${leaked_ip}" ] || die "打包目录存在真实内网地址，拒绝打包：${leaked_ip}"
 info "敏感内容检查通过（无 stray .sql、无 192.168.x.x）"
 
