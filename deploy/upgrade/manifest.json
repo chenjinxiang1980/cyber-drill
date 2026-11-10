@@ -152,10 +152,13 @@
       "published_at": "2026-11-10",
       "image": {
         "tags": ["1.0.1", "latest"],
-        "digest": null,
-        "digest_unknown": true,
-        "size_bytes": 0,
-        "layers": 0
+        "digest": {
+          "ghcr": "sha256:d67c2b42d4a0003316bc7e8bf8c083fc9605c1af4a5fbe08fa6f4c7e0b0df31b",
+          "swr": "sha256:d67c2b42d4a0003316bc7e8bf8c083fc9605c1af4a5fbe08fa6f4c7e0b0df31b"
+        },
+        "digest_unknown": false,
+        "size_bytes": 152221660,
+        "layers": 10
       },
       "migrations": { "from_exclusive": "0123_brand_version_100", "through": "0123_brand_version_100", "count": 0, "contains_ddl": false, "backward_compatible": true },
       "schema_migrations_total": 76,
