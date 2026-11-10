@@ -143,6 +143,25 @@
       "min_free_bytes": 2147483648,
       "health": { "path": "/api/health", "expect_version": "1.0.0", "timeout_seconds": 90 },
       "notes_url": "https://github.com/chenjinxiang1980/cyber-drill/releases/tag/v1.0.0"
+    },
+    {
+      "version": "1.0.1",
+      "previous": "1.0.0",
+      "channel": "stable",
+      "best_effort": false,
+      "published_at": "2026-11-10",
+      "image": {
+        "tags": ["1.0.1", "latest"],
+        "digest": null,
+        "digest_unknown": true,
+        "size_bytes": 0,
+        "layers": 0
+      },
+      "migrations": { "from_exclusive": "0123_brand_version_100", "through": "0123_brand_version_100", "count": 0, "contains_ddl": false, "backward_compatible": true },
+      "schema_migrations_total": 76,
+      "min_free_bytes": 2147483648,
+      "health": { "path": "/api/health", "expect_version": "1.0.1", "timeout_seconds": 90 },
+      "notes_url": "https://github.com/chenjinxiang1980/cyber-drill/releases/tag/v1.0.1"
     }
   ]
 }
