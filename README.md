@@ -1,4 +1,4 @@
-# 应急演练指挥系统（Cyber-Drill-System）
+﻿# 应急演练指挥系统（Cyber-Drill-System）
 
 > **使用中遇到问题，请优先查阅 Wiki：**
 > GitHub <https://github.com/chenjinxiang1980/cyber-drill/wiki> ｜ Gitee <https://gitee.com/habeas/cyber-drill/wiki>
@@ -6,7 +6,7 @@
 
 面向医院、政府与企事业单位**内网**的桌面推演 + 实战演练指挥调度平台：内置勒索病毒、横向渗透、DDoS、钓鱼邮件、存储故障等高频安全事件剧本，覆盖演练编排、多角色协同、时序控制、处置记录、监视大屏、自动考评与复盘报告全流程。
 
-> 当前版本：**1.0.0** · 许可证：MIT © 2026 陈金祥 · 软件著作权登记：**未登记**（截至 1.0.0）
+> 当前版本：**1.0.1** · 许可证：MIT © 2026 陈金祥 · 软件著作权登记：**未登记**（截至 1.0.0）
 
 ---
 
@@ -57,7 +57,7 @@ cd cyber-drill
 sudo bash deploy/install/install.sh
 ```
 
-安装器会自动完成：安装/检查 Docker 与 Compose → 选择镜像源并拉取镜像 → 生成随机强口令 `.env`（权限 600）→ 启动 MySQL → 恢复 1.0.0 基线快照 → 启动应用 → 健康检查 → **在终端打印 `admin` 与 `platformadmin` 初始口令**。
+安装器会自动完成：安装/检查 Docker 与 Compose → 选择镜像源并拉取镜像 → 生成随机强口令 `.env`（权限 600）→ 启动 MySQL → 恢复 1.0.1 基线快照 → 启动应用 → 健康检查 → **在终端打印 `admin` 与 `platformadmin` 初始口令**。
 
 ### 镜像源选择
 
@@ -86,7 +86,7 @@ sudo bash deploy/install/install.sh
 sudo bash deploy/install/install.sh --reinstall
 
 # B. 保留数据，改用升级脚本
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.0
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.1
 ```
 
 非交互环境执行 A 分支时必须显式提供确认词：
@@ -121,8 +121,8 @@ Windows 不提供原生一键安装脚本。推荐使用 **Docker Desktop + WSL2
 
 ```bash
 sudo bash deploy/upgrade/upgrade.sh --status
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.0 --dry-run
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.0
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.1 --dry-run
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.1
 ```
 
 版本链与升级矩阵见 [`docs/upgrade.md`](docs/upgrade.md) 与 [`deploy/upgrade/manifest.json`](deploy/upgrade/manifest.json)。
@@ -152,7 +152,7 @@ go build -trimpath -ldflags "-s -w -X drill-system/internal/version.Version=${VE
 Emergency/
 ├── server/                  # Go 后端（Gin + MySQL）
 ├── public/                  # 前端静态页面（无构建步骤，由服务端托管）
-├── migrations/              # 0000_bootstrap … 0123_brand_version_100（1.0.0 共 76 条）
+├── migrations/              # 0000_bootstrap … 0123_brand_version_100（1.0.1 共 76 条）
 ├── deploy/
 │   ├── install/             # ★ 唯一一键安装入口（install.sh + 基线快照）
 │   ├── upgrade/             # 升级脚本与版本清单
