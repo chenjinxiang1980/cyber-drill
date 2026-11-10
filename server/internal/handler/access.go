@@ -96,11 +96,15 @@ func canReadEvidenceRow(u *auth.User, typ, roleID string) bool {
 // CanReadUploadPath 判断用户能否通过 /uploads 或 /media 读取某个相对路径。
 // 供 router 在静态文件出站前调用，避免仅靠“登录即可读任意文件路径”。
 func CanReadUploadPath(database *db.DB, u *auth.User, rel string) bool {
-	if u == nil {
-		return false
-	}
 	rel = strings.TrimPrefix(filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel))), "./")
 	if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return false
+	}
+	// 品牌 Logo 是公开资源：登录页在未登录时也要能显示。
+	if strings.HasPrefix(rel, "brand/") {
+		return true
+	}
+	if u == nil {
 		return false
 	}
 

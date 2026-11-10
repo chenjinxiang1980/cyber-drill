@@ -137,9 +137,9 @@ RUN chown -R drill:drill /opt/drill \
  && chmod 755 /opt/drill/bin/drill-migrate \
  && chmod 755 /opt/drill/bin/drill-seed \
  && chmod 755 /opt/drill/docker-entrypoint.sh \
- && chmod 644 /opt/drill/public/*           2>/dev/null || true \
- && chmod 644 /opt/drill/public/img/*       2>/dev/null || true \
- && chmod 644 /opt/drill/migrations/*.sql   2>/dev/null || true \
+ && find /opt/drill/public -type d -exec chmod 755 {} \; \
+ && find /opt/drill/public -type f -exec chmod 644 {} \; \
+ && find /opt/drill/migrations -type f -name '*.sql' -exec chmod 644 {} \; \
  && echo "[runtime] permissions OK"
 
 # --- 容器内运行时代理（可选，默认不设；用户 compose 里可覆盖）---

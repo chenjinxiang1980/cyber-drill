@@ -225,7 +225,7 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			sys.GET("/seed/baselines", authSvc.RequireAuth(), authSvc.RequireBrandAdmin(), handler.SystemSeedBaselines(database))
 			sys.POST("/seed/export", authSvc.RequireAuth(), authSvc.RequireBrandAdmin(), handler.SystemSeedExport(database))
 			sys.POST("/reset", authSvc.RequireAuth(), authSvc.RequireBrandAdmin(), handler.SystemReset(database, cfg, backupDir))
-			sys.POST("/logo", authSvc.RequireAuth(), authSvc.RequireBrandAdmin(), handler.PostSystemLogo(database))
+			sys.POST("/logo", authSvc.RequireAuth(), authSvc.RequireBrandAdmin(), handler.PostSystemLogo(database, uploadDir, cfg.UploadMaxMB))
 		}
 
 		// ---- api/admin — 全部 RequireAdmin ----
@@ -392,6 +392,11 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 //  3. 待改密受限会话不允许读取附件。
 func uploadAuth(svc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 品牌 Logo 是公开资源（登录页未登录也要显示），brand/ 前缀免鉴权。
+		if strings.HasPrefix(strings.TrimPrefix(c.Param("filepath"), "/"), "brand/") {
+			c.Next()
+			return
+		}
 		token := auth.TokenOf(c)
 		if token == "" {
 			if ck, err := c.Cookie(auth.MediaCookieName); err == nil {

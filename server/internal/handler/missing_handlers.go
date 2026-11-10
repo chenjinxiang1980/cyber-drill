@@ -4352,13 +4352,37 @@ func GetDrillFaults(database *db.DB) gin.HandlerFunc {
 // =========================================================================
 
 // PostSystemLogo POST /api/system/logo
-func PostSystemLogo(database *db.DB) gin.HandlerFunc {
+// 保存到 uploads/brand/ 并返回可直接展示的 URL。
+// Logo 会显示在登录页，因此 /uploads|/media 下 brand/ 前缀允许匿名读取
+// （见 router.uploadAuth 与 CanReadUploadPath）；uploads 是命名卷，容器重启/重建后仍在。
+func PostSystemLogo(database *db.DB, uploadDir string, maxMB int) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		file, _ := c.FormFile("file")
-		if file == nil {
+		file, err := c.FormFile("file")
+		if err != nil || file == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "未接收到文件"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "logo": "/uploads/brand/logo.png"})
+		if file.Size <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "文件内容为空"})
+			return
+		}
+		maxBytes := int64(maxMB) * 1024 * 1024
+		if maxBytes > 0 && file.Size > maxBytes {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Logo 超过 %dMB 限制", maxMB)})
+			return
+		}
+		switch strings.ToLower(strings.TrimPrefix(filepath.Ext(file.Filename), ".")) {
+		case "png", "jpg", "jpeg", "webp", "gif":
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Logo 仅支持 png/jpg/jpeg/webp/gif"})
+			return
+		}
+		rel, _, err := saveUploadedFile(uploadDir, "brand", file.Filename, file)
+		if err != nil {
+			slog.Warn("保存 Logo 失败", "err", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "url": "/uploads/" + rel})
 	}
 }
