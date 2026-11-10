@@ -52,13 +52,13 @@
 
 | 项 | 要求 |
 |----|------|
-| 系统 | x86_64 Linux；openEuler 24.03 LTS-SP1 实测通过 |
+| 系统 | x86_64 Linux；**优先 openEuler 24.03 LTS-SP1**（实机验证）；**统信 UOS Server 20** 为兼容可选项 |
 | 权限 | root（装软件包、改 firewalld、写 /opt） |
 | 内存 | ≥ 2 GB（实测 3.3 GB） |
 | 磁盘 | 安装目录所在分区 ≥ 3 GB 可用；离线包约 0.7 GB |
 | 端口 | 8090（应用）空闲；3306 仅绑定 127.0.0.1 |
-| SELinux | 可保持 enforcing（openEuler 的 moby-engine 自带 container-selinux 策略） |
-| 软件源 | 离线路径不需要外网；联网路径需要 openEuler 源与 ghcr.io |
+| SELinux | openEuler 保持 enforcing 即可（`moby-engine` 自带 `container-selinux` 策略）；UOS 需自行确认该策略，另注意其 `docker.socket` 激活差异（见 [Q8](vmware-vm-deployment.md)） |
+| 软件源 | 离线路径不需要外网；联网路径需要 openEuler 源与 ghcr.io；UOS 的 Docker 引擎需自备仓库或离线 RPM |
 
 ---
 

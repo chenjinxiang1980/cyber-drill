@@ -48,6 +48,8 @@
 仓库中不存在其他一键安装入口；`deploy/linux/` 下的 systemd / compose 文件仅作为物理机手工部署参考。
 
 前置条件：Linux x86_64、root 权限、可访问 Docker 镜像仓库（或准备离线包）、≥ 3GB 磁盘。
+运行环境**优先 openEuler 24.03 LTS-SP1**（已在实机验证）；**统信 UOS Server 20** 为兼容可选项——两者同为 dnf 系，
+但安装器在线安装的 Docker 引擎（`moby-engine` + `container-selinux`）取自 openEuler 源，UOS 上需按现场仓库或离线 RPM 提供。
 
 ```bash
 git clone https://github.com/chenjinxiang1980/cyber-drill.git

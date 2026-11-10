@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 离线资源打包（在“有网 + 有 docker + 是 openEuler 24.03”的 Linux 上执行一次）
+# 离线资源打包（在“有网 + 有 docker + dnf 系”的 Linux 上执行一次；优先 openEuler 24.03 LTS-SP1）
 #
 # 产出：
 #   <out>/rpms/*.rpm                        Docker 引擎与全部依赖
@@ -52,7 +52,7 @@ while [ $# -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || die "请用 root 执行（需要 dnf 下载 RPM）"
-command -v dnf >/dev/null 2>&1 || die "仅支持 dnf 系发行版（openEuler/RHEL/CentOS）"
+command -v dnf >/dev/null 2>&1 || die "仅支持 dnf 系发行版（openEuler / 统信 UOS Server 20 / RHEL / CentOS）"
 command -v docker >/dev/null 2>&1 || die "需要本机 docker 用于拉取/导出镜像"
 
 mkdir -p "${OUT}"/{rpms,images,bin,baseline}

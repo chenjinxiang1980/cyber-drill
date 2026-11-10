@@ -1,6 +1,6 @@
-# Cyber-Drill-System Wiki（草稿）
+# Cyber-Drill-System Wiki
 
-> 本目录是 Wiki 草稿，**尚未推送到 GitHub / Gitee Wiki**。正式发布前请按 `docs/pre-release-checklist-1.0.0.md` 的顺序执行。
+> 本 Wiki 已发布到 GitHub / Gitee Wiki；仓库内 `wiki/` 目录是唯一源文件，改完需要重新推送。
 
 ## 快速导航
 
@@ -16,6 +16,8 @@
 Cyber-Drill-System（应急演练指挥系统）是面向医院、政府与企事业单位内网的桌面推演 + 实战演练指挥调度平台。后端为 Go 单体服务，数据库为 MySQL 8.0，前端为静态页面，由服务端直接托管。
 
 当前版本：**1.0.0**。版本号唯一来源是仓库根目录 `VERSION`。
+
+运行环境：**优先 openEuler 24.03 LTS-SP1**（已在实机验证）；**统信 UOS Server 20** 为兼容可选项（同为 dnf 系，Docker 引擎需按现场仓库或离线 RPM 提供）。
 
 ## 获取帮助的顺序
 

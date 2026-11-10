@@ -14,7 +14,7 @@ deploy/install/install.sh
 
 | 项 | 要求 |
 |---|---|
-| 操作系统 | Linux x86_64（openEuler / 统信 UOS / CentOS / Ubuntu 等） |
+| 操作系统 | Linux x86_64；**优先 openEuler 24.03 LTS-SP1**（实机验证），**统信 UOS Server 20** 兼容可选（CentOS / Ubuntu 亦可运行） |
 | 权限 | root（`sudo bash ...`） |
 | 磁盘 | 安装目录所在分区 ≥ 3GB 可用 |
 | 网络 | 可访问 GHCR 或华为云 SWR；否则使用离线包 |

@@ -17,7 +17,7 @@ sudo ./deploy/upgrade/upgrade.sh --to 1.0.0
 
 | 项 | 要求 | 怎么确认 |
 |---|---|---|
-| 操作系统 | Linux（脚本用 bash、flock、sha256sum、gzip、awk） | `bash --version` |
+| 操作系统 | Linux（脚本用 bash、flock、sha256sum、gzip、awk）；**优先 openEuler 24.03 LTS-SP1**，统信 UOS Server 20 兼容可选 | `bash --version` |
 | Docker | 20.10+ | `docker version` |
 | Compose | **v2.20 及以上**（脚本用 `docker compose config --format json`） | `docker compose version --short` |
 | Python | 3.x（清单是 JSON，用 python3 解析，不依赖 jq） | `python3 -V` |

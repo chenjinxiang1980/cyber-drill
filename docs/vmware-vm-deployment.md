@@ -21,7 +21,7 @@
 ## 1. 前置条件
 
 **VM 里需要**：
-- Linux x86_64（推荐 Debian 12 / Ubuntu 22.04 / openEuler 24.03）
+- Linux x86_64（**优先 openEuler 24.03 LTS-SP1**；**统信 UOS Server 20** 兼容可选；Debian 12 / Ubuntu 22.04 亦可运行）
 - 二选一：
   - **路径 A**：Docker + Docker Compose v2（`docker compose version` 能输出版本号）
   - **路径 B**：MySQL 8.x + systemd（几乎所有现代发行版都有）

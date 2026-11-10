@@ -49,7 +49,8 @@
 
 **目标机器**：
 - Linux x86_64（amd64），内核 ≥ 3.10（systemd 要求）
-- systemd init system（Debian 10+ / Ubuntu 20.04+ / CentOS 8+ / Rocky 8+ 等主流发行版）
+- systemd init system；**优先 openEuler 24.03 LTS-SP1**，**统信 UOS Server 20** 为兼容可选项
+  （两者同为 dnf 系；Debian 10+ / Ubuntu 20.04+ / CentOS 8+ / Rocky 8+ 等主流发行版亦可运行）
 - 非 root 用户（deploy 期间只需要一次 sudo）
 - 至少 512MB 内存（Go 二进制 + MySQL），2GB 推荐
 
