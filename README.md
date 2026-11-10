@@ -38,33 +38,100 @@
 - **取证与台账**：证据归档与哈希保管链、操作台账、知识库与字典。
 - **站内消息与会商**：按项目隔离的消息、未读计数、可选语音播报；演练期间多角色会商留痕。
 - **安全加固**：JWT + Session + RBAC、登录失败锁定、算术验证码、TLS、审计日志、加密备份。
-- **交付形态**：Go 单体二进制 + MySQL 8.0；前端为静态资源，由服务端直接托管，无前端构建链。
+- **交付形态**：预构建 Docker 镜像（Go 单体服务 + MySQL 8.0）；前端为静态资源，由服务端直接托管。使用方不需要 Go 或 Node/npm 工具链。
 
 ---
 
-## 一键安装（唯一入口）
+## 部署（Docker，二选一）
 
-**Linux + Docker 的唯一一键安装脚本是 [`deploy/install/install.sh`](deploy/install/install.sh)。**
-仓库中不存在其他一键安装入口；`deploy/linux/` 下的 systemd / compose 文件仅作为物理机手工部署参考。
+**最终用户不需要 Go、不需要 Node.js/npm，也不需要 clone 源码。** 只需要一台 x86_64 Linux（优先 openEuler 24.03 LTS-SP1）和 Docker 环境；应用镜像从 GHCR / 华为云 SWR 拉取，或使用 Release 离线包。
 
-前置条件：Linux x86_64、root 权限、可访问 Docker 镜像仓库（或准备离线包）、≥ 3GB 磁盘。
-运行环境**优先 openEuler 24.03 LTS-SP1**（已在实机验证）；**统信 UOS Server 20** 为兼容可选项——两者同为 dnf 系，
-但安装器在线安装的 Docker 引擎（`moby-engine` + `container-selinux`）取自 openEuler 源，UOS 上需按现场仓库或离线 RPM 提供。
+### 前置条件
+
+| 项 | 要求 |
+|---|---|
+| 系统 | x86_64 Linux；优先 openEuler 24.03 LTS-SP1（实机验证），统信 UOS Server 20 兼容可选 |
+| 权限 | root（`sudo`） |
+| 容器 | Docker Engine 20.10+ 与 Compose v2（`docker compose`）；未安装时安装器会处理（在线用 openEuler 源，离线用包内 RPM） |
+| 磁盘 | 安装目录所在分区 ≥ 3GB 可用（建议 ≥ 5GB） |
+| 端口 | 8090（应用）空闲；3306 仅绑定 127.0.0.1；启用 TLS 时 8443 |
+| 目录 | 默认安装到 `/opt/cyber-drill`；自定义 `--install-dir` 时**父目录必须已存在** |
+| 网络 | 在线路径需可达 GHCR 或华为云 SWR；离线路径不需要外网 |
+
+### 路径一：在线安装（无需源码，推荐）
+
+安装器与基线快照合计约 270 KB。Gitee 优先：
 
 ```bash
-# 国内推荐：Gitee
-git clone https://gitee.com/habeas/cyber-drill.git
-cd cyber-drill
-sudo bash deploy/install/install.sh
+sudo mkdir -p /opt/cyber-drill-installer/baseline
+cd /opt/cyber-drill-installer
+sudo curl -fsSL -o install.sh \
+  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/install.sh
+sudo curl -fsSL -o baseline/drill-baseline-1.0.1.sql.gz \
+  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/drill-baseline-1.0.1.sql.gz
+sudo curl -fsSL -o baseline/SHA256SUMS \
+  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/SHA256SUMS
+sudo curl -fsSL -o baseline/manifest.env \
+  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/manifest.env
+sudo bash install.sh --image-source swr
 ```
 
-GitHub 备选：`git clone https://github.com/chenjinxiang1980/cyber-drill.git`，后续步骤相同。
+- `--image-source swr`：华为云 SWR，国内推荐；`--image-source ghcr`：GHCR（国外网络）。不写则自动探测后选择。
+- GitHub 备选：把上面 4 个 `https://gitee.com/habeas/cyber-drill/raw/main/...` 换成 `https://raw.githubusercontent.com/chenjinxiang1980/cyber-drill/main/...`。
+- 已装 Docker/Compose 时，`install.sh` 只拉镜像、建库、恢复基线、起应用；未装时在线路径会从 openEuler 源安装 `moby-engine` 并下载 compose v2。
 
-安装器会自动完成：安装/检查 Docker 与 Compose → 选择镜像源并拉取镜像 → 生成随机强口令 `.env`（权限 600）→ 启动 MySQL → 恢复 1.0.1 基线快照 → 启动应用 → 健康检查 → **在终端打印 `admin` 与 `platformadmin` 初始口令**。
+### 路径二：离线安装（Release 离线包）
+
+在可联网机器下载，把 tar 包拷到目标机：
+
+```bash
+curl -fL -o cyber-drill-offline-1.0.1.tar.gz \
+  https://github.com/chenjinxiang1980/cyber-drill/releases/download/v1.0.1/cyber-drill-offline-1.0.1.tar.gz
+tar -xzf cyber-drill-offline-1.0.1.tar.gz
+cd cyber-drill-offline-1.0.1
+sudo bash deploy/install/install.sh --offline-dir "$PWD"
+```
+
+- 体积：**472,867,328 字节（约 451 MiB / 473 MB）**。
+- 内容：Docker 引擎 RPM（`moby-engine` / `moby-client` 及依赖）、compose v2 二进制、应用镜像 `cyber-drill-1.0.1`、MySQL 8.0 镜像、基线快照与校验清单，以及安装/升级脚本。
+- 目标机不需要外网、不需要源码；安装器优先使用包内 RPM、镜像和基线。
+- Gitee 发行版页 <https://gitee.com/habeas/cyber-drill/releases> 提供同版本说明；离线包体积较大，附件托管在 GitHub Release。
+
+### 安装后：访问与初始口令
+
+- 浏览器访问 `http://<服务器IP>:8090`（登录页是 `/`）。
+- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，返回 `"version":"1.0.1"`。
+- 初始账号：`admin` / `platformadmin`；口令在安装结束时**只打印一次**，同时写入 `/opt/cyber-drill/.env`（权限 600）。
+- **首次登录必须立即修改初始口令**；改密后 `.env` 中的初始口令失效。若已遗失，可在安装器所在目录执行 `sudo bash install.sh --show-secrets`（仅在尚未改密时有效），或直接查看 `.env`。
+- 常用参数：`--port 8090`、`--install-dir /opt/cyber-drill`、`--mysql-port 3306`、`--project drill`、`--tls-cert/--tls-key`；完整列表见 [安装文档](docs/install-docker-openeuler.md)。
+
+### 已安装过：重装还是升级
+
+安装器检测到安装目录已存在且非空时会直接停止（退出码 28），不会覆盖数据：
+
+```bash
+# A. 不保留数据：删除原目录、容器与数据卷后重装（交互输入 DELETE）
+sudo bash install.sh --reinstall
+
+# 非交互环境必须显式提供确认词
+sudo bash install.sh --reinstall --confirm DELETE
+
+# B. 保留数据：用升级工具（自动备份 → 迁移 → 重建 app → 校验，失败回滚）
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.1 --dir /opt/cyber-drill
+```
+
+升级工具不在 `install.sh` 内。用离线包安装的用户直接使用包内 `deploy/upgrade/`；只下载了在线安装器的用户，可从 Gitee 取该目录（8 个文件）：
+
+```bash
+sudo mkdir -p /opt/cyber-drill-upgrade/lib && cd /opt/cyber-drill-upgrade
+for f in upgrade.sh manifest.json lib/00-common.sh lib/10-manifest.sh \
+         lib/20-backup.sh lib/30-migrate.sh lib/40-compose.sh lib/50-rollback.sh; do
+  sudo curl -fsSL -o "$f" "https://gitee.com/habeas/cyber-drill/raw/main/deploy/upgrade/$f"
+done
+sudo bash upgrade.sh --to 1.0.1 --dir /opt/cyber-drill
+```
 
 ### 镜像源选择
-
-安装器会探测 GHCR 与华为云 SWR 的连通性并给出建议，也可以显式指定：
 
 | 参数 | 行为 |
 |---|---|
@@ -72,45 +139,7 @@ GitHub 备选：`git clone https://github.com/chenjinxiang1980/cyber-drill.git`�
 | `--image-source ghcr` | 使用 `ghcr.io/chenjinxiang1980/cyber-drill:<版本>`（国外网络） |
 | `--image-source swr` | 使用 `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:<版本>`（国内推荐） |
 
-镜像 tag 始终取仓库根目录 `VERSION` 文件（可用 `--version` 覆盖），不再写死任何历史版本号。
-
-### 初始口令
-
-- 安装结束时会明确打印 **`admin`** 与 **`platformadmin`** 的初始口令，并标注“仅显示一次”。
-- 口令同时落盘在安装目录的 `.env`（权限 600），输出中会给出完整路径。
-- **首次登录必须立即修改初始口令**；修改后 `.env` 中的初始口令即失效。
-
-### 已安装过怎么办
-
-安装器检测到安装目录（默认 `/opt/cyber-drill`）已存在且非空时会**直接停止**，不会覆盖旧数据，并给出两条路径：
-
-```bash
-# A. 删除原目录、容器与数据卷后重新安装（交互输入 DELETE 确认，不能回车即删）
-sudo bash deploy/install/install.sh --reinstall
-
-# B. 保留数据，改用升级脚本
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.1
-```
-
-非交互环境执行 A 分支时必须显式提供确认词：
-
-```bash
-sudo bash deploy/install/install.sh --reinstall --confirm DELETE
-```
-
-### 常用参数
-
-| 参数 | 说明 |
-|---|---|
-| `--install-dir <目录>` | 安装目录，默认 `/opt/cyber-drill` |
-| `--port <端口>` | 应用对外端口，默认 `8090` |
-| `--mysql-port <端口>` | MySQL 宿主机回环端口，默认 `3306` |
-| `--offline-dir <目录>` | 离线资源目录（`rpms/`、`images/`、`baseline/`、`bin/docker-compose`） |
-| `--snapshot <文件>` | 指定基线快照 `.sql.gz` |
-| `--tls-cert/--tls-key` | 启用应用内 HTTPS（对外交付必须上 TLS） |
-| `--show-secrets` | 再次打印初始口令（默认仅首次安装打印一次） |
-| `--skip-firewall` | 不修改 firewalld |
-| `--help` | 查看完整参数与退出码 |
+镜像 tag 取仓库根目录 `VERSION`（当前 `1.0.1`），可用 `--version` 覆盖。
 
 ### Windows
 
@@ -120,19 +149,21 @@ Windows 不提供原生一键安装脚本。推荐使用 **Docker Desktop + WSL2
 
 ## 升级
 
-容器部署使用升级脚本，自动完成备份 → 数据库迁移 → 拉取镜像 → 重建应用 → 健康校验，失败自动回滚：
+容器部署使用升级脚本，自动完成备份 → 数据库迁移 → 拉取镜像 → 重建应用 → 健康校验，失败自动回滚。以下命令在含 `deploy/upgrade/` 的目录（离线包解包目录或源码仓库）执行；只下载了在线安装器的用户，先按上一节获取升级工具。
 
 ```bash
 sudo bash deploy/upgrade/upgrade.sh --status
 sudo bash deploy/upgrade/upgrade.sh --to 1.0.1 --dry-run
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.1
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.1 --dir /opt/cyber-drill
 ```
 
 版本链与升级矩阵见 [`docs/upgrade.md`](docs/upgrade.md) 与 [`deploy/upgrade/manifest.json`](deploy/upgrade/manifest.json)。
 
 ---
 
-## 从源码编译
+## 从源码编译（开发者路径，部署不需要）
+
+最终用户部署**不需要** Go、Node.js/npm 或源码；以下仅面向需要自行产出二进制、做二次开发或只升级数据库的开发者。
 
 要求 Go 1.27+、`CGO_ENABLED=0`，目标平台 `linux/amd64`：
 
@@ -177,8 +208,8 @@ Emergency/
 |---|---|
 | 安装（openEuler / Docker） | [docs/install-docker-openeuler.md](docs/install-docker-openeuler.md) |
 | 升级与回滚 | [docs/upgrade.md](docs/upgrade.md) |
-| 源码编译 | [docs/build-from-source.md](docs/build-from-source.md) |
-| Linux / systemd / 反向代理 | [docs/linux-deployment.md](docs/linux-deployment.md) |
+| 源码编译（开发者路径） | [docs/build-from-source.md](docs/build-from-source.md) |
+| Linux / systemd / 反向代理（开发者路径） | [docs/linux-deployment.md](docs/linux-deployment.md) |
 | 安全加固与登录策略 | [docs/security-guide.md](docs/security-guide.md) |
 | 个人信息处理说明（医院/政府交付） | [docs/privacy-data-processing.md](docs/privacy-data-processing.md) |
 | 1.0.0 发版说明与已知限制 | [docs/release-1.0.0.md](docs/release-1.0.0.md) |

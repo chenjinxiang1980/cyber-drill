@@ -5,20 +5,42 @@
 
 ---
 
-## 目录
-
-1. [读者 A：只想用的人（三步启动）](#读者-a只想用的人三步启动)
-2. [读者 B：要自己构建的人（buildx 多架构）](#读者-b要自己构建的人buildx-多架构)
-3. [读者 C：要发布到 Registry 的人](#读者-c要发布到-registry-的人)
-4. [镜像内容快照声明（每次发布必填）](#镜像内容快照声明每次发布必填)
-5. [安全声明](#安全声明)
-6. [架构支持](#架构支持)
-7. [国内拉取慢怎么办](#国内拉取慢怎么办)
-8. [FAQ / Q&A](#faq--qa)
+> **最终用户请直接看 [一键安装（Docker / openEuler）](install-docker-openeuler.md)**：不需要 Go、Node.js/npm，也不需要 clone 源码。
+> 本文面向需要手工 compose、自建镜像或发布镜像的运维/开发者；手工方式需要 `deploy/docker-dist/` 下的文件，不属于一键部署路径。
 
 ---
 
-## 读者 A：只想用的人（三步启动）
+## 目录
+
+1. [读者 A0：最终用户（推荐：一键安装，无需源码）](#读者-a0最终用户推荐一键安装无需源码)
+2. [读者 A1：手工 compose（可选）](#读者-a1手工-compose可选)
+3. [读者 B：要自己构建的人（buildx 多架构）](#读者-b要自己构建的人buildx-多架构)
+4. [读者 C：要发布到 Registry 的人](#读者-c要发布到-registry-的人)
+5. [镜像内容快照声明（每次发布必填）](#镜像内容快照声明每次发布必填)
+6. [安全声明](#安全声明)
+7. [架构支持](#架构支持)
+8. [国内拉取慢怎么办](#国内拉取慢怎么办)
+9. [FAQ / Q&A](#faq--qa)
+
+---
+
+## 读者 A0：最终用户（推荐：一键安装，无需源码）
+
+只需要 x86_64 Linux + Docker 环境，不需要 Go、Node.js/npm，也不需要 clone 源码：
+
+- **在线**：下载约 270 KB 的安装器与基线快照，按镜像源选择 GHCR / 华为云 SWR；
+- **离线**：Release 离线包约 451 MiB，解包后一条命令安装。
+
+完整命令、前置条件、初始口令、重装与升级见 [一键安装（Docker / openEuler）](install-docker-openeuler.md)。
+
+应用镜像：`ghcr.io/chenjinxiang1980/cyber-drill:1.0.1` 或 `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.1`；
+MySQL 为 `mysql:8.0`（Docker Hub 不可达时安装器自动回退国内镜像源）。
+
+下面的手工方式需要 compose 文件，面向运维定制与开发者，**不是**最终用户的一键部署路径。
+
+---
+
+## 读者 A1：手工 compose（可选）
 
 ### 前置条件
 - Docker Engine ≥ 20.10

@@ -1,7 +1,7 @@
-# 从源码构建与升级数据库
+# 从源码构建与升级数据库（开发者路径）
 
-> 面向自己编译二进制、自己控数据库的高级用户。
-> 用容器部署的普通用户请直接用 [升级指南](upgrade.md) 里的 `deploy/upgrade/upgrade.sh`，不需要看这篇。
+> **这是开发者路径，不是部署路径。** 最终用户部署不需要 Go、Node.js/npm 或源码，只需 Docker 环境 + 在线镜像源或 Release 离线包，见 [一键安装（Docker / openEuler）](install-docker-openeuler.md)。
+> 本文面向自己编译二进制、自己控数据库的高级用户；用容器部署的普通用户升级请直接用 [升级指南](upgrade.md) 里的 `deploy/upgrade/upgrade.sh`，不需要看这篇。
 
 本篇三件事，按顺序做：
 
