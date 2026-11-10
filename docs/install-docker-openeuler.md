@@ -256,6 +256,7 @@ curl -fsS http://127.0.0.1:8090/api/health
 # {"ok":true,"service":"cyber-drill-system","version":"1.0.0",...}
 
 PW="$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' /opt/cyber-drill/.env)"
+# 容器名 = <项目名>-mysql；默认项目 drill 即 drill-mysql
 docker exec drill-mysql mysql -uroot -p"$PW" -N -B drill_system -e "
  SELECT (SELECT COUNT(*) FROM schema_migrations),
         (SELECT value FROM settings WHERE \`key\`='brand_version'),
@@ -318,7 +319,7 @@ curl -fsS http://127.0.0.1:8090/api/health
 ### 8.4 MySQL 未就绪
 
 ```bash
-docker logs drill-mysql --tail 80
+docker logs drill-mysql --tail 80   # 容器名 = <项目名>-mysql，默认项目 drill
 ```
 
 重点检查 `.env` 中 `DB_USER` / `DB_PASSWORD` 与容器实际 `MYSQL_USER` / `MYSQL_PASSWORD` 是否对应（脚本已自动映射）。

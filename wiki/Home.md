@@ -21,4 +21,4 @@ Cyber-Drill-System（应急演练指挥系统）是面向医院、政府与企�
 
 1. 先看本 Wiki 的 [常见问题](FAQ)；
 2. 再看 `docs/` 下对应主题文档；
-3. 仍未解决时，附上 `docker compose ps`、`docker logs drill-app` 的关键片段与版本号反馈。
+3. 仍未解决时，附上 `docker compose ps`、`docker logs <项目名>-app`（默认 `drill-app`）的关键片段与版本号反馈。

@@ -61,7 +61,7 @@ sudo bash deploy/install/install.sh --port 18090 --mysql-port 13306
 升级工具失败会自动回滚。若需人工处理：
 
 1. `sudo bash deploy/upgrade/upgrade.sh --status` 查看状态；
-2. 查看升级日志与 `docker logs drill-app`；
+2. 查看升级日志与容器日志 `docker logs <项目名>-app`（默认项目为 `drill-app`）；
 3. 含 DDL 的迁移只能整库恢复到升级前备份；
 4. 恢复前确认 `BACKUP_PASSPHRASE` / `RESTORE_PASSWORD` 可用。
 
@@ -72,8 +72,8 @@ sudo bash deploy/install/install.sh --port 18090 --mysql-port 13306
 ## 日志在哪里
 
 ```bash
-docker logs --tail 200 drill-app
-docker logs --tail 200 drill-mysql
+docker logs --tail 200 drill-app      # 容器名 = <项目名>-app，默认项目 drill
+docker logs --tail 200 drill-mysql    # 容器名 = <项目名>-mysql
 ```
 
 审计日志在数据库 `audit_logs` 表，按 `AUDIT_RETENTION_DAYS` 清理。
