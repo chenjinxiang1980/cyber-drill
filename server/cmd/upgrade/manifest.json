@@ -1,4 +1,4 @@
-{
+﻿{
   "schema_version": 1,
   "updated_at": "2026-11-10",
   "default_registry": "ghcr",
@@ -153,11 +153,11 @@
       "image": {
         "tags": ["1.0.1", "latest"],
         "digest": {
-          "ghcr": "sha256:d67c2b42d4a0003316bc7e8bf8c083fc9605c1af4a5fbe08fa6f4c7e0b0df31b",
-          "swr": "sha256:d67c2b42d4a0003316bc7e8bf8c083fc9605c1af4a5fbe08fa6f4c7e0b0df31b"
+          "ghcr": "sha256:f636234dd4c76b975889bc3767be3e33af0642c5974e9a5bf3954c72607ae106",
+          "swr": "sha256:f636234dd4c76b975889bc3767be3e33af0642c5974e9a5bf3954c72607ae106"
         },
         "digest_unknown": false,
-        "size_bytes": 152221660,
+        "size_bytes": 152223548,
         "layers": 10
       },
       "migrations": { "from_exclusive": "0123_brand_version_100", "through": "0123_brand_version_100", "count": 0, "contains_ddl": false, "backward_compatible": true },
