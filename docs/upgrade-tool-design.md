@@ -408,7 +408,7 @@ docker run --rm \
 | 项 | 期望 |
 |---|---|
 | `/api/health` | HTTP 200，`version == 目标版本` |
-| `settings.brand_version` | `v<目标版本>` |
+| `settings.brand_version` | `v<目标版本>`（本版本迁移增量为 0 时跳过） |
 | `schema_migrations` | 行数 == `schema_migrations_total`，末条 == `migrations.through` |
 | 容器 | `RestartCount == 0`、`State.Health.Status == healthy` |
 | 日志（最近 200 行） | 无 `PANIC` / `FATAL` / `[ERROR]`（**仅告警，不作为回滚依据**——业务日志里也有 ERROR 字样） |

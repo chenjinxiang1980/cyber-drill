@@ -669,12 +669,21 @@ do_verify() {
   fi
   info "健康检查通过：version=$v"
 
-  local bv
+  local bv from_total added=0
   bv="$(brand_version)"
+  from_total="$(mf_get "$FROM_VER" schema_migrations_total 2>/dev/null || true)"
+  [ -n "$from_total" ] && added=$((CHAIN_TOTAL - from_total))
   if [ "$bv" != "v$TO_VER" ]; then
-    rollback_apply "$E_VERSION" "settings.brand_version=$bv，期望 v$TO_VER"
+    # 补丁版本可能不带任何数据库迁移（清单 migrations.count=0）。
+    # 这种情况下 brand_version 本来就不会被迁移推进，不能因此判升级失败。
+    if [ "$added" -le 0 ]; then
+      info "brand_version=$bv（本次无数据库迁移，跳过品牌版本校验）"
+    else
+      rollback_apply "$E_VERSION" "settings.brand_version=$bv，期望 v$TO_VER"
+    fi
+  else
+    info "brand_version=$bv"
   fi
-  info "brand_version=$bv"
 
   if ! verify_schema_target "$CHAIN_TOTAL" "$CHAIN_THROUGH"; then
     rollback_apply "$E_VERSION" "升级后数据库迁移记录与清单不符"
@@ -707,7 +716,7 @@ do_finish() {
   {
     printf '\n[OK] 升级完成：%s → %s\n' "$FROM_VER" "$TO_VER"
     printf '     镜像：%s\n' "$TARGET_REF"
-    printf '     health：%s   brand_version：v%s\n' "$TO_VER" "$TO_VER"
+    printf '     health：%s   brand_version：%s\n' "$TO_VER" "$(brand_version)"
     printf '     备份：%s\n' "$BACKUP_DIR"
     printf '     日志：%s\n' "$LOG_FILE"
   } | tee -a "$LOG_FILE"

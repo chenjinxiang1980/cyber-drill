@@ -158,7 +158,7 @@ docker run --rm --network <app所在网络> --env-file <env文件> -e DB_HOST=<�
 只重建 `app` 一个服务（`up -d --no-deps app`），`mysql` 不会被重建。校验项：
 
 - `/api/health` 的 `version` == 目标版本；
-- `settings.brand_version` == `v<目标版本>`；
+- `settings.brand_version` == `v<目标版本>`（本版本迁移增量为 0 时跳过该项，仅打印实际值）；
 - `schema_migrations` 行数 == 清单累计条数，末条 == 清单 `through`；
 - 容器 `RestartCount`、最近 200 行日志里的 `PANIC/FATAL/[ERROR]` —— **只告警，不作为回滚依据**。
 
