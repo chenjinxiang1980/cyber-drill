@@ -33,7 +33,7 @@ sudo bash deploy/upgrade/upgrade.sh --from 1.0.0 --to 1.0.1
 
 完整版本链见 `deploy/upgrade/manifest.json` 与 `docs/upgrade.md`。
 
-> 1.0.1 不携带数据库迁移（累计仍 76 条），升级后 `settings.brand_version` 保持 `v1.0.0`，页面底部版本标签不会随之变化；`/api/health` 返回的 `version` 为 `1.0.1`，升级工具据此判定成功。
+> 1.0.1 不携带数据库迁移（累计仍 76 条），升级后 `settings.brand_version` 保持 `v1.0.0`；页面底部版本标签自 1.0.1 起改为读 `/api/health` 返回的 `version`（取不到才回退 `settings.brand_version`），因此显示 **v1.0.1**，与健康检查一致。升级工具也以 `/api/health` 的 `version` 判定成功。
 
 ## 回滚
 

@@ -69,3 +69,5 @@ docker compose --env-file .env up -d --force-recreate app
 ## 版本
 
 镜像 tag 与仓库根目录 `VERSION` 一致。升级时由 `deploy/upgrade/upgrade.sh --to <版本>` 控制，不要手工改镜像 tag。
+
+页面底部等 `data-brand="version"` 位置显示的是**运行时版本**：前端优先读 `/api/health` 返回的 `version`，取不到才回退系统设置里的 `brand_version`。因此补丁版本不需要靠新增数据库迁移推进 `settings.brand_version`；改动 `public/` 下含内联脚本的文件后，CSP 哈希在服务启动时重算，需重启容器（或重建镜像）才生效。
