@@ -1,0 +1,257 @@
+{
+  "env": {
+    "base": "http://127.0.0.1:18096",
+    "loginStatus": 200,
+    "user": "admin",
+    "role": "platformadmin"
+  },
+  "viewports": [
+    {
+      "viewport": "1920x1080",
+      "consoleErrors": 0,
+      "pageErrors": 0,
+      "http4xx5xx": 0,
+      "activeTab": "dict",
+      "tabCount": 7,
+      "ntCards": 8,
+      "chCards": 2,
+      "bdItems": 4,
+      "dictSaveBtnCount": 0,
+      "docScroll": 1920,
+      "client": 1920,
+      "badCount": 0,
+      "badSample": [],
+      "errorSamples": [],
+      "httpSamples": []
+    },
+    {
+      "viewport": "393x873",
+      "consoleErrors": 0,
+      "pageErrors": 0,
+      "http4xx5xx": 0,
+      "activeTab": "dict",
+      "tabCount": 7,
+      "ntCards": 8,
+      "chCards": 2,
+      "bdItems": 4,
+      "dictSaveBtnCount": 0,
+      "docScroll": 393,
+      "client": 393,
+      "badCount": 0,
+      "badSample": [],
+      "errorSamples": [],
+      "httpSamples": []
+    },
+    {
+      "viewport": "412x915",
+      "consoleErrors": 0,
+      "pageErrors": 0,
+      "http4xx5xx": 0,
+      "activeTab": "dict",
+      "tabCount": 7,
+      "ntCards": 8,
+      "chCards": 2,
+      "bdItems": 4,
+      "dictSaveBtnCount": 0,
+      "docScroll": 412,
+      "client": 412,
+      "badCount": 0,
+      "badSample": [],
+      "errorSamples": [],
+      "httpSamples": []
+    }
+  ],
+  "tabs": [
+    {
+      "tab": "users",
+      "exists": true,
+      "on": true,
+      "textLen": 86,
+      "inputs": 5,
+      "newConsoleErrors": 0
+    },
+    {
+      "tab": "matrix",
+      "exists": true,
+      "on": true,
+      "textLen": 1480,
+      "inputs": 95,
+      "newConsoleErrors": 0
+    },
+    {
+      "tab": "forms",
+      "exists": true,
+      "on": true,
+      "textLen": 249,
+      "inputs": 16,
+      "newConsoleErrors": 0
+    },
+    {
+      "tab": "audit",
+      "exists": true,
+      "on": true,
+      "textLen": 112,
+      "inputs": 2,
+      "newConsoleErrors": 0
+    },
+    {
+      "tab": "ops",
+      "exists": true,
+      "on": true,
+      "textLen": 2872,
+      "inputs": 123,
+      "newConsoleErrors": 0
+    },
+    {
+      "tab": "dict",
+      "exists": true,
+      "on": true,
+      "textLen": 115,
+      "inputs": 16,
+      "newConsoleErrors": 0
+    },
+    {
+      "tab": "brand",
+      "exists": true,
+      "on": true,
+      "textLen": 156,
+      "inputs": 9,
+      "newConsoleErrors": 0
+    }
+  ],
+  "dictIO": [
+    {
+      "key": "notif_templates",
+      "readCards": 8,
+      "sourceOptions": 5,
+      "saveStatus": 200,
+      "modifiedTitleSample": [
+        "系统自动考评完成",
+        "演练结束 · {project}"
+      ],
+      "getStatus": 200,
+      "persisted": true,
+      "persistedTitleHasProjectId": false
+    },
+    {
+      "key": "chat_channels",
+      "readCards": 2,
+      "roleChecks": 24,
+      "saveStatus": 200,
+      "getStatus": 200,
+      "persisted": true,
+      "persistedChannels": 2
+    },
+    {
+      "key": "levels",
+      "items": 4,
+      "sample": [
+        "一般",
+        "较大",
+        "重大"
+      ],
+      "saveStatus": 200,
+      "getStatus": 200,
+      "persisted": true,
+      "persistedItems": 4
+    },
+    {
+      "key": "projTypes",
+      "items": 3,
+      "sample": [
+        "桌面推演",
+        "实战协同演练",
+        "联合演练"
+      ],
+      "saveStatus": 200,
+      "getStatus": 200,
+      "persisted": true,
+      "persistedItems": 3
+    },
+    {
+      "key": "eventTypes",
+      "items": 8,
+      "sample": [
+        "勒索病毒",
+        "内网渗透",
+        "DDoS攻击"
+      ],
+      "saveStatus": 200,
+      "getStatus": 200,
+      "persisted": true,
+      "persistedItems": 8
+    },
+    {
+      "key": "ev_types",
+      "items": 8,
+      "sample": [
+        "附件截图",
+        "操作日志",
+        "处置记录"
+      ],
+      "saveStatus": 200,
+      "getStatus": 200,
+      "persisted": true,
+      "persistedItems": 8
+    },
+    {
+      "key": "script_action_types",
+      "items": 10,
+      "sample": [
+        "告警核实",
+        "研判分级",
+        "启动预案"
+      ],
+      "saveStatus": 200,
+      "getStatus": 200,
+      "persisted": true,
+      "persistedItems": 10
+    }
+  ],
+  "api": {
+    "invalidSource": {
+      "name": "非法来源",
+      "status": 400,
+      "body": "模板 auto_eval 的消息来源「不存在的来源」非法，必须是：演练调度 / 角色工作台 / 演练导调中心 / 复盘评估"
+    },
+    "missingTitle": {
+      "name": "缺标题",
+      "status": 400,
+      "body": "模板 auto_eval 缺少标题"
+    },
+    "missingSource": {
+      "name": "缺来源",
+      "status": 400,
+      "body": "模板 auto_eval 缺少消息来源"
+    },
+    "badLevel": {
+      "name": "非法等级",
+      "status": 400,
+      "body": "模板 auto_eval 的消息等级「P9」非法，必须是 P0 / P1 / P2"
+    },
+    "validPercent": {
+      "name": "合法保存（含 {projectId}）",
+      "status": 200,
+      "body": ""
+    },
+    "legacyRedirect": {
+      "status": 302,
+      "location": "/admin.html#dict"
+    },
+    "adminDictTabSaveBtnIds": {
+      "dictSaveBtn": 0,
+      "ntSaveBtn": 1,
+      "chSaveBtn": 1,
+      "bdSaveBtn": 1
+    }
+  },
+  "notes": [],
+  "tabsConsoleErrors": 0,
+  "tabsHttpBad": 0,
+  "tabsHttpSamples": [],
+  "frontend": {
+    "navDictionaryLinks": 0,
+    "navDictText": 0,
+    "dictionaryLandingUrl": "http://127.0.0.1:18096/admin.html#dict"
+  }
+}

@@ -1,0 +1,9 @@
+# drill-server Linux/amd64 构建签名
+# 构建时间: 2026-11-10 11:36:33 (+08:00)
+# 构建方式: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o deploy-linux/drill-server .
+# 部署形态: 静态链接，容器基础镜像 Alpine（musl），无动态库依赖
+# 校验: 本文件末行哈希 = 二进制实测（Get-FileHash 大写）一致（17,532,472 / 2e077716…）
+# 上一线上版本: 0.9.0（sha256 80bf4899…，2026-11-09 部署）
+# 字节数: 17532472
+# 部署记录: 1.0.0 镜像已构建（2026-11-10，194943620 B / 9 层），digest sha256:53fbf220…；待 GHCR/SWR 重推后随 release 发布
+2e07771632e57d8e957c48fa7f2bf4c9016dec3500e7552694a3d103346b4f9f  drill-server

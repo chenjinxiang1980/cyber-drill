@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>演练报告导出 · 示例医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+</head>
+<body>
+<!-- 报告导出已合并到「复盘评估」，本页仅保留老链接跳转 -->
+<script>
+(function(){
+  var pid = '';
+  try { pid = new URLSearchParams(location.search).get('projectId') || ''; } catch(e) {}
+  location.replace('evaluation.html' + (pid ? ('?projectId=' + encodeURIComponent(pid)) : ''));
+})();
+</script>
+</body>
+</html>

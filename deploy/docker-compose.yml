@@ -1,0 +1,32 @@
+# 演练系统 MySQL 8 隔离环境（可选，本机已装 MySQL 时不必起这个）
+# 启动：docker compose -f deploy/docker-compose.yml up -d
+# 停止：docker compose -f deploy/docker-compose.yml down -v
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: drill-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: CHANGE_ME_ROOT
+      MYSQL_DATABASE: drill_system
+      MYSQL_USER: drill_app
+      MYSQL_PASSWORD: CHANGE_ME_PASSWORD
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - drill-mysql-data:/var/lib/mysql
+      - ../migrations:/docker-entrypoint-initdb.d:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --max-connections=300
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pCHANGE_ME_ROOT"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  drill-mysql-data:

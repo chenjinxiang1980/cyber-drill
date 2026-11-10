@@ -1,0 +1,58 @@
+# =============================================================================
+# Windows Docker Desktop —— Go 容器 + **宿主 MySQL**
+#
+# 用法：
+#   # 1) 准备 .env（必须改 DB_HOST）
+#   cp .env.example .env
+#   # 关键：DB_HOST 改成 host.docker.internal（compose 内部 DNS 别名）
+#   # DB_USER / DB_PASSWORD / DB_ROOT_* 填宿主 MySQL 的真实账号
+#
+#   # 2) 宿主 MySQL 准备：
+#   #    确保已 CREATE DATABASE drill_system + 跑 migrations，
+#   #    或让 DB_ROOT_USER/DB_ROOT_PASSWORD 有权限后跑 bootstrap：
+#   docker compose run --rm app /opt/drill/bin/drill-server-bootstrap -root=/opt/drill
+#
+#   # 3) 启动
+#   docker compose up -d --build
+#
+# =============================================================================
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/linux/Dockerfile
+      args:
+        VERSION: 0.8.6
+    image: drill-server:latest
+    container_name: drill-app-local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 关键：让容器 Go 进程连宿主 MySQL
+      # Docker Desktop 自动把 host.docker.internal 解析到宿主
+      DB_HOST: host.docker.internal
+      APP_ENV: development
+      # compose 默认网络是 bridge，用 Docker Desktop 内置网段
+      # TRUSTED_PROXIES 留空同机直连
+    ports:
+      - "8090:8090"
+    volumes:
+      # 直接挂仓库目录（开发时 live-edit，刷新浏览器立刻生效）
+      - ../../public:/opt/drill/public:ro
+      # 运行时可写（上传文件、备份）
+      - ../../data:/opt/drill/data
+      - drill-desktop-uploads:/opt/drill/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    extra_hosts:
+      # 兼容旧版 Docker Desktop 没有 host.docker.internal
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  drill-desktop-uploads:

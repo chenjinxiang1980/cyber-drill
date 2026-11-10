@@ -1,0 +1,1438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>演练监视大屏 · 示例医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<style>
+:root{
+  --cy:#22d3ee; --bl:#3b82f6; --pu:#a371f7; --ok:#22c55e; --wn:#fbbf24; --er:#f43f5e;
+  --tx:#d7efff; --tx2:#8db8d9; --dim:#517694; --line:rgba(34,211,238,.22);
+  /* mono 加入中文 fallback，避免中文回退到系统宋体 */
+  --mono:Consolas,"Microsoft YaHei","PingFang SC","Courier New",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{overflow:hidden;width:100vw;height:100vh;background:#030711}
+body{
+  position:fixed;top:0;left:0;margin:0;width:1920px;height:1080px;
+  background:#030711; color:var(--tx);
+  font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+  transform-origin:top left;
+  transform:scale(1);
+}
+body::before{
+  content:''; position:fixed; inset:0; z-index:-2;
+  background:
+    radial-gradient(1200px 620px at 50% -12%, rgba(34,211,238,.18), transparent 62%),
+    radial-gradient(900px 520px at 8% 108%, rgba(59,130,246,.14), transparent 60%),
+    radial-gradient(900px 520px at 92% 108%, rgba(163,113,247,.12), transparent 60%),
+    #030711;
+}
+.bg-grid{
+  position:fixed; left:-25%; right:-25%; top:-20%; bottom:-20%; z-index:-1; pointer-events:none;
+  background-image:linear-gradient(rgba(34,211,238,.06) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(34,211,238,.06) 1px,transparent 1px);
+  background-size:46px 46px;
+  transform:perspective(620px) rotateX(22deg) scale(1.35);
+  animation:gridMove 16s linear infinite;
+}
+@keyframes gridMove{from{background-position:0 0}to{background-position:0 460px}}
+.scan{position:fixed;left:0;right:0;height:2px;z-index:6;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(34,211,238,.75),transparent);
+  box-shadow:0 0 20px rgba(34,211,238,.6); animation:scanMove 7s linear infinite}
+@keyframes scanMove{0%{top:-1%}100%{top:101%}}
+
+.screen{height:1080px;display:flex;flex-direction:column;padding:10px 16px 14px;gap:10px;animation:fadein .6s ease both}
+@keyframes fadein{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ---------- 顶栏 ---------- */
+.s-head{display:flex;align-items:center;justify-content:space-between;gap:18px;
+  padding:6px 10px 12px;border-bottom:1px solid rgba(34,211,238,.28);position:relative}
+.s-head::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;
+  background:linear-gradient(90deg,transparent,rgba(34,211,238,.85),rgba(59,130,246,.5),transparent)}
+.h-left{display:flex;align-items:center;gap:10px;min-width:250px}
+.h-logo{width:38px;height:38px;border:1px solid rgba(255,255,255,.55);border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:#fff;padding:2px;overflow:hidden;flex:none;
+  box-shadow:0 0 14px rgba(34,211,238,.35),0 0 12px rgba(34,211,238,.2);
+  animation:logoPulse 3s ease-in-out infinite}
+.h-logo img{width:100%;height:100%;object-fit:contain;border-radius:50%;display:block}
+@keyframes logoPulse{0%,100%{box-shadow:0 0 10px rgba(34,211,238,.18) inset,0 0 8px rgba(34,211,238,.16)}50%{box-shadow:0 0 18px rgba(34,211,238,.45) inset,0 0 20px rgba(34,211,238,.4)}}
+.h-org{font-size:15px;font-weight:700;letter-spacing:1px;color:#eaf9ff}
+.h-sub{font-size:11px;color:var(--dim);letter-spacing:2px;margin-top:2px}
+.h-mid{text-align:center;flex:1}
+.h-title{font-size:clamp(20px,2.1vw,32px);font-weight:800;letter-spacing:.35em;text-indent:.35em;
+  background:linear-gradient(180deg,#ffffff,#7fe3ff 60%,#2aa9d6);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  text-shadow:0 0 24px rgba(34,211,238,.25)}
+.h-title-en{font-size:9px;letter-spacing:4px;color:rgba(120,195,230,.55);margin-top:3px}
+.h-right{display:flex;align-items:center;gap:10px;min-width:300px;justify-content:flex-end}
+.h-sel{background:rgba(9,28,50,.9);color:var(--tx);border:1px solid var(--line);border-radius:4px;
+  font-size:12px;padding:5px 8px;max-width:190px;outline:none}
+.live{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:2px;color:#67f0b0;
+  border:1px solid rgba(34,197,94,.45);border-radius:3px;padding:3px 8px;background:rgba(34,197,94,.08)}
+.live-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 10px #22c55e;animation:blink 1.4s infinite}
+.live.off{color:#ff8a8a;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.1)}
+.live.off .live-dot{background:#ef4444;box-shadow:0 0 10px #ef4444}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.h-clock{text-align:right;font-family:var(--mono);padding:4px 10px;border:1px solid rgba(34,211,238,.3);border-radius:4px;background:rgba(9,28,50,.6);line-height:1.4}
+.h-clock #clkTime{display:block;font-size:19px;font-weight:700;letter-spacing:1px;color:#9fe9ff;text-shadow:0 0 10px rgba(34,211,238,.5)}
+.h-clock #clkDate{display:block;font-size:11px;color:var(--tx2);letter-spacing:1px;margin-top:2px}
+.h-btn{background:rgba(34,211,238,.08);border:1px solid var(--line);color:#8fe1ff;font-size:12px;
+  padding:5px 10px;border-radius:3px;cursor:pointer;letter-spacing:1px}
+.h-btn:hover{background:rgba(34,211,238,.2);border-color:var(--cy);box-shadow:0 0 12px rgba(34,211,238,.3)}
+/* 语音播报开关：左侧状态灯，开=绿 / 关=灰 */
+.h-btn.vbtn{display:inline-flex;align-items:center;gap:6px;min-width:74px;justify-content:center}
+.h-btn.vbtn::before{content:'';width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e}
+.h-btn.vbtn.off{color:#7c93a8;border-color:rgba(124,147,168,.35);background:rgba(124,147,168,.06)}
+.h-btn.vbtn.off::before{background:#64748b;box-shadow:none}
+
+/* ---------- 主体 ---------- */
+.s-main{flex:1;display:grid;grid-template-columns:320px minmax(0,1fr) 340px;gap:12px;min-height:0}
+.panel{position:relative;display:flex;flex-direction:column;min-height:0;
+  background:linear-gradient(180deg,rgba(13,34,60,.86),rgba(6,17,32,.92));
+  border:1px solid var(--line);border-radius:5px;
+  box-shadow:inset 0 0 34px rgba(34,211,238,.05),0 6px 18px rgba(0,0,0,.45);
+  isolation:isolate}
+.panel::before,.panel::after{content:'';position:absolute;width:11px;height:11px;border:2px solid var(--cy);opacity:.7}
+.panel::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
+.panel::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
+.p-head{display:flex;align-items:center;gap:8px;padding:10px 12px;font-size:12.5px;letter-spacing:1.5px;
+  color:#86dbff;border-bottom:1px dashed rgba(34,211,238,.18);flex:none}
+.p-dot{width:6px;height:6px;background:var(--cy);transform:rotate(45deg);box-shadow:0 0 8px var(--cy)}
+.p-badge{margin-left:auto;font-family:var(--mono);font-size:11px;color:#6fd3f2;
+  border:1px solid rgba(34,211,238,.3);border-radius:3px;padding:1px 6px;background:rgba(34,211,238,.06)}
+.p-foot{flex:none;padding:6px 12px;font-size:10px;color:var(--dim);letter-spacing:1px;border-top:1px dashed rgba(34,211,238,.12)}
+.col-center{display:flex;flex-direction:column;gap:12px;min-height:0}
+.col-right{display:flex;flex-direction:column;gap:12px;min-height:0}
+.col-right .panel{flex:1;min-height:0}
+
+/* KPI */
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;flex:none}
+.kpi{position:relative;padding:14px 16px;border:1px solid var(--line);border-radius:5px;overflow:hidden;
+  background:linear-gradient(150deg,rgba(20,58,94,.75),rgba(7,20,38,.9))}
+.kpi::after{content:'';position:absolute;right:-28px;top:-28px;width:70px;height:70px;border:1px solid rgba(34,211,238,.22);
+  border-radius:50%;animation:spin 9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.k-l{font-size:12px;color:var(--tx2);letter-spacing:1px;font-weight:500}
+/* 数值区：中文元素（如事件等级）自动退回到默认字体栈，避免 Consolas 找不到字形回退宋体 */
+.k-v{font-size:clamp(22px,2vw,34px);font-weight:800;margin-top:6px;line-height:1;letter-spacing:1px;
+  color:#8ff0ff;text-shadow:0 0 18px rgba(34,211,238,.45);
+  /* 先尝试等宽字体渲染数字，找不到字形时自动回退到 Microsoft YaHei */
+  font-family:var(--mono)}
+.k-v.ok{color:#5ef2a6;text-shadow:0 0 18px rgba(34,197,94,.45)}
+.k-v.wn{color:#ffd76a;text-shadow:0 0 18px rgba(251,191,36,.45)}
+.k-v.er{color:#ff7b8f;text-shadow:0 0 18px rgba(244,63,94,.45)}
+.k-f{font-size:10.5px;color:var(--dim);margin-top:6px;letter-spacing:.5px}
+/* 事件等级 badge：特殊样式 + 等级徽章 */
+.kpi .level-badge{display:inline-flex;align-items:center;gap:6px}
+.kpi .level-badge .lv-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:800;line-height:1}
+.kpi .level-badge .lv-text{font-size:clamp(24px,2.2vw,36px);font-weight:800;
+  font-family:"Microsoft YaHei","PingFang SC",sans-serif}
+
+/* 节点列表：隐藏滚动条但保留滚动能力（内容溢出时由脚本自动缓慢滚动） */
+.node-list{flex:1;overflow-y:auto;padding:10px 12px 8px;
+  scrollbar-width:none;-ms-overflow-style:none}
+.node-list::-webkit-scrollbar{width:0;height:0;display:none}
+.log-list::-webkit-scrollbar,.msg-list::-webkit-scrollbar{width:4px}
+.log-list::-webkit-scrollbar-thumb,.msg-list::-webkit-scrollbar-thumb{background:rgba(34,211,238,.3);border-radius:2px}
+.nd{position:relative;margin-left:7px;padding:7px 6px 9px 22px;border-left:1px solid rgba(34,211,238,.18)}
+.nd:last-child{border-left-color:transparent}
+.nd::before{content:'';position:absolute;left:-5px;top:12px;width:9px;height:9px;border-radius:50%;
+  background:#0a1e34;border:1px solid #3d6d92}
+.nd.done::before{background:var(--ok);border-color:var(--ok);box-shadow:0 0 10px rgba(34,197,94,.8)}
+.nd.overdue::before{background:#fbbf24;border-color:#fbbf24;box-shadow:0 0 10px rgba(251,191,36,.85)}
+.nd.overdue{background:rgba(251,191,36,.08);border-radius:4px}
+.nd.doing::before{background:var(--wn);border-color:var(--wn);box-shadow:0 0 10px rgba(251,191,36,.9);animation:blink 1.2s infinite}
+.nd-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.nd-name{font-size:12.5px;font-weight:600;color:#dff4ff}
+.nd-state{font-size:10px;padding:1px 6px;border-radius:2px;flex:none}
+.nd-state.done{color:#5ef2a6;border:1px solid rgba(34,197,94,.45);background:rgba(34,197,94,.1)}
+.nd-state.overdue{color:#ffd76a;border:1px solid rgba(251,191,36,.55);background:rgba(251,191,36,.18);font-weight:700}
+.nd-state.doing{color:#ffd76a;border:1px solid rgba(251,191,36,.45);background:rgba(251,191,36,.1)}
+.nd-state.next{color:#7ea9c9;border:1px solid rgba(126,169,201,.32);background:rgba(126,169,201,.06)}
+.nd-meta{font-size:10.5px;color:var(--dim);margin-top:3px;letter-spacing:.5px}
+
+/* 链路 */
+/* 中间「演练实时态势」面板：毛玻璃质感（半透明深色底 + 背景虚化 + 细边框内发光）
+   只作用于视觉层；对比度靠深色半透明底保证，内部文字/节点列表/自动滚动不受影响 */
+.chain-panel{flex:1;min-height:0;padding:6px 10px;overflow:hidden;
+  background:
+    linear-gradient(135deg,rgba(255,255,255,.05),transparent 42%),
+    radial-gradient(560px 200px at 50% -10%,rgba(34,211,238,.16),transparent 72%),
+    linear-gradient(180deg,rgba(13,34,60,.66),rgba(6,17,32,.74));
+  -webkit-backdrop-filter:blur(16px) saturate(118%);
+  backdrop-filter:blur(16px) saturate(118%);
+  border-color:rgba(34,211,238,.30);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),inset 0 0 54px rgba(34,211,238,.10),0 12px 30px rgba(0,0,0,.5)}
+/* 不支持背景虚化的浏览器回退到更实的深色底，避免对比度下降 */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .chain-panel{background:linear-gradient(180deg,rgba(13,34,60,.92),rgba(6,17,32,.95))}
+}
+.chain-wrap{flex:1;min-height:0;padding:4px 6px;display:flex;flex-direction:column;gap:3px;align-items:stretch;justify-content:stretch}
+.dag-svg{display:block;width:100%;height:100%;flex:1;min-height:0}
+.dag-svg .dag-edge-bg{filter:blur(.3px)}
+.dag-svg .dag-edge-fg{filter:drop-shadow(0 0 3px rgba(34,211,238,.25))}
+.dag-svg .dag-node.parallel circle{filter:drop-shadow(0 0 4px rgba(251,191,36,.35))}
+.dag-svg .dag-node.done circle{filter:drop-shadow(0 0 3px rgba(34,197,94,.3))}
+.dag-svg .dag-node.doing circle{filter:drop-shadow(0 0 5px rgba(251,191,36,.4))}
+.dag-svg .dag-node.overdue circle{filter:drop-shadow(0 0 6px rgba(244,63,94,.5))}
+/* 每行 SVG 用实际像素宽高，节点固定 14px */
+/* 评分 */
+.score-panel{flex:none;padding:6px 10px}
+.score-body{padding:6px 10px;font-size:11.5px}
+.sc-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.sc-score{font-size:28px;font-weight:900;font-family:var(--mono);letter-spacing:1px;line-height:1;color:#9fe9ff;text-shadow:0 0 14px #22d3ee55}
+.sc-grade{font-size:13px;padding:2px 8px;border-radius:2px;font-weight:700}
+.sc-good{color:#22c55e;border:1px solid #22c55e55;background:#22c55e15}
+.sc-mid{color:#fbbf24;border:1px solid #fbbf2455;background:#fbbf2415}
+.sc-bad{color:#f43f5e;border:1px solid #f43f5e55;background:#f43f5e15}
+.sc-bar{display:flex;gap:6px;margin-top:4px}
+.sc-bar .seg{flex:1;height:30px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-direction:column}
+.sc-bar .seg b{font-size:14px;font-weight:900;font-family:var(--mono)}
+.sc-deductions{margin-top:6px;border-top:1px dashed rgba(34,211,238,.15);padding-top:5px}
+.sc-deductions .sc-d-title{font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:3px}
+.sc-d-item{display:flex;gap:6px;padding:2px 0;font-size:11px;border-bottom:1px dashed rgba(34,211,238,.08)}
+.sc-d-item .pt{color:#f43f5e;font-family:var(--mono);font-weight:700;flex:none;width:44px;text-align:right}
+.sc-d-item .ty{color:#fbbf24;flex:none;width:76px;font-size:10px}
+.sc-d-item .ti{color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 链路横向填满：让每行 SVG 的 viewBox 宽度匹配容器 */
+.chain-wrap svg{display:block;margin:0 auto}
+
+/* 告警消息中扣分项的样式在 .msg 基础上 */
+.flow-dash{animation:dashMove 1.6s linear infinite}
+@keyframes dashMove{to{stroke-dashoffset:-32}}
+.node text{font-family:"Microsoft YaHei",sans-serif}
+.node .core{filter:drop-shadow(0 0 6px currentColor)}
+
+/* 任务分布 */
+.task-panel{flex:none;padding-bottom:4px}
+.task-dist{padding:12px 14px 14px}
+.td-bar{display:flex;height:14px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.04);
+  border:1px solid rgba(34,211,238,.16)}
+.td-bar span{height:100%;transition:width .8s ease}
+.td-legend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.td-item{border-left:2px solid;padding-left:8px}
+.td-item .n{font-size:19px;font-weight:700;font-family:var(--mono)}
+.td-item .l{font-size:10.5px;color:var(--dim);margin-top:2px}
+
+/* 角色 */
+.role-list{flex:1;overflow-y:auto;padding:10px 14px;scrollbar-gutter:stable}
+/* 大屏专属滚动条样式 */
+.role-list::-webkit-scrollbar,.impact-list::-webkit-scrollbar,
+.log-list::-webkit-scrollbar,.msg-list::-webkit-scrollbar{width:6px;height:6px}
+.role-list::-webkit-scrollbar-track,.impact-list::-webkit-scrollbar-track,
+.log-list::-webkit-scrollbar-track,.msg-list::-webkit-scrollbar-track{background:rgba(34,211,238,.06);border-radius:3px}
+.role-list::-webkit-scrollbar-thumb,.impact-list::-webkit-scrollbar-thumb,
+.log-list::-webkit-scrollbar-thumb,.msg-list::-webkit-scrollbar-thumb{background:rgba(34,211,238,.35);border-radius:3px}
+.role-list::-webkit-scrollbar-thumb:hover,.impact-list::-webkit-scrollbar-thumb:hover,
+.log-list::-webkit-scrollbar-thumb:hover,.msg-list::-webkit-scrollbar-thumb:hover{background:rgba(34,211,238,.6)}
+.rl{margin-bottom:12px}
+.rl-top{display:flex;align-items:center;justify-content:space-between;font-size:12px}
+.rl-top .nm{display:flex;align-items:center;gap:6px}
+.rl-top i{width:7px;height:7px;border-radius:50%;display:inline-block;box-shadow:0 0 8px currentColor}
+.rl-top .cnt{font-family:var(--mono);font-size:11px;color:var(--tx2)}
+.rl-bar{height:5px;margin-top:5px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden}
+.rl-bar span{display:block;height:100%;border-radius:3px;transition:width .8s ease}
+
+/* 业务影响：字号/行高/进度条/间距按面板可用高度自适应缩放
+   --if-scale / --if-gap 由 fitImpact() 依据容器实际高度计算，不写死分辨率；
+   条目多时自动收敛到下限并内部滚动，条目少时用间距匀开剩余空间 */
+.impact-list{flex:1;overflow-y:auto;padding:10px 14px;scrollbar-gutter:stable;--if-scale:1}
+.if{margin-bottom:calc(12px * var(--if-scale) + var(--if-gap, 0px))}
+.if:last-child{margin-bottom:0}
+.if-top{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  font-size:calc(11.5px * var(--if-scale));margin-bottom:calc(5px * var(--if-scale));line-height:1.25}
+.if-top .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.if-top .st{flex:none;white-space:nowrap;font-size:calc(10px * var(--if-scale));
+  padding:calc(1px * var(--if-scale)) calc(6px * var(--if-scale));border-radius:2px}
+.if-bar{height:calc(5px * var(--if-scale));background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden}
+.if-bar span{display:block;height:100%;border-radius:3px;transition:width .8s ease}
+.if.ok .st{color:#5ef2a6;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.08)}
+.if.wn .st{color:#ffd76a;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.08)}
+.if.er .st{color:#ff8496;border:1px solid rgba(244,63,94,.4);background:rgba(244,63,94,.08)}
+
+/* 底部 */
+.s-foot{flex:none;height:clamp(128px,17vh,180px);display:grid;grid-template-columns:1.35fr 1fr;gap:12px;min-height:0}
+.foot-panel{min-height:0}
+.log-list,.msg-list{flex:1;overflow-y:auto;padding:6px 12px 8px;font-size:11.5px;scrollbar-gutter:stable}
+.lg{display:grid;grid-template-columns:48px 76px 96px 1fr;gap:8px;padding:5px 4px;border-bottom:1px dashed rgba(34,211,238,.1);
+  animation:fadein .5s ease both}
+.lg .t{font-family:var(--mono);color:#6fd3f2}
+.lg .a{color:#b7ddf3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg .x{color:#8ff0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg .d{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg.p0{background:linear-gradient(90deg,rgba(244,63,94,.1),transparent)}
+.lg.p0 .x{color:#ff8496}
+/* 操作流中的站内消息：与语音播报同源（desc 原样），跳过「来源板块」列，只有时间/角色/正文 */
+.lg.nf{grid-template-columns:48px 76px 1fr;background:linear-gradient(90deg,rgba(34,197,94,.08),transparent);align-items:start}
+.lg.nf .d{white-space:normal;word-break:break-word;color:#a8d8ef;line-height:1.45}
+.lg.nf.rd{opacity:.6}
+.msg{display:flex;gap:8px;padding:5px 2px;border-bottom:1px dashed rgba(34,211,238,.1);font-size:11.5px;color:var(--tx2);align-items:flex-start}
+.msg .lt{flex:none;font-size:9.5px;padding:1px 5px;border-radius:2px;height:16px;line-height:14px;flex-shrink:0}
+.msg .mt{font-family:var(--mono);color:#6fd3f2;flex:none;white-space:nowrap;flex-shrink:0}
+.msg .tx{flex:1;min-width:0;white-space:normal;word-break:break-word;line-height:1.45}
+
+/* 遮罩 / 加载 / 无权限 */
+.mask{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  background:rgba(3,7,17,.92);font-size:14px;color:var(--tx2);letter-spacing:1px}
+.mask .ttl{font-size:20px;color:#ff8496;font-weight:700}
+.mask a{color:var(--cy);text-decoration:none;border:1px solid var(--line);padding:6px 16px;border-radius:3px}
+
+/* ---------- 空态：无演练项目 ---------- */
+.standby{position:fixed;inset:0;z-index:15;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+  background:rgba(3,7,17,.85);padding:40px}
+.sb-logo-ring{width:130px;height:130px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:2px solid rgba(34,211,238,.5);background:radial-gradient(circle at 50% 50%,rgba(34,211,238,.22),transparent 70%);
+  position:relative;animation:sbPulse 3.5s ease-in-out infinite}
+.sb-logo-ring::before,.sb-logo-ring::after{content:'';position:absolute;border-radius:50%;
+  border:1px solid rgba(34,211,238,.35)}
+.sb-logo-ring::before{inset:-14px;border-color:rgba(59,130,246,.35);animation:sbRotate 12s linear infinite}
+.sb-logo-ring::after{inset:-28px;border-color:rgba(163,113,247,.25);animation:sbRotate 20s linear infinite reverse}
+@keyframes sbPulse{0%,100%{box-shadow:0 0 28px rgba(34,211,238,.35)}50%{box-shadow:0 0 48px rgba(34,211,238,.65)}}
+@keyframes sbRotate{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.sb-logo-ring svg{width:58px;height:58px;color:var(--cy);filter:drop-shadow(0 0 8px rgba(34,211,238,.7))}
+.sb-tag{display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--cy);letter-spacing:2px;
+  padding:6px 20px;border:1px solid rgba(34,211,238,.35);border-radius:30px;background:rgba(34,211,238,.08);
+  text-transform:uppercase}
+.sb-tag .dot{width:8px;height:8px;border-radius:50%;background:var(--cy);box-shadow:0 0 10px var(--cy);animation:blink 1.4s infinite}
+.sb-title{font-size:44px;font-weight:700;color:#e8f8ff;letter-spacing:4px;
+  text-shadow:0 0 20px rgba(34,211,238,.4)}
+.sb-sub{font-size:16px;color:var(--tx2);max-width:720px;text-align:center;line-height:1.8}
+.sb-acts{display:flex;gap:14px;margin-top:8px}
+.sb-btn{display:inline-flex;align-items:center;gap:8px;font-size:15px;padding:10px 24px;border-radius:4px;
+  text-decoration:none;border:1px solid var(--line);color:var(--tx);background:rgba(34,211,238,.06);
+  transition:all .2s}
+.sb-btn:hover{background:rgba(34,211,238,.15);border-color:var(--cy);color:#fff}
+.sb-btn.primary{background:linear-gradient(135deg,rgba(34,211,238,.28),rgba(59,130,246,.28));
+  border-color:rgba(34,211,238,.6);color:#fff;font-weight:600}
+.sb-btn.primary:hover{box-shadow:0 0 24px rgba(34,211,238,.45)}
+.sb-meta{display:flex;gap:40px;margin-top:14px;padding:16px 40px;border-top:1px solid rgba(34,211,238,.18);border-bottom:1px solid rgba(34,211,238,.18)}
+.sb-meta .m-item{display:flex;flex-direction:column;align-items:center;gap:4px}
+.sb-meta .m-item b{font-size:30px;color:var(--cy);font-weight:700;letter-spacing:1px}
+.sb-meta .m-item span{font-size:13px;color:var(--dim);letter-spacing:1px}
+.spinner{width:32px;height:32px;border:2px solid rgba(34,211,238,.2);border-top-color:var(--cy);border-radius:50%;animation:spin 1s linear infinite}
+.net-warn{position:fixed;left:50%;top:74px;transform:translateX(-50%);z-index:99;display:none;align-items:center;gap:10px;
+  padding:10px 22px;border-radius:8px;background:rgba(120,20,20,.92);border:1px solid rgba(255,120,120,.7);
+  color:#ffe4e4;font-size:15px;letter-spacing:.5px;box-shadow:0 6px 24px rgba(0,0,0,.45)}
+.net-warn.show{display:flex}
+.net-warn b{color:#fff}
+.net-warn .nw-dot{width:9px;height:9px;border-radius:50%;background:#ff6b6b;box-shadow:0 0 10px #ff6b6b;animation:blink 1s infinite}
+</style>
+</head>
+<body data-page="screen">
+<div class="bg-grid"></div>
+<div class="scan"></div>
+<div class="net-warn" id="netWarn" role="status"><span class="nw-dot"></span><span id="netWarnTxt">数据连接中断，当前显示为最后成功获取的陈旧数据</span></div>
+
+<div class="screen" id="screen" style="display:none">
+  <header class="s-head">
+    <div class="h-left">
+      <span class="h-logo"><img src="img/logo.png" alt="示例医院院徽"></span>
+      <div><div class="h-org" data-brand="unit">示例医院</div><div class="h-sub" data-brand="system">网络与信息安全应急演练</div></div>
+    </div>
+    <div class="h-mid">
+      <div class="h-title">演练监视大屏</div>
+      <div class="h-title-en">CYBER SECURITY DRILL MONITOR</div>
+    </div>
+    <div class="h-right">
+      <select class="h-sel" id="projSel"></select>
+      <span class="live" id="liveTag"><span class="live-dot"></span><span id="liveTxt">LIVE</span></span>
+      <div class="h-clock"><span id="clkTime">--:--:--</span><span id="clkDate">----</span></div>
+      <button class="h-btn vbtn" id="screenVoiceBtn" type="button" aria-pressed="true" title="语音播报">语音开</button>
+      <button class="h-btn" id="btnFull">全屏</button>
+    </div>
+  </header>
+
+  <main class="s-main">
+    <section class="panel col-left">
+      <div class="p-head"><span class="p-dot"></span>演练节点处置进度<span class="p-badge" id="nodeBadge">0/0</span></div>
+      <div class="node-list" id="nodeList"></div>
+      <div class="p-foot">按处置时序推进 · 数据每 8 秒自动刷新</div>
+    </section>
+
+    <section class="col-center">
+      <div class="kpi-row" id="kpis"></div>
+      <div class="panel chain-panel">
+        <div class="p-head"><span class="p-dot"></span>应急演练实时态势<span class="p-badge" id="chainBadge">T+00:00</span></div>
+        <div class="chain-wrap" id="chainWrap"></div>
+      </div>
+    </section>
+
+    <section class="col-right">
+      <div class="panel">
+        <div class="p-head"><span class="p-dot"></span>参演角色处置状态</div>
+        <div class="role-list" id="roleList"></div>
+      </div>
+      <div class="panel">
+        <div class="p-head"><span class="p-dot"></span>业务系统影响</div>
+        <div class="impact-list" id="impactList"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="s-foot">
+    <div class="panel foot-panel">
+      <div class="p-head"><span class="p-dot"></span>实时操作流</div>
+      <div class="log-list" id="logList"></div>
+    </div>
+    <div class="panel foot-panel">
+      <div class="p-head"><span class="p-dot"></span>告警与消息</div>
+      <div class="msg-list" id="msgList"></div>
+    </div>
+  </footer>
+</div>
+
+<div class="mask" id="mask">
+  <div class="spinner"></div>
+  <div>正在接入演练数据…</div>
+</div>
+
+<script>
+/* ---------- 小屏 / 触屏设备守卫 ----------
+   手机 / 平板等 coarse pointer 或视口 < 1024px 时，不渲染 1920×1080 缩放画布，
+   改为显示居中提示页。桌面端（fine pointer 且 ≥1024px）完全不变，
+   body 的 transform/left/top 仍走下方 scale() 原样路径。
+*/
+(function(){
+  var isTouch = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+  var viewportW = Math.min(window.innerWidth || 0, document.documentElement.clientWidth || 0);
+  var small = viewportW > 0 && viewportW < 1024;
+  /* 触屏一体机常见 1920/3840 宽，不再仅凭 pointer:coarse 硬拦截；仅拦真正的小屏设备 */
+  if(small || (isTouch && viewportW > 0 && viewportW < 1280)){
+    var body = document.body;
+    window.__SCREEN_SMALL = true; /* 后续数据脚本看到此标记即不再渲染/取数 */
+    // 隐藏大屏所有原生子节点，后续叠加提示页
+    Array.prototype.forEach.call(body.children, function(c){ c.style.display='none'; });
+    var tip = document.createElement('div');
+    tip.id = 'mobileTip';
+    var curW = window.innerWidth || '?';
+    tip.innerHTML =
+      '<div style="padding:32px 24px;background:#030711;color:#d7efff;text-align:center;line-height:1.8">'
+      +'<div style="font-size:48px;margin-bottom:16px;line-height:1">🖥️</div>'
+      +'<h2 style="font-size:20px;font-weight:700;margin-bottom:8px;color:#22d3ee">演练监视大屏需在电脑端使用</h2>'
+      +'<p style="font-size:14px;color:#8db8d9;max-width:360px;margin:0 auto">'
+      +'建议 1920×1080 及以上分辨率 · 支持 Chrome / Edge 全屏投屏<br>'
+      +'请在电脑浏览器中打开本页面，或返回上一页面。</p>'
+      +'<div style="margin-top:20px;padding:10px 16px;background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.25);border-radius:6px;font-size:12px;color:#8db8d9;display:inline-block">'
+      +'当前设备宽度：<b style="color:#d7efff;font-family:Consolas,monospace">'+curW+'px</b>'
+      +(isTouch ? ' · 触屏设备' : (small ? ' · 视口过小' : ''))
+      +'</div>'
+      +'<div><a href="javascript:history.back()" style="margin-top:20px;display:inline-block;padding:10px 24px;background:#2f81f7;color:#fff;border-radius:6px;text-decoration:none;font-size:14px">← 返回上一页</a></div>'
+      +'</div>';
+    // 小屏提示页：解除 1920×1080 固定画布，避免横向溢出
+    body.style.width = '100%';
+    body.style.height = '100%';
+    body.style.transform = 'none';
+    body.style.left = '0';
+    body.style.top = '0';
+    body.style.overflow = 'hidden';
+    body.appendChild(tip);
+    return;
+  }
+
+  /* ---------- 等比缩放适配（1920×1080 设计基准）----------
+     4K 屏按 transform 放大到 2 倍会先按 1 倍栅格化再拉伸，文字发虚；
+     支持 CSS zoom 的浏览器（Chrome/Edge）改用 zoom 重新布局并按目标倍率渲染。
+     不支持 zoom 时限制上采样倍数，宁可留边也不模糊。 */
+  var W=1920, H=1080;
+  var ZOOM_OK = !!(window.CSS && CSS.supports && CSS.supports('zoom','2'));
+  function scale(){
+    var raw=Math.min(innerWidth/W, innerHeight/H);
+    if(raw>1 && ZOOM_OK){
+      document.body.style.transform='none';
+      document.body.style.zoom=String(raw);
+      /* zoom 会连 left/top 一起放大，居中偏移要先除以倍率，否则画面整体右/下偏 */
+      document.body.style.left=Math.max(0,(innerWidth-W*raw)/2/raw)+'px';
+      document.body.style.top=Math.max(0,(innerHeight-H*raw)/2/raw)+'px';
+    }else{
+      var s=Math.min(raw,1);
+      document.body.style.zoom='';
+      document.body.style.transform='scale('+s+')';
+      document.body.style.left=((innerWidth-W*s)/2)+'px';
+      document.body.style.top=((innerHeight-H*s)/2)+'px';
+    }
+  }
+  scale(); addEventListener('resize', scale); addEventListener('orientationchange', scale);
+})();
+</script>
+<script src="system.js"></script>
+<script src="app.js"></script>
+<script src="api.js"></script>
+<script>
+(function(){
+  'use strict';
+  if(window.__SCREEN_SMALL) return; /* 小屏/触屏：停留在提示页，不取数、不播报 */
+  function $(id){ return document.getElementById(id); }
+  function esc(s){
+    return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function p2(n){ return (n<10?'0':'')+n; }
+
+  var projId = '';
+  try { projId = new URLSearchParams(location.search).get('projectId') || ''; } catch(e) {}
+  projId = projId || sessionStorage.getItem('pzy_proj') || '';
+
+  var DATA = null, timer = null;
+
+  /* 品牌设置：免登录同步单位名称、系统名称与 Logo */
+  DRILL.loadBrand().then(function(b){ if(b) DRILL.applyBrand(b); });
+
+  /* ---------- 时钟 ---------- */
+  function clock(){
+    var d = new Date();
+    $('clkTime').textContent = p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());
+    var wk = ['日','一','二','三','四','五','六'][d.getDay()];
+    $('clkDate').textContent = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' 星期'+wk;
+    tickElapsed();
+  }
+  clock(); setInterval(clock, 1000);
+  window.addEventListener('resize', function(){
+    if(DATA && DATA.chainNodes){ renderChain(); }
+  });
+
+  /* ---------- 数据 ---------- */
+  /* 大屏统一走 /api/screen 只读接口：未登录可观摩，登录态同样可用。
+     不走 DRILL.get，避免 401 时被全局逻辑强制跳转登录页。 */
+  function isLoggedIn(){
+    try{ return !!(sessionStorage.getItem('pzy_token') || sessionStorage.getItem('pzy_role')); }catch(e){ return false; }
+  }
+  function sget(path){
+    var token = '';
+    try{ token = sessionStorage.getItem('pzy_token') || ''; }catch(e){}
+    var headers = {};
+    if(token) headers['Authorization'] = 'Bearer ' + token;
+    var opt = { credentials:'same-origin', headers:headers };
+    var to = null;
+    /* 超时保护：后端重启/网络半开时 fetch 可能长时间不返回，必须主动中断，
+       否则首屏会永远停在加载遮罩上（大屏“不显示数据”的根因之一）。 */
+    if(window.AbortController){
+      var ac = new AbortController();
+      opt.signal = ac.signal;
+      to = setTimeout(function(){ try{ ac.abort(); }catch(e){} }, 12000);
+    }
+    function clearTo(){ if(to){ clearTimeout(to); to = null; } }
+    return fetch('/api' + path, opt).then(function(r){
+      return r.text().then(function(txt){
+        clearTo();
+        var data = {};
+        try{ data = txt ? JSON.parse(txt) : {}; }catch(e){ data = {}; }
+        if(!r.ok){
+          var err = new Error((data && data.error) || ('请求失败（HTTP '+r.status+'）'));
+          err.status = r.status;
+          throw err;
+        }
+        return data;
+      });
+    }, function(e){
+      clearTo();
+      if(e && e.name === 'AbortError'){ throw new Error('请求超时（12 秒无响应）'); }
+      throw e;
+    });
+  }
+  var netFails = 0, lastOkTs = 0, netOffline = false;
+  function setLiveState(off){
+    var tag = $('liveTag'), txt = $('liveTxt');
+    if(tag) tag.classList.toggle('off', !!off);
+    if(txt) txt.textContent = off ? '离线' : 'LIVE';
+  }
+  function markNetOk(){
+    netFails = 0; lastOkTs = Date.now();
+    if(netOffline){ netOffline = false; var w = $('netWarn'); if(w) w.classList.remove('show'); }
+    setLiveState(false);
+  }
+  function markNetFail(){
+    netFails++;
+    if(netFails >= 2) netOffline = true; /* 连续两次失败才提示，避免瞬时抖动 */
+    if(!netOffline) return;
+    setLiveState(true);
+    var t = lastOkTs ? new Date(lastOkTs).toLocaleTimeString('zh-CN', {hour12:false}) : '—';
+    var txt = $('netWarnTxt');
+    if(txt) txt.textContent = '数据连接中断，当前显示最后成功更新于 ' + t + ' 的数据，可能已过期';
+    var w = $('netWarn'); if(w) w.classList.add('show');
+  }
+  function fetchData(){
+    return sget('/screen/monitor' + (projId ? ('?projectId='+encodeURIComponent(projId)) : ''));
+  }
+  var loadRetry = null, loadFails = 0, loadMaskShown = false;
+  /* 首屏失败自动重试：后端发布/重启造成的一次性失败不应把大屏永久钉在遮罩上，
+     恢复后自动切回正常画面（401/403 属配置或权限问题，不重试）。 */
+  function scheduleLoadRetry(){
+    if(loadRetry) return;
+    var delay = Math.min(10000, 3000 * Math.pow(1.5, Math.min(loadFails - 1, 3)));
+    loadRetry = setTimeout(function(){ loadRetry = null; load(); }, delay);
+  }
+  function load(){
+    fetchData().then(function(d){
+      DATA = d;
+      loadFails = 0; loadMaskShown = false;
+      if(loadRetry){ clearTimeout(loadRetry); loadRetry = null; }
+      markNetOk();
+      if(!d.project){ showStandby(); return; }
+      if(d.project){ projId = d.project.id; sessionStorage.setItem('pzy_proj', projId); }
+      $('screen').style.display = 'flex';
+      $('mask').style.display = 'none';
+      renderAll();
+      if(!timer) timer = setInterval(refresh, 8000);
+      startNotifPolling();
+    }).catch(function(e){
+      if(e && e.status === 401){
+        showMask('需要登录后查看演练监视大屏', '当前已关闭免登录观摩，请登录后访问。');
+        return;
+      }
+      if(e && e.status === 403){
+        showMask('暂无查看权限', '请联系平台管理员开通演练监视大屏查看权限。');
+        return;
+      }
+      loadFails++;
+      if(!loadMaskShown){ loadMaskShown = true; showMask('数据加载失败', (e && e.message) || '请检查服务运行状态后重试。'); }
+      markNetFail();
+      scheduleLoadRetry();
+    });
+  }
+  function refresh(){
+    fetchData().then(function(d){
+      DATA = d;
+      markNetOk();
+      if(!d.project){ showStandby(); return; }
+      if(d.project){
+        projId = d.project.id;
+        if(notifPid && notifPid !== projId){ notifList = []; notifPid = ''; pollNotifs(); } /* 切项目：清旧项目消息缓存 */
+      }
+      renderAll();
+    }).catch(function(){ markNetFail(); });
+  }
+  function showMask(title, desc){
+    var link = isLoggedIn()
+      ? '<a href="dashboard.html">返回首页</a>'
+      : '<a href="index.html">登录后台</a>';
+    $('mask').innerHTML = '<div class="ttl">'+esc(title)+'</div><div>'+esc(desc||'')+'</div>'+link;
+    $('mask').style.display = 'flex';
+  }
+  /* ---------- 站内消息语音播报（大屏：只播本项目未读正文，每条一次） ---------- */
+  var notifTimer = null, notifFetching = false;
+  var notifList = [], notifPid = ''; /* 操作流展示缓存：与语音播报同一数据源 */
+  function screenVoiceSupported(){
+    return !!(window.App && App.notifVoice && App.voice && App.voice.supported());
+  }
+  function syncScreenVoiceBtn(){
+    var b = $('screenVoiceBtn');
+    if(!b) return;
+    var ok = screenVoiceSupported();
+    var on = !!(window.App && App.notifVoice && App.notifVoice.on());
+    b.textContent = on ? '语音开' : '语音关';
+    b.classList.toggle('off', !on || !ok);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.title = !ok ? '当前浏览器不支持语音合成'
+      : (on ? '语音播报已开启（点击关闭）' : '语音播报已关闭（点击开启）');
+  }
+  function toggleScreenVoice(){
+    if(!screenVoiceSupported()) return;
+    var next = !App.notifVoice.on();
+    App.notifVoice.set(next); /* 只改持久化状态，切换本身不发声 */
+    syncScreenVoiceBtn();
+    if(!next) return; /* 关闭：仅停止发声，操作流的消息展示与轮询继续 */
+    /* 开启：先把当前已有未读记为已处理，从下一条新消息开始播，不补播积压 */
+    if(!projId){ startNotifPolling(); return; }
+    sget('/screen/notifs?projectId='+encodeURIComponent(projId)).then(function(d){
+      App.notifVoice.skip((d && d.notifs) || [], projId);
+      startNotifPolling();
+    }).catch(function(){ startNotifPolling(); });
+  }
+  function stopNotifPolling(){
+    if(notifTimer){ clearInterval(notifTimer); notifTimer = null; }
+  }
+  function pollNotifs(){
+    if(notifFetching || !projId) return;
+    notifFetching = true;
+    var pid = projId;
+    sget('/screen/notifs?projectId='+encodeURIComponent(pid)).then(function(d){
+      notifFetching = false;
+      var ns = (d && d.notifs) || [];
+      notifList = ns; notifPid = pid; /* 语音关闭时也更新：操作流照常展示，只是不发声 */
+      renderLogs();
+      if(window.App && App.notifVoice && App.notifVoice.on()) App.notifVoice.announceScreen(ns, pid);
+    }).catch(function(){ notifFetching = false; });
+  }
+  function startNotifPolling(){
+    stopNotifPolling();
+    if(!projId) return;
+    if(window.App && App.notifVoice && App.notifVoice.on()) App.notifVoice.start();
+    pollNotifs();
+    notifTimer = setInterval(pollNotifs, 15000);
+  }
+  syncScreenVoiceBtn();
+  var screenVoiceBtnEl = $('screenVoiceBtn');
+  if(screenVoiceBtnEl) screenVoiceBtnEl.addEventListener('click', toggleScreenVoice);
+  /* ---------- 空态：待机模式 ---------- */
+  function showStandby(){
+    if(timer){ clearInterval(timer); timer = null; }
+    stopNotifPolling();
+    $('screen').style.display = 'none';
+    var html =
+      '<div class="standby" id="standby">'+
+      '<div class="sb-logo-ring">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+
+          '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'+
+          '<path d="M9 12l2 2 4-4"/>'+
+        '</svg>'+
+      '</div>'+
+      '<span class="sb-tag"><span class="dot"></span>SYSTEM STANDBY · 待机模式</span>'+
+      '<div class="sb-title">当前无进行中的安全演练</div>'+
+      '<div class="sb-sub">系统已就绪，<b id="sbSubScens">-</b> 个剧本场景、<b id="sbSubNodes">-</b> 个处置节点、7 个参演角色均已加载。'+
+        '请先创建演练项目或从剧本库选择场景启动推演。</div>'+
+      '<div class="sb-meta">'+
+        '<div class="m-item"><b id="sbScens">-</b><span>内置场景</span></div>'+
+        '<div class="m-item"><b id="sbNodes">-</b><span>剧本节点</span></div>'+
+        '<div class="m-item"><b id="sbProjs">-</b><span>历史项目</span></div>'+
+        '<div class="m-item"><b id="sbDate">-</b><span>系统时间</span></div>'+
+      '</div>'+
+      (isLoggedIn()
+        ? '<div class="sb-acts">'+
+            '<a class="sb-btn primary" href="projects.html">'+
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>'+
+              '创建演练项目</a>'+
+            '<a class="sb-btn" href="scenarios.html">'+
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 6h8M8 12h8M8 18h5"/></svg>'+
+              '浏览剧本库</a>'+
+            '<a class="sb-btn" href="dashboard.html">'+
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 6-6"/></svg>'+
+              '演练概览</a>'+
+          '</div>'
+        : '<div class="sb-acts" style="color:#8ea0b5;font-size:14px;letter-spacing:1px">只读观摩模式 · 登录后可创建演练项目</div>')+
+      '</div>';
+    $('mask').innerHTML = html;
+    $('mask').style.display = 'flex';
+    // 填充统计（走只读聚合接口，未登录也能显示）
+    sget('/screen/summary').then(function(r){
+      var el1 = $('sbScens'), el2 = $('sbNodes'), el3 = $('sbProjs');
+      if(el1) el1.textContent = (r && r.scenarios) || 0;
+      if(el2) el2.textContent = (r && r.scriptNodes) || 0;
+      if(el3) el3.textContent = (r && r.projects) || 0;
+      // 待机副标题的“剧本场景 / 处置节点”改为随聚合接口动态展示，不再写死 8 类 / 200+
+      var el4 = $('sbSubScens'), el5 = $('sbSubNodes');
+      if(el4) el4.textContent = (r && r.scenarios) || 0;
+      if(el5) el5.textContent = (r && r.scriptNodes) || 0;
+    }).catch(function(){});
+    // 时钟
+    function setDate(){
+      var d = new Date();
+      var wk = ['日','一','二','三','四','五','六'][d.getDay()];
+      var el = $('sbDate');
+      if(!el) return;
+      el.textContent = d.getFullYear()+'-'+(d.getMonth()+1<10?'0':'')+(d.getMonth()+1)+'-'+(d.getDate()<10?'0':'')+d.getDate()+' '+wk;
+    }
+    setDate(); setInterval(setDate, 60000);
+  }
+
+  function renderAll(){
+    renderHead(); renderKpis(); renderNodes(); renderChain();
+    renderScore(); renderRoles(); renderImpact(); renderLogs(); renderMsgs();
+  }
+
+  /* ---------- 顶栏 / 项目切换 ---------- */
+  function renderHead(){
+    var sel = $('projSel'), list = (DATA && DATA.projects) || [];
+    var html = list.map(function(p){
+      return '<option value="'+esc(p.id)+'"'+(p.id===projId?' selected':'')+'>'+esc(p.name)+'</option>';
+    }).join('');
+    if(sel.getAttribute('data-sig') !== html){
+      sel.innerHTML = html;
+      sel.setAttribute('data-sig', html);
+      sel.onchange = function(){
+        projId = sel.value;
+        sessionStorage.setItem('pzy_proj', projId);
+        try { history.replaceState(null, '', 'screen.html?projectId='+encodeURIComponent(projId)); } catch(e) {}
+        refresh();
+      };
+    }
+  }
+
+  /* ---------- KPI ---------- */
+  /* 真实计时：与看板/工作台共用 api.js 的 API.elapsedOf（当前时间 − started_at，暂停取 paused_at、结束取 ended_at，并扣 pausedSec），
+   * 不做本地累加，刷新/切页不归零 */
+  function localElapsed(){
+    return API.elapsedOf(DATA && DATA.project);
+  }
+  function elapsedText(){
+    var p = DATA && DATA.project;
+    if(!p) return { v:'--:--:--', f:'未选择演练项目' };
+    var sec = localElapsed();
+    if(sec === null){
+      /* 项目在「演练中/暂停」但 started_at 为空（历史数据缺开始时刻）：不显示 T+00:00:00 */
+      var pending = (p.status==='演练中' || p.status==='暂停');
+      return { v:(pending ? '计时未启动' : '未开始'), f:'项目状态：'+p.status };
+    }
+    var h = Math.floor(sec/3600), mm = Math.floor(sec%3600/60), ss = sec%60;
+    var tail = p.status==='暂停' ? ' · 已暂停' : ((p.status==='已结束'||p.status==='已归档') ? ' · 计时已冻结' : '');
+    return { v:'T+'+p2(h)+':'+p2(mm)+':'+p2(ss), f:'启动于 '+String(p.startedAt).slice(0,16)+tail };
+  }
+  function renderKpis(){
+    var p = DATA.project || {};
+    var s = DATA.stats || { total:0, done:0, doing:0, pending:0, overdue:0 };
+    var rate = s.total ? Math.round(s.done/s.total*100) : 0;
+    var el = elapsedText();
+    var level = p.level || '—';
+    // 等级 → 徽章颜色映射（重大=红/一般=黄/较大=蓝）
+    var levelColor = level === '重大' ? '#f43f5e' : level === '较大' ? '#fbbf24' : level === '一般' ? '#3b82f6' : '#58a6ff';
+    var levelIdx = level === '重大' ? 'Ⅱ' : level === '较大' ? 'Ⅲ' : level === '一般' ? 'Ⅳ' : 'Ⅰ';
+    var sc = DATA.score || {};
+    var scGradeCls = sc.grade === '优秀' || sc.grade === '良好' ? 'ok' : sc.grade === '合格' ? 'wn' : 'er';
+    // 演练进行中后端不返回等级（grade 为空）：评分颜色保持中性，避免空值被映射成红色“不合格”。
+    var scGradeColor = !sc.grade ? '#58a6ff' : (scGradeCls === 'ok' ? '#22c55e' : scGradeCls === 'wn' ? '#fbbf24' : '#f43f5e');
+    var items = [
+      { l:'当前事件等级', v:null, cls:'er', f:'演练模式 '+(p.mode||'—'),
+        badgeHtml:'<div class="level-badge"><span class="lv-icon" style="color:'+levelColor+';background:'+levelColor+'22;border:1px solid '+levelColor+'55">'+levelIdx+'</span>'
+          + '<span class="lv-text" style="color:'+levelColor+';text-shadow:0 0 18px '+levelColor+'66">'+esc(level)+'</span></div>' },
+      { l:'演练已进行', v:el.v, cls:'ok', f:el.f, id:'kpiElapsed' },
+      { l:'任务完成率', v:rate+'%', cls:rate>=100?'ok':rate>=60?'wn':'er', f:'已完成 '+s.done+' / 共 '+s.total+' 项' },
+      { l:'超时 / 待办', v:(s.overdue||0)+' / '+(s.pending||0), cls:'wn', f:'处理中 '+s.doing+' 项' },
+      { l:'演练评分', v:null, cls:scGradeCls, f:'已完成 '+s.done+' 项处置', id:'kpiScore',
+        badgeHtml:'<div style="display:flex;align-items:center;gap:8px"><span style="font-family:var(--mono);font-size:30px;font-weight:900;color:'+scGradeColor+';text-shadow:0 0 14px '+scGradeColor+'55">'+(sc.score!=null?sc.score:'—')+'</span>'
+          + '<span style="font-size:14px;font-weight:700;color:'+scGradeColor+';border:1px solid '+scGradeColor+'aa;background:'+scGradeColor+'22;padding:3px 10px;border-radius:3px;letter-spacing:2px">'+esc(sc.grade||'—')+'</span></div>' }
+    ];
+    $('kpis').innerHTML = items.map(function(x){
+      var valCell = x.badgeHtml ? x.badgeHtml : esc(x.v);
+      return '<div class="kpi"'+(x.id?' data-kpi="'+x.id+'"':'')+'><div class="k-l">'+x.l+'</div><div class="k-v '+x.cls+'">'+valCell+'</div><div class="k-f">'+esc(x.f)+'</div></div>';
+    }).join('');
+    $('chainBadge').textContent = el.v;
+  }
+  /* 每秒刷新计时 KPI 与链路徽标，不触发整屏重绘 */
+  function tickElapsed(){
+    if(!DATA || !DATA.project) return;
+    var el = elapsedText();
+    var kp = document.querySelector('[data-kpi="kpiElapsed"]');
+    if(kp){
+      kp.querySelector('.k-v').textContent = el.v;
+      kp.querySelector('.k-f').textContent = el.f;
+    }
+    $('chainBadge').textContent = el.v;
+  }
+
+  /* ---------- 左侧节点 ---------- */
+  function renderNodes(){
+    var nodes = (DATA.seqFlow||[]).slice();
+    var nodeEl = $('nodeList');
+    /* 轮询刷新会重写 innerHTML，先把滚动位置存下来，写完再还原：
+       否则每 8 秒刷新都会把阅读位置弹回顶部。 */
+    var keepTop = nodeEl ? nodeEl.scrollTop : 0;
+    if(!nodes.length){
+      $('nodeBadge').textContent = '0/0';
+      nodeEl.innerHTML = '<div style="padding:24px 6px;color:var(--dim);font-size:12px;text-align:center">该项目暂无演练节点记录</div>';
+      _startNodeScroll(false);
+      return;
+    }
+    var done = nodes.filter(function(n){ return n.state==='done'; }).length;
+    $('nodeBadge').textContent = done+'/'+nodes.length;
+    nodeEl.innerHTML = nodes.map(function(n){
+      var isOver = !!n.isOverdue;
+      var st, label;
+      if(n.state==='done'){ st = isOver ? 'overdue' : 'done'; label = isOver ? '超时完成' : '已完成'; }
+      else if(n.state==='doing'){ st = 'doing'; label = '处置中'; }
+      else { st = 'next'; label = '待启动'; }
+      return '<div class="nd '+st+'"><div class="nd-top"><span class="nd-name">'+esc(n.name)+'</span>'
+        + '<span class="nd-state '+st+'">'+label+'</span></div>'
+        + '<div class="nd-meta">'+esc(n.time||'--:--')+' · '+esc(n.role||'—')+'</div></div>';
+    }).join('');
+    nodeEl.scrollTop = Math.min(keepTop, Math.max(0, nodeEl.scrollHeight - nodeEl.clientHeight));
+    _startNodeScroll();
+  }
+
+  /* ---------- 处置链路（DAG 分层布局 + SVG 贝塞尔连线） ----------
+   * 参照剧本编排的可视化流程：按依赖拓扑深度分层，同层节点水平排列，
+   * 多前置/并行节点通过贝塞尔曲线正确表达，动态计算画布尺寸。
+   */
+  function renderChain(){
+    var wrap = $('chainWrap');
+    var nodes = (DATA.chainNodes || DATA.seqFlow || []).slice();
+    if(!nodes.length){
+      wrap.innerHTML = '<div style="padding:24px;text-align:center;color:var(--dim);font-size:13px">暂无处置链路记录</div>';
+      return;
+    }
+    // 减去wrap自身padding得到SVG可用内容区尺寸
+    var cs = getComputedStyle(wrap);
+    var pl = parseFloat(cs.paddingLeft) || 0, pr = parseFloat(cs.paddingRight) || 0;
+    var pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
+    var W = Math.max(300, wrap.clientWidth - pl - pr);
+    var H = Math.max(120, wrap.clientHeight - pt - pb);
+
+    // ---- 1. 构建 DAG 索引 ----
+    var nodeById = {};
+    nodes.forEach(function(n){ nodeById[String(n.id)] = n; });
+    var ids = nodes.map(function(n){ return String(n.id); });
+
+    // 过滤 deps 中有效且属于当前剧本的节点
+    nodes.forEach(function(n){
+      var ds = Array.isArray(n.deps) ? n.deps : [];
+      n._deps = ds.map(String).filter(function(d){ return !!nodeById[d] && d !== String(n.id); });
+    });
+
+    // ---- 2. 拓扑排序 + 计算深度 ----
+    var depth = {};
+    var indeg = {}, childs = {};
+    ids.forEach(function(id){ indeg[id] = 0; childs[id] = []; });
+    ids.forEach(function(id){
+      nodeById[id]._deps.forEach(function(d){
+        indeg[id]++; childs[d].push(id);
+      });
+    });
+    // Kahn 拓扑排序
+    var q = ids.filter(function(id){ return indeg[id] === 0; });
+    var topoOrder = [];
+    var guard = 0;
+    while(q.length && guard++ < 20000){
+      var id = q.shift(); topoOrder.push(id);
+      childs[id].forEach(function(c){ indeg[c]--; if(indeg[c] === 0) q.push(c); });
+    }
+    // 若有环（理论上剧本不会出现），fallback 按 seq
+    if(topoOrder.length !== ids.length) topoOrder = ids.slice().sort(function(a,b){ return (nodeById[a].seq||0) - (nodeById[b].seq||0); });
+
+    // 计算每个节点的 depth（层）
+    topoOrder.forEach(function(id){
+      var n = nodeById[id];
+      if(!n._deps.length){ depth[id] = 0; }
+      else {
+        depth[id] = n._deps.reduce(function(m, d){ return Math.max(m, (depth[d]||0)+1); }, 0);
+      }
+    });
+
+    // ---- 3. 分层 ----
+    var layers = [];
+    topoOrder.forEach(function(id){
+      var d = depth[id];
+      layers[d] = layers[d] || [];
+      layers[d].push(id);
+    });
+    // 填充空层（保险）
+    var maxD = layers.length - 1;
+    for(var li = 0; li <= maxD; li++) layers[li] = layers[li] || [];
+
+    // ---- 4. 节点坐标计算 ----
+    var nodeR = 13;
+    var padLeft = 70, padRight = 70;
+    var padTop = 28, padBot = 16;
+    var nodeNameMax = 8;
+
+    var colCount = layers.length;
+    var availW = Math.max(0, W - padLeft - padRight);
+    var colGap = colCount > 1 ? availW / (colCount - 1) : 0;
+    colGap = Math.max(42, colGap);
+
+    var positions = {};
+    var maxNodesInCol = Math.max.apply(null, layers.map(function(col){ return col.length; }));
+    var availH = Math.max(40, H - padTop - padBot);
+    var rowH = availH / Math.max(1, maxNodesInCol);
+    rowH = Math.max(nodeR*2 + 18, rowH);  // 仅设下限，让rowH自动拉伸填满可用高度
+    var svgH = H;  // SVG高度严格等于容器，不留底部空白
+
+    layers.forEach(function(colIds, ci){
+      var cx = colCount > 1 ? padLeft + ci * colGap : W/2;
+      var startY = padTop + (maxNodesInCol - colIds.length) * rowH / 2; // 垂直居中
+      colIds.forEach(function(id, ri){
+        positions[id] = {
+          x: cx,
+          y: startY + ri * rowH + nodeR + 20,
+          col: ci,
+          row: ri
+        };
+      });
+    });
+
+    // ---- 5. 构造 SVG ----
+    var svgW = W;
+    var out = [];
+    var edges = []; // { fromId, toId, pathStr }
+    nodes.forEach(function(n){
+      n._deps.forEach(function(d){
+        var from = positions[d], to = positions[String(n.id)];
+        if(!from || !to) return;
+        var ax = from.x, ay = from.y;
+        var bx = to.x, by = to.y;
+        var dx = Math.max(30, Math.abs(bx - ax) * 0.4);
+        var ps = 'M'+ax+','+ay+' C'+(ax+dx)+','+ay+' '+(bx-dx)+','+by+' '+bx+','+by;
+        edges.push({ fromId: d, toId: String(n.id), pathStr: ps });
+      });
+    });
+
+    out.push('<svg width="'+svgW+'" height="'+svgH+'" xmlns="http://www.w3.org/2000/svg" class="dag-svg">');
+    // defs：先定义所有 path 和渐变
+    out.push('<defs>');
+    edges.forEach(function(e, ei){
+      out.push('<path id="edge_'+ei+'" d="'+e.pathStr+'" fill="none" stroke="none"/>');
+    });
+    edges.forEach(function(e, ei){
+      out.push('<linearGradient id="grad_'+ei+'" x1="0" y1="0" x2="1" y2="0">');
+      out.push('<stop offset="0" stop-color="rgba(34,211,238,.35)"/>');
+      out.push('<stop offset="1" stop-color="rgba(34,211,238,.06)"/>');
+      out.push('</linearGradient>');
+    });
+    out.push('</defs>');
+
+    // ---- 5a. 绘制边 ----
+    edges.forEach(function(e, ei){
+      var isParallel = nodeById[e.toId] && nodeById[e.toId].type === 'parallel';
+      // 背景线
+      out.push('<path d="'+e.pathStr+'" fill="none" stroke="url(#grad_'+ei+')" stroke-width="1.5" class="dag-edge dag-edge-bg"/>');
+      // 前景虚线
+      if(isParallel){
+        out.push('<path d="'+e.pathStr+'" fill="none" stroke="#fbbf24" stroke-width="1" stroke-dasharray="5 4" class="dag-edge dag-edge-fg"/>');
+      } else {
+        out.push('<path d="'+e.pathStr+'" fill="none" stroke="#22d3ee88" stroke-width="1" stroke-dasharray="4 5" class="dag-edge dag-edge-fg"/>');
+      }
+      // 滚动点
+      out.push('<circle r="2.2" fill="'+(isParallel?'#fde68a':'#7fe3ff')+'" opacity=".9">');
+      out.push('<animateMotion dur="5.6s" begin="'+(ei*0.3)%3+'s" repeatCount="indefinite" rotate="auto">');
+      out.push('<mpath href="#edge_'+ei+'"/>');
+      out.push('</animateMotion></circle>');
+    });
+
+    // ---- 5b. 绘制节点 ----
+    topoOrder.forEach(function(id, idx){
+      var n = nodeById[id];
+      var p = positions[id];
+      if(!p) return;
+      var st = n.state === 'done' ? 'done' : n.state === 'doing' ? 'doing' : 'pending';
+      var overdue = !!n.isOverdue;
+      var color = overdue ? '#f43f5e' : (st === 'done' ? '#22c55e' : st === 'doing' ? '#fbbf24' : '#3d6d92');
+      var core = overdue ? '#f43f5e' : (st === 'pending' ? '#0f2c48' : color);
+      var fullName = esc(n.name);
+      var displayTitle = (n.shortTitle && n.shortTitle.trim()) ? n.shortTitle.trim() : n.name;
+      var shortName = displayTitle.length > nodeNameMax ? displayTitle.slice(0, nodeNameMax-1) + '…' : displayTitle;
+      var isParallel = n.type === 'parallel';
+
+      out.push('<g class="dag-node '+st+(overdue?' overdue':'')+(isParallel?' parallel':'')+'" title="'+fullName+(n.timeout?' (时限 '+n.timeout+' 分钟)':'')+'">');
+      // 背景光圈动画
+      if(st === 'doing'){
+        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR+2)+'" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity=".6">');
+        out.push('<animate attributeName="r" values="'+(nodeR+2)+';'+(nodeR+10)+';'+(nodeR+2)+'" dur="2s" repeatCount="indefinite"/>');
+        out.push('<animate attributeName="opacity" values=".6;0;.6" dur="2s" repeatCount="indefinite"/>');
+        out.push('</circle>');
+      } else if(st === 'done' && !overdue){
+        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR+2)+'" fill="none" stroke="#22c55e" stroke-width="1" opacity=".4">');
+        out.push('<animate attributeName="r" values="'+(nodeR+2)+';'+(nodeR+12)+';'+(nodeR+2)+'" dur="3.2s" repeatCount="indefinite"/>');
+        out.push('<animate attributeName="opacity" values=".5;0;.5" dur="3.2s" repeatCount="indefinite"/>');
+        out.push('</circle>');
+      } else if(overdue){
+        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR+3)+'" fill="none" stroke="#f43f5e" stroke-width="1.2" opacity=".45">');
+        out.push('<animate attributeName="r" values="'+(nodeR+2)+';'+(nodeR+10)+';'+(nodeR+2)+'" dur="2.4s" repeatCount="indefinite"/>');
+        out.push('<animate attributeName="opacity" values=".5;0;.5" dur="2.4s" repeatCount="indefinite"/>');
+        out.push('</circle>');
+      }
+      // 节点主体
+      var strokeW = isParallel ? 2.5 : 2;
+      if(isParallel){
+        out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR+2)+'" fill="none" stroke="#fbbf24" stroke-width="1" stroke-dasharray="3 3" opacity=".5"/>');
+      }
+      out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+nodeR+'" fill="#06182b" stroke="'+(isParallel?'#fbbf24':color)+'" stroke-width="'+strokeW+'"'+(st === 'pending' && !overdue ? ' opacity=".55"' : '')+'/>');
+      out.push('<circle cx="'+p.x+'" cy="'+p.y+'" r="'+(nodeR*0.34)+'" fill="'+core+'"/>');
+      var innerLabel = overdue ? '!' : String(idx+1);
+      var innerFontSize = overdue ? (nodeR*0.75) : (nodeR*0.7);
+      out.push('<text x="'+p.x+'" y="'+(p.y+nodeR*0.3)+'" text-anchor="middle" font-size="'+innerFontSize+'" font-weight="700" fill="'+color+'" opacity="'+(st==='pending'?'0.55':'1')+'">'+innerLabel+'</text>');
+      // 节点名称（显示在节点上方）
+      out.push('<text x="'+p.x+'" y="'+(p.y-nodeR-12)+'" text-anchor="middle" fill="'+(overdue?'#ff9fb3':(st==='pending'?'#5d7a92':'#d7f2ff'))+'" font-size="10.5" font-weight="600" class="dag-node-label dag-name" data-full="'+fullName+'">'+esc(shortName)+'</text>');
+      // 底部信息（时间/角色/超时）
+      var bottomTxt = '';
+      if(overdue){
+        bottomTxt = '⚠ 超时'+(n.timeout?n.timeout+'\'':'');
+      } else if(st === 'pending'){
+        bottomTxt = esc(n.role || '');
+      } else {
+        bottomTxt = esc((n.time||'') + ' · ' + (n.role||''));
+      }
+      out.push('<text x="'+p.x+'" y="'+(p.y+nodeR+16)+'" text-anchor="middle" fill="'+(overdue?'#ff8496':(st==='pending'?'#3e5f7a':'#5f8fb8'))+'" font-size="9">'+bottomTxt+'</text>');
+      out.push('</g>');
+    });
+
+    out.push('</svg>');
+    wrap.innerHTML = out.join('');
+
+    // hover tip 绑定
+    wrap.querySelectorAll('svg').forEach(function(svg){
+      if(svg._dagBound) return;
+      svg._dagBound = true;
+      svg.addEventListener('mousemove', function(e){
+        var t = e.target.closest('g.dag-node');
+        if(!t){ $('chainTip') && ($('chainTip').style.display='none'); return; }
+        var nameEl = t.querySelector('.dag-name');
+        if(!nameEl) return;
+        var tip = $('chainTip');
+        if(!tip){
+          tip = document.createElement('div');
+          tip.id = 'chainTip';
+          tip.style.cssText = 'position:fixed;pointer-events:none;z-index:999;padding:5px 10px;background:rgba(8,20,36,.96);border:1px solid #22d3ee55;border-radius:4px;color:#9fe9ff;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.55);max-width:280px;white-space:normal';
+          document.body.appendChild(tip);
+        }
+        tip.textContent = nameEl.getAttribute('data-full') || nameEl.textContent;
+        tip.style.display = 'block';
+        tip.style.left = (e.clientX + 12) + 'px';
+        tip.style.top = (e.clientY + 12) + 'px';
+      });
+      svg.addEventListener('mouseleave', function(){ $('chainTip') && ($('chainTip').style.display='none'); });
+    });
+  }
+
+  /* ---------- 演练评分（仅分数 + 等级） ---------- */
+  function renderScore(){
+    // 评分已合并到 KPI 行，由 renderKpis 负责渲染
+  }
+
+  /* ---------- 角色处置 ---------- */
+  function renderRoles(){
+    var roles = DATA.roles || [];
+    var map = {};
+    roles.forEach(function(r){ map[r.id] = r; });
+
+    // 优先使用后端统一聚合的 roleAgg（已合并 tasks + drill_steps，实战版也能显示）
+    var agg = DATA.roleAgg;
+    if(!agg || !Object.keys(agg).length){
+      // Fallback: 从 tasks 聚合（基础版兼容）
+      agg = {};
+      var tasks = DATA.tasks || [];
+      tasks.forEach(function(t){
+        var a = agg[t.role] = agg[t.role] || { total:0, done:0, overtime:0 };
+        a.total++;
+        if(t.status==='已完成') a.done++;
+        if(t.status==='超时') a.overtime++;
+      });
+    }
+
+    var keys = Object.keys(agg);
+    if(!keys.length){
+      $('roleList').innerHTML = '<div style="padding:24px 0;color:var(--dim);font-size:12px;text-align:center">暂无角色处置记录</div>';
+      return;
+    }
+    keys.sort(function(a,b){ return agg[b].total - agg[a].total; });
+    $('roleList').innerHTML = keys.map(function(k){
+      var r = map[k] || { short:k, name:k, color:'#3b82f6' };
+      var a = agg[k];
+      var pct = a.total ? Math.round(a.done/a.total*100) : 0;
+      var od = a.overtime || 0;
+      return '<div class="rl"><div class="rl-top"><span class="nm"><i style="background:'+r.color+';color:'+r.color+'"></i>'+esc(r.name)+'</span>'
+        + '<span class="cnt">'+a.done+'/'+a.total+(od ? ' <b style="color:#ff8496">超时'+od+'</b>' : '')+'</span></div>'
+        + '<div class="rl-bar"><span style="width:'+pct+'%;background:'+r.color+';box-shadow:0 0 8px '+r.color+'88"></span></div></div>';
+    }).join('');
+    _startMarquee('roleList', 1);
+  }
+
+  /* ---------- 业务影响 ---------- */
+  /* 按面板实际可用高度自适应：先按 scale=1 量出条目总高，再求铺满所需的缩放比；
+     触顶（字号已够大）时用条目间距匀开剩余空间。条目多时收敛到 0.85 并内部滚动。 */
+  function fitImpact(){
+    var list = $('impactList'); if(!list) return;
+    var items = list.querySelectorAll('.if');
+    if(!items.length){
+      list.style.removeProperty('--if-scale');
+      list.style.removeProperty('--if-gap');
+      return;
+    }
+    var avail = list.clientHeight;
+    if(avail <= 0) return;
+    var PAD = 20; /* 容器上下 padding 10+10，不随缩放变化 */
+    list.style.setProperty('--if-scale', '1');
+    list.style.setProperty('--if-gap', '0px');
+    /* 用 offsetTop 差值量内容高：scrollHeight 会被容器高度撑满，量不出真实内容；
+       offsetTop 不受 body 缩放影响，1366/1920 口径一致 */
+    var first = items[0], last = items[items.length - 1];
+    var contentH = (last.offsetTop + last.offsetHeight) - first.offsetTop;
+    if(contentH <= 0) return;
+    var s = (avail - PAD - 6) / contentH; /* 留 6px 余量：offsetTop 取整会累积误差，避免出 1px 滚动 */
+    /* 横向约束：名称 + 状态标签在缩放后必须整行放得下，避免文字放大后被截断 */
+    var maxW = list.clientWidth - 28; /* 左右 padding 14+14 */
+    var needW = 0;
+    for(var i=0;i<items.length;i++){
+      var nm = items[i].querySelector('.nm'), st = items[i].querySelector('.st');
+      if(!nm || !st) continue;
+      var w = nm.scrollWidth + 8 + st.offsetWidth; /* 8 = .if-top 的 gap */
+      if(w > needW) needW = w;
+    }
+    if(needW > 0 && maxW > 0) s = Math.min(s, maxW / needW);
+    s = Math.max(0.8, Math.min(2.2, s));
+    list.style.setProperty('--if-scale', s.toFixed(3));
+    var free = (avail - PAD) - contentH * s;
+    var n = items.length;
+    var gap = n > 1 ? Math.min(72, Math.max(0, free / (n - 1))) : 0;
+    list.style.setProperty('--if-gap', gap.toFixed(1) + 'px');
+    /* offsetTop 取整会累积误差，按真实 scrollHeight 做微调，确保不出 1~2px 滚动条 */
+    for(var k=0; k<16 && list.scrollHeight > list.clientHeight; k++){
+      s = Math.max(0.8, s - 0.01);
+      list.style.setProperty('--if-scale', s.toFixed(3));
+      list.style.setProperty('--if-gap', '0px');
+    }
+  }
+  function renderImpact(){
+    var imp = DATA.impact || [];
+    if(!imp.length){
+      $('impactList').innerHTML = '<div style="padding:24px 0;color:var(--dim);font-size:12px;text-align:center">暂无业务系统状态</div>';
+      return;
+    }
+    $('impactList').innerHTML = imp.map(function(i){
+      var c = i.pct>=100 ? 'ok' : i.pct>=60 ? 'wn' : 'er';
+      var color = c==='ok' ? '#22c55e' : c==='wn' ? '#fbbf24' : '#f43f5e';
+      return '<div class="if '+c+'"><div class="if-top"><span class="nm">'+esc(i.sys)+'</span>'
+        + '<span class="st">'+esc(i.state)+' · '+i.pct+'%</span></div>'
+        + '<div class="if-bar"><span style="width:'+i.pct+'%;background:'+color+';box-shadow:0 0 8px '+color+'88"></span></div></div>';
+    }).join('');
+    fitImpact();
+  }
+
+  /* ---------- 无缝向上滚动（大屏展示用） ----------
+   * 旧实现直接 cloneNode 整个 .log-list/.msg-list/.role-list（含容器自身 padding），
+   * 拼接处会多出一段空白（容器 padding-bottom + 克隆 padding-top，角色列表还有末条 margin-bottom），
+   * 且回卷阈值取 clone.scrollHeight，与"克隆块真实起始位置"不一致 → 末尾出现空行/错位。
+   * 新实现：只把条目克隆进无 padding 的包装层；清零容器 padding-bottom 与末条 margin-bottom；
+   * 回卷阈值 = 克隆块在滚动内容中的真实偏移（每次渲染重新测量），拼接处首尾紧贴、无空白。 */
+  var _marqueeTimers = {};
+  var _marqueePos = {};
+  function _startMarquee(id, speed){
+    var el = document.getElementById(id);
+    if(!el) return;
+    // 清旧定时器和旧克隆
+    if(_marqueeTimers[id]){ clearInterval(_marqueeTimers[id]); delete _marqueeTimers[id]; }
+    var old = el.querySelectorAll('[data-mq-clone]');
+    for(var i=0;i<old.length;i++) old[i].parentNode.removeChild(old[i]);
+    var keep = _marqueePos[id] || 0;
+    el.style.paddingBottom = '';
+    el.style.overflowY = '';
+
+    // 内容不够长 → 不滚动，恢复滚动条
+    var needH = el.clientHeight + 4;
+    if(el.scrollHeight <= needH){
+      _marqueePos[id] = 0;
+      el.scrollTop = 0;
+      return;
+    }
+
+    // 拼接处不产生空白：容器底部内边距与末条外边距不参与滚动内容
+    el.style.paddingBottom = '0px';
+    var padTop = parseInt(getComputedStyle(el).paddingTop, 10) || 0;
+    var kids = [];
+    for(var k=0;k<el.children.length;k++){ if(!el.children[k].hasAttribute('data-mq-clone')) kids.push(el.children[k]); }
+    if(kids.length){
+      var last = kids[kids.length-1];
+      if(last) last.style.marginBottom = '0px';
+    }
+
+    // 条目克隆到无内边距包装层（不是克隆整个滚动容器）
+    var clone = document.createElement('div');
+    clone.setAttribute('data-mq-clone', id);
+    clone.style.padding = '0';
+    clone.style.margin = '0';
+    for(var j=0;j<kids.length;j++) clone.appendChild(kids[j].cloneNode(true));
+    el.appendChild(clone);
+    el.style.overflowY = 'hidden';
+
+    // 回卷阈值 = 克隆块相对滚动内容顶部的真实偏移（= 原始内容高度）
+    var firstBlockH = clone.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    if(!isFinite(firstBlockH) || firstBlockH <= 0) firstBlockH = clone.offsetTop;
+    if(firstBlockH <= 0) return;
+    // 顶部内边距不参与循环：滚动窗口从首条顶部开始（回卷时同样对齐到该位置），避免回顶跳 6~10px
+    var pos = keep ? (keep % firstBlockH) : 0;
+    el.scrollTop = padTop + pos;
+
+    var sp = speed || 1;
+    _marqueeTimers[id] = setInterval(function(){
+      el.scrollTop += sp;
+      if(el.scrollTop >= firstBlockH){
+        el.scrollTop = padTop + Math.max(0, el.scrollTop - firstBlockH); // 无缝跳回（下方紧接内容相同的克隆块）
+      }
+      _marqueePos[id] = el.scrollTop;
+    }, 40);
+  }
+  function _stopMarquee(id){
+    if(_marqueeTimers[id]){ clearInterval(_marqueeTimers[id]); delete _marqueeTimers[id]; }
+  }
+
+  /* ---------- 节点列表自动滚动（隐藏滚动条，仅溢出时缓慢下滚） ----------
+   * 与上面的克隆式跑马灯不同：这里保留原生滚动容器，只由脚本改 scrollTop。
+   * 尺寸（scrollHeight/clientHeight）每次渲染只量一次并缓存，逐帧只做累加，
+   * 避免在定时器里反复读 scrollHeight 触发强制回流造成抖动；
+   * 每次启动先取消上一轮 rAF/定时器，轮询刷新不会叠加多个循环。 */
+  var nodeScroll = { raf:0, timer:0, paused:false, running:false, el:null, max:0, y:0,
+                     phase:'down', acc:0, from:0, dur:1.2, speed:30, last:null };
+  function _nodeScrollCancel(){
+    var s = nodeScroll;
+    if(s.raf){ cancelAnimationFrame(s.raf); s.raf = 0; }
+    if(s.timer){ clearTimeout(s.timer); s.timer = 0; }
+    s.last = null;
+  }
+  function _startNodeScroll(resetPos){
+    var s = nodeScroll;
+    _nodeScrollCancel();
+    var el = $('nodeList');
+    if(!el){ s.running = false; return; }
+    s.el = el;
+    /* zoom 会放大 CSS 像素：4K 下按倍率折算，保证视觉速度仍约 30px/s */
+    s.speed = 30 / (parseFloat(document.body.style.zoom) || 1);
+    s.max = Math.max(0, el.scrollHeight - el.clientHeight);
+    if(s.max <= 4){
+      /* 内容未超出：不滚动、不留空转 */
+      s.running = false; s.phase = 'down'; s.acc = 0; s.y = 0;
+      el.scrollTop = 0;
+      return;
+    }
+    s.y = resetPos === false ? 0 : Math.min(Math.max(0, el.scrollTop), s.max);
+    el.scrollTop = s.y;
+    s.running = true; s.phase = 'down'; s.acc = 0; s.last = null;
+    s.raf = requestAnimationFrame(_nodeScrollTick);
+  }
+  function _nodeScrollTick(now){
+    var s = nodeScroll, el = s.el;
+    if(!s.running || !el) return;
+    if(s.last == null) s.last = now;
+    /* 正常掉帧按真实间隔折算，保证低帧率（4K/无 GPU）下速度也准确；
+       切后台回来第一帧的间隔可能是数秒，整段丢弃，避免一帧跳到底 */
+    var raw = (now - s.last) / 1000;
+    var dt = raw > 1 ? 0 : raw;
+    s.last = now;
+    if(!s.paused){
+      if(s.phase === 'down'){
+        s.y = Math.min(s.max, s.y + s.speed * dt);
+        el.scrollTop = s.y;
+        if(s.y >= s.max - 0.5){
+          s.phase = 'hold'; s.acc = 0; /* 到底停顿 2.5s 再回顶部 */
+          s.timer = setTimeout(function(){
+            s.timer = 0;
+            if(!s.running) return;
+            s.phase = 'back'; s.acc = 0; s.from = s.y;
+          }, 2500);
+        }
+      }else if(s.phase === 'back'){
+        s.acc += dt;
+        var p = Math.min(1, s.acc / s.dur);
+        var e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+        s.y = s.from * (1 - e);
+        el.scrollTop = s.y;
+        if(p >= 1){ s.y = 0; el.scrollTop = 0; s.phase = 'down'; s.acc = 0; }
+      }
+    }
+    s.raf = requestAnimationFrame(_nodeScrollTick);
+  }
+  function _nodeScrollSuspend(){
+    var s = nodeScroll;
+    if(s.raf){ cancelAnimationFrame(s.raf); s.raf = 0; }
+    if(s.timer){ clearTimeout(s.timer); s.timer = 0; s.phase = 'down'; s.acc = 0; }
+    s.last = null;
+  }
+  function _nodeScrollResume(){
+    var s = nodeScroll;
+    if(!s.running) return;
+    _nodeScrollCancel();
+    s.raf = requestAnimationFrame(_nodeScrollTick);
+  }
+  /* 鼠标悬停面板（标题/列表/底部说明）暂停，移开继续 */
+  (function(){
+    var list = $('nodeList');
+    var wrap = list ? list.parentNode : null;
+    if(!wrap) return;
+    wrap.addEventListener('mouseenter', function(){ nodeScroll.paused = true; });
+    wrap.addEventListener('mouseleave', function(){ nodeScroll.paused = false; nodeScroll.last = null; });
+  })();
+  /* 视口变化（含 4K zoom 重排）后重新测量是否需要滚动 */
+  var _nodeScrollRz = null;
+  window.addEventListener('resize', function(){
+    if(_nodeScrollRz) clearTimeout(_nodeScrollRz);
+    _nodeScrollRz = setTimeout(function(){ _nodeScrollRz = null; _startNodeScroll(); }, 200);
+  });
+
+  /* ---------- 实时操作流 ---------- */
+  /* 时间归一：timeline 存 "HH:MM"，notifs 存 "YYYY-MM-DD HH:MM"，统一取 HH:MM 排序/展示 */
+  function hhmmOf(v){
+    var s = String(v==null ? '' : v);
+    var m = s.match(/(\d{2}):(\d{2})/);
+    return m ? (m[1]+':'+m[2]) : s;
+  }
+  function renderLogs(){
+    var rows = [];
+    /* 站内消息：与语音播报同一数据源（/api/screen/notifs 的 desc），正文原样，逐条可核对。
+       只保留时间/来源角色/正文，不再显示「站内消息」来源板块标签；
+       已读仍展示（置灰）但不播报；跨项目与全局公告由接口过滤，不进本项目操作流。 */
+    if(notifPid === projId){
+      (notifList||[]).forEach(function(n){
+        var txt = String(n.desc==null ? '' : n.desc);
+        if(!txt) return; /* 正文为空不会被播报，也不占操作流 */
+        rows.push({ time: hhmmOf(n.time), actor: n.source||'', action: '',
+          detail: txt, level: n.level||'', nf: true, read: !!n.read });
+      });
+    }
+    /* 演练步骤：保持原有相对顺序（先反转成新→旧，再稳定排序） */
+    (DATA.timeline||[]).slice().reverse().forEach(function(t){
+      rows.push({ time: hhmmOf(t.t), actor: t.actor||'', action: t.action||'', detail: t.detail||'',
+        level: t.level||'', nf: false, read: false });
+    });
+    rows.sort(function(a,b){ if(a.time === b.time) return 0; return a.time < b.time ? 1 : -1; });
+    rows = rows.slice(0, 40); /* 新消息在最前；超出上限只挤掉最旧的 */
+    if(!rows.length){
+      $('logList').innerHTML = '<div style="padding:18px 0;color:var(--dim);font-size:12px;text-align:center">暂无操作记录</div>';
+      return;
+    }
+    $('logList').innerHTML = rows.map(function(t){
+      var cls = 'lg' + (t.nf ? ' nf' : '') + (t.nf && t.read ? ' rd' : '') + (!t.nf && t.level==='P0' ? ' p0' : '');
+      /* 站内消息不渲染来源板块列，避免出现空的「站内消息」列占位 */
+      var act = t.nf ? '' : '<span class="x">'+esc(t.action||'')+'</span>';
+      return '<div class="'+cls+'"><span class="t">'+esc(t.time)+'</span>'
+        + '<span class="a">'+esc(t.actor||'')+'</span>'
+        + act
+        + '<span class="d">'+esc(t.detail||'')+'</span></div>';
+    }).join('');
+    _startMarquee('logList', 1);
+  }
+
+  /* ---------- 告警消息 ---------- */
+  function renderMsgs(){
+    var rows = (DATA.messages||[]).slice();
+    // 扣分原因作为"评分告警"插入消息列表顶部
+    var sc = DATA.score;
+    if(sc && sc.deductions && sc.deductions.length){
+      sc.deductions.forEach(function(d){
+        rows.push({
+          time: '', level: 'P1',
+          source: '演练评分',
+          text: '扣分 -'+Math.abs(d.point||0)+'分 · '+d.type+' · '+d.title
+        });
+      });
+    }
+    rows = rows.reverse().slice(0, 20);
+    if(!rows.length){
+      $('msgList').innerHTML = '<div style="padding:18px 0;color:var(--dim);font-size:12px;text-align:center">暂无告警消息</div>';
+      return;
+    }
+    $('msgList').innerHTML = rows.map(function(m){
+      var q = m.level==='P0' ? { c:'#f43f5e', b:'rgba(244,63,94,.12)' }
+        : m.level==='P1' ? { c:'#fbbf24', b:'rgba(251,191,36,.12)' }
+        : { c:'#3b82f6', b:'rgba(59,130,246,.12)' };
+      return '<div class="msg"><span class="lt" style="color:'+q.c+';background:'+q.b+';border:1px solid '+q.c+'55">'+esc(m.level||'P2')+'</span>'
+        + '<span class="mt">'+esc(m.time||'')+'</span>'
+        + '<span class="tx">'+esc((m.source?('['+m.source+'] '):'')+(m.text||''))+'</span></div>';
+    }).join('');
+    _startMarquee('msgList', 1);
+  }
+
+  /* ---------- 顶部操作 ---------- */
+  $('btnFull').onclick = function(){
+    if(document.fullscreenElement){ document.exitFullscreen(); }
+    else if(document.documentElement.requestFullscreen){ document.documentElement.requestFullscreen(); }
+  };
+  /* 切窗口/切后台回到大屏：立即补一次数据与消息。
+     浏览器会节流后台定时器，若不补一次，回到前台后画面和播报都会滞后。
+     后台时 rAF 会被浏览器挂起，这里显式暂停/恢复节点自动滚动，避免回来卡住。 */
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'hidden'){ _nodeScrollSuspend(); return; }
+    _nodeScrollResume();
+    if(!DATA) return;
+    refresh(); pollNotifs();
+  });
+  window.addEventListener('focus', function(){
+    _nodeScrollResume();
+    if(!DATA) return;
+    refresh(); pollNotifs();
+  });
+  /* bfcache 恢复（返回键/切回标签）时同样恢复自动滚动 */
+  window.addEventListener('pageshow', function(){ _nodeScrollResume(); });
+  load();
+})();
+</script>
+</body>
+</html>

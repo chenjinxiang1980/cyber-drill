@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>预案知识库 · 示例医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<link rel="stylesheet" href="styles.css?v=20261104b">
+</head>
+<body data-page="knowledge">
+<script src="system.js"></script>
+<script src="app.js"></script>
+<script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+
+  var docs = MOCK.KNOWLEDGE;
+  var cats = ['全部'];
+  /* 知识库维护权限：平台管理员、院应急指挥部、信息科负责人 */
+  var canEdit = ['platformadmin','commander','itlead'].indexOf(role.id)>=0;
+  var curCat = '全部', kw = '';
+
+  function refreshCats(){
+    cats = ['全部'];
+    docs.forEach(function(d){ if(cats.indexOf(d.cat)<0) cats.push(d.cat); });
+    if(cats.indexOf(curCat)<0) curCat = '全部';
+  }
+  refreshCats();
+
+  /* 页内局部图标helper：表格链接/section-title处无svg尺寸规则 */
+  function ic(n,s){ return '<svg viewBox="0 0 24 24" style="width:'+s+'px;height:'+s+'px;flex:none;vertical-align:-2px">'+(App.ICONS[n]||App.ICONS.file)+'</svg>'; }
+
+  /* 文档结构化正文（条目化模拟，全角色可查） */
+  var CONTENT = {
+    KB1: { ver:'2026版 · v3.2', scope:'全院各科室、各信息系统运维班组', steps:[
+      '事件分级：依据影响范围与业务中断时长，划分为一般/较大/重大/特别重大四级',
+      '应急组织：院应急指挥部统筹，信息科技术处置，医务部业务兜底，院办对外口径',
+      '监测报告：值班员接收告警→10分钟内核实→逐级上报信息科负责人',
+      '响应启动：指挥部研判后批准启动对应等级响应，各科室按预案执行',
+      '处置与兜底：断网隔离、系统停机、纸质流程兜底同步展开',
+      '恢复与复盘：业务恢复验证后提交确认单，进入时序回放与评估' ] },
+    KB2: { ver:'2026版 · v1.4', scope:'信息科网络安全组、系统运维组、临床相关科室', steps:[
+      '感染终端立即断网隔离，保留现场，禁止重启与杀毒（先取证）',
+      '截图取证并提取勒索信文本摘要、样本哈希（演练模拟，不接触真实恶意样本）',
+      '核查HIS/EMR/LIS数据库服务器是否被波及，确认扩散边界',
+      '校验最近存储快照与备份有效性，评估可恢复时间点',
+      '感染终端格式化重装，业务系统按优先级分批恢复',
+      '按事件等级填报《网络安全事件上报表》，经指挥部审批后上报' ] },
+    KB3: { ver:'2026版 · v2.0', scope:'信息科、院应急指挥部、对外报送联络人', steps:[
+      '信息科核实事件等级（对照《网络安全事件应急预案》分级标准）',
+      '填写《网络安全事件上报表》：事发单位/事件类型/等级/影响范围/已采取措施',
+      '院应急指挥部审批报送口径与材料',
+      '报送市卫生健康局值班室（重大事件2小时内）',
+      '视情况同步报送市委网信办、市公安局网安大队',
+      '记录接收回执与督办反馈，归档至取证模块' ] },
+    KB4: { ver:'2026版 · v1.1', scope:'门诊/住院收费窗口、药房、护士站、医务部', steps:[
+      '业务系统中断确认后30分钟内启用纸质流程，由医务部统一宣布',
+      '处方：改用手工纸质处方，药师按手工台账发药',
+      '登记：护士站手工登记治疗、护理与出入转记录',
+      '收费：启动人工收费与手工票据，患者费用事后补录',
+      '窗口张贴经审批的公告口径，做好患者解释与诉求登记',
+      '系统恢复后当日完成补录、票据核对与流程撤销' ] },
+    KB5: { ver:'2026-09更新 · v5.0', scope:'指挥部成员、各科室应急联络员、主管单位联络人', steps:[
+      '院应急指挥部值班电话：0858-3XX0001（虚拟号码）',
+      '信息科值班员/负责人：0858-3XX0002 / 138XXXX0002（虚拟号码）',
+      '网络安全组 / 系统运维组：内线 8021 / 8022（虚拟号码）',
+      '医务部 / 门诊护士长：内线 6601 / 6102（虚拟号码）',
+      '市卫生健康局应急值班室：0858-3XX9001（虚拟号码）',
+      '市委网信办 / 市公安局网安大队：0858-3XX9002 / 0858-3XX9110（虚拟号码）' ] },
+    KB6: { ver:'2026版 · v1.0', scope:'院应急指挥部、信息科、法务/院办', steps:[
+      '固定泄露样本截图与论坛发帖链接快照（演练模拟数据）',
+      '提取涉及样本哈希摘要与虚拟患者字段清单（不含真实患者信息）',
+      '统计泄露数据类型、可能规模与影响范围，形成事件经过说明',
+      '填写《报案登记表》：报案单位/报案人/事件经过/损失情况（演练虚拟）',
+      '向市公安局网安大队报案，索取受理回执与取证指引',
+      '全程留痕归档，配合后续调查与舆情口径管理' ] }
+  };
+  var GENERIC = { ver:'当前有效版', scope:'全院参演角色（全角色可查）', steps:[
+    '总则：编制目的、适用范围与依据',
+    '组织与职责：指挥体系与分工',
+    '处置流程：发现→核实→上报→处置→恢复',
+    '保障措施：通讯、物资与技术支撑' ] };
+
+  /* 后端知识库 content 可能为结构化 JSON（依据正式预案修订的条目化正文） */
+  function parseStructured(d){
+    if(!d || !d.content) return null;
+    var t = String(d.content).trim();
+    if(t.charAt(0) !== '{') return null;
+    try {
+      var o = JSON.parse(t);
+      return (o && o.sections && o.sections.length) ? o : null;
+    } catch(err){ return null; }
+  }
+  function renderStructured(st){
+    return st.sections.map(function(sec){
+      return '<div class="section-title" style="margin-top:14px">'+App.esc(sec.t)+'</div>'
+        + '<div class="card" style="padding:12px 14px">'
+        + (sec.items||[]).map(function(it,i){
+            return '<div style="display:flex;gap:8px;font-size:12.5px;line-height:1.75;color:var(--text2);'+(i===sec.items.length-1?'':'margin-bottom:6px')+'">'
+              + '<span class="mono" style="color:var(--accent);flex:none">'+(i+1)+'.</span><div>'+App.esc(it)+'</div></div>';
+          }).join('')
+        + '</div>';
+    }).join('');
+  }
+
+  /* 内置文档下载：由结构化正文生成 txt 文件（上传文档则下载服务器原件） */
+  function docText(d){
+    var st = parseStructured(d);
+    var c = st || CONTENT[d.id] || GENERIC;
+    var lines = [];
+    lines.push(d.name);
+    lines.push('文档编号：'+d.id+'　分类：'+d.cat+'　版本：'+c.ver);
+    lines.push('更新时间：'+d.updated+'　适用范围：'+c.scope);
+    if(st && st.base) lines.push('依据文件：'+st.base);
+    lines.push('');
+    if(st){
+      st.sections.forEach(function(sec){
+        lines.push(sec.t);
+        (sec.items||[]).forEach(function(it,i){ lines.push('  '+(i+1)+'. '+it); });
+        lines.push('');
+      });
+    } else {
+      c.steps.forEach(function(s,i){ lines.push((i+1)+'. '+s); });
+    }
+    var _b = DRILL.brand() || {};
+    var _unit = _b.unitName || '示例医院';
+    var _sys = _b.systemName || '网络安全应急演练系统';
+    lines.push('—— '+_unit+' '+_sys+'（演练用虚拟文档）');
+    return lines.join('\r\n');
+  }
+  function downloadDoc(d){
+    var blob = new Blob(['\ufeff'+docText(d)], { type:'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = d.id+'-'+d.name+'.txt';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    API.addAudit('下载预案文档：'+d.name);
+    App.toast('已下载「'+d.name+'」','ok');
+  }
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>预案知识库</h1><div class="sub">应急预案 · 处置流程图 · 兜底流程 · 通讯录 · 制度文书 · 全角色可查</div></div>'
+    + '<div class="acts"><input class="input" id="kbSearch" placeholder="搜索文档标题…" style="width:220px">'
+    + (canEdit ? '<button class="btn primary" id="kbUpload">'+App.icon('upload')+'上传文档</button>' : '')
+    + '</div></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>知识库文档为<b>演练用虚拟制度文本</b>（含虚拟号码/虚拟数据），预览与下载行为将记录至审计日志，不涉及真实生产文件。</span></div>'
+    + '<div class="tabs" id="kbTabs"></div>'
+    + '<div class="table-wrap"><table class="table"><thead><tr>'
+    + '<th>编号</th><th>文档名称</th><th>分类</th><th>最近更新</th><th>大小</th><th>页数</th><th>操作</th>'
+    + '</tr></thead><tbody id="kbTbody"></tbody></table></div>';
+
+  document.getElementById('kbSearch').oninput = function(){ kw = this.value.trim(); renderTable(); };
+  var kbUpBtn = document.getElementById('kbUpload');
+  if(kbUpBtn) kbUpBtn.onclick = openUpload;
+
+  function renderTabs(){
+    document.getElementById('kbTabs').innerHTML = cats.map(function(c){
+      var cnt = c==='全部' ? docs.length : docs.filter(function(d){ return d.cat===c; }).length;
+      return '<span class="tab'+(curCat===c?' active':'')+'" data-c="'+c+'">'+c+'<span class="cnt">'+cnt+'</span></span>';
+    }).join('');
+    document.querySelectorAll('#kbTabs .tab').forEach(function(el){
+      el.onclick = function(){ curCat = el.dataset.c; renderTabs(); renderTable(); };
+    });
+  }
+
+  function catIcon(c){
+    return c==='通讯录'?'user':c==='上报流程'?'send':c==='兜底流程'?'hospital':c==='专项预案'?'shield':'knowledge';
+  }
+
+  function visible(){
+    return docs.filter(function(d){
+      if(curCat!=='全部' && d.cat!==curCat) return false;
+      if(kw && d.name.indexOf(kw)<0) return false;
+      return true;
+    });
+  }
+
+  function renderTable(){
+    var list = visible();
+    var tb = document.getElementById('kbTbody');
+    if(!list.length){
+      tb.innerHTML = '<tr><td colspan="7"><div class="empty">'+App.icon('knowledge')+'<div>该分类下暂无文档</div><div class="tiny dim mt2">可切换分类或清空搜索关键词</div></div></td></tr>';
+      return;
+    }
+    tb.innerHTML = list.map(function(d){
+      return '<tr><td class="mono">'+d.id+'</td>'
+        + '<td><span class="t-link" data-id="'+d.id+'">'+ic(catIcon(d.cat),14)+' '+App.esc(d.name)+'</span></td>'
+        + '<td><span class="tag blue">'+App.esc(d.cat)+'</span></td>'
+        + '<td class="small mono">'+d.updated+'</td>'
+        + '<td class="small dim">'+d.size+'</td>'
+        + '<td class="small dim">'+d.pages+'</td>'
+        + '<td><button class="btn sm" data-act="preview" data-id="'+d.id+'">'+App.icon('eye')+'预览</button> '
+        + (canEdit ? '<button class="btn sm primary" data-act="edit" data-id="'+d.id+'">'+App.icon('edit')+'编辑</button> ' : '')
+        + '<button class="btn sm outline" data-act="download" data-id="'+d.id+'">'+App.icon('download')+'下载</button>'
+        + (canEdit ? ' <button class="btn sm danger" data-act="del" data-id="'+d.id+'">删除</button>' : '')
+        + '</td></tr>';
+    }).join('');
+    tb.querySelectorAll('[data-act="preview"], .t-link').forEach(function(el){
+      el.onclick = function(){ openPreview(el.dataset.id); };
+    });
+    tb.querySelectorAll('[data-act="edit"]').forEach(function(el){
+      el.onclick = function(ev){ ev.stopPropagation(); openEdit(el.dataset.id); };
+    });
+    tb.querySelectorAll('[data-act="download"]').forEach(function(el){
+      el.onclick = function(){
+        var d = docs.filter(function(x){ return x.id===el.dataset.id; })[0];
+        if(!d) return;
+        if(d.url){ API.addAudit('下载预案文档：'+d.name); window.open(d.url, '_blank'); App.toast('已开始下载「'+d.name+'」原件','ok'); }
+        else downloadDoc(d);
+      };
+    });
+    tb.querySelectorAll('[data-act="del"]').forEach(function(el){
+      el.onclick = function(ev){ ev.stopPropagation(); delDoc(el.dataset.id); };
+    });
+  }
+
+  /* ---------- 删除文档 ---------- */
+  function delDoc(id){
+    var d = docs.filter(function(x){ return x.id===id; })[0];
+    if(!d) return;
+    App.confirmSim('删除知识库文档 '+d.id+'《'+d.name+'》？上传的原文件将同时被清理，操作不可恢复（演练模拟）。', function(){
+      API.deleteKnowledge(id).then(function(){
+        docs = MOCK.KNOWLEDGE;
+        refreshCats(); renderTabs(); renderTable();
+        App.toast('文档 '+id+' 已删除','ok');
+      }).catch(function(err){ App.toast((err&&err.message)||'删除失败，请稍后重试','err'); });
+    });
+  }
+
+  /* ---------- 上传文档 ---------- */
+  function openUpload(){
+    var options = cats.filter(function(c){ return c!=='全部'; })
+      .map(function(c){ return '<option value="'+App.esc(c)+'">'+App.esc(c)+'</option>'; }).join('');
+    App.modal({ title:'上传知识库文档', wide:false,
+      body:
+        '<div class="sim-banner">'+App.icon('alert')+'<span>仅允许上传<b>演练用虚拟制度文本/预案文档</b>，禁止上传真实恶意程序或含真实患者隐私的材料；单文件 ≤ 20 MB。</span></div>'
+        + '<div class="form-row"><label class="f-label">文档名称<span style="color:var(--err)"> *</span></label><input class="input" id="kbUpName" placeholder="如：2026年勒索病毒专项处置预案（修订版）" maxlength="100"></div>'
+        + '<div class="form-row"><label class="f-label">分类</label><select class="select" id="kbUpCat"><option value="上传文档">上传文档</option>'+options+'</select></div>'
+        + '<div class="form-row"><label class="f-label">文档文件<span style="color:var(--err)"> *</span></label>'
+        + '<input type="file" class="input" id="kbUpFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.png,.jpg,.jpeg,.zip,.rar,.7z"></div>'
+        + '<div class="tiny dim mt2">支持 PDF/Word/Excel/PPT/文本/图片/压缩包；文件名与上传动作将记入审计日志。</div>',
+      foot:'<button class="btn" id="kbUpCancel">取消</button><button class="btn primary" id="kbUpOk">'+App.icon('upload')+'上传</button>',
+      onOpen:function(ov){
+        ov.querySelector('#kbUpCancel').onclick = function(){ ov.close(); };
+        ov.querySelector('#kbUpOk').onclick = function(){
+          var name = ov.querySelector('#kbUpName').value.trim();
+          var cat = ov.querySelector('#kbUpCat').value;
+          var fileEl = ov.querySelector('#kbUpFile');
+          var f = fileEl.files && fileEl.files[0];
+          if(!name){ App.toast('请填写文档名称','err'); return; }
+          if(!f){ App.toast('请选择要上传的文档文件','err'); return; }
+          var btn = this; btn.disabled = true; btn.textContent = '上传中…';
+          var fd = new FormData();
+          fd.append('name', name); fd.append('cat', cat); fd.append('file', f);
+          API.uploadKnowledge(fd).then(function(r){
+            ov.close(); refreshCats(); renderTabs(); renderTable();
+            App.toast('文档「'+r.doc.name+'」已上传（'+r.id+'）','ok');
+          }).catch(function(err){
+            btn.disabled = false; btn.innerHTML = App.icon('upload')+'上传';
+            App.toast((err&&err.message)||'上传失败，请检查文件类型与大小','err');
+          });
+        };
+      } });
+  }
+
+  function openPreview(id){
+    var d = docs.filter(function(x){ return x.id===id; })[0];
+    if(!d) return;
+    var uploaded = !!d.filePath;
+    var st = uploaded ? null : parseStructured(d);
+    var c = st || CONTENT[id] || GENERIC;
+    API.addAudit('预览预案文档：'+d.name);
+
+    var meta = '<div class="kv mb4">'
+      + '<span class="k">文档编号</span><span class="mono">'+d.id+'</span>'
+      + '<span class="k">分类</span><span><span class="tag blue">'+App.esc(d.cat)+'</span></span>'
+      + (uploaded ? '' : '<span class="k">版本号</span><span>'+App.esc(c.ver)+'</span>')
+      + '<span class="k">更新时间</span><span class="mono">'+d.updated+'</span>'
+      + (uploaded ? '' : '<span class="k">适用范围</span><span class="small">'+App.esc(c.scope)+'</span>')
+      + (st && st.base ? '<span class="k">依据文件</span><span class="small">'+App.esc(st.base)+'</span>' : '')
+      + '<span class="k">规格</span><span class="small dim">'+(d.pages||0)+' 页 · '+d.size+'</span>'
+      + (uploaded ? '<span class="k">来源</span><span class="small">自行上传（演练用虚拟文档）</span>' : '')
+      + '</div>';
+
+    var body = uploaded
+      ? meta
+        + '<div class="section-title">'+ic('file',15)+'上传原件</div>'
+        + '<div class="card" style="padding:14px"><div class="flex gap2" style="align-items:center">'
+        + '<span class="tag green">已归档</span><span class="mono small" style="word-break:break-all">'+App.esc(d.name)+'</span></div>'
+        + '<div class="tiny dim mt2">原文件已保存至服务器 uploads 目录，可下载查看；如需在线浏览结构化条款，可在下载后查阅。</div></div>'
+        + '<div class="divider"></div>'
+        + '<div class="flex gap2">'
+        + '<a class="btn primary" id="kbDl" href="'+d.url+'" target="_blank">'+App.icon('download')+'下载原件</a>'
+        + '<button class="btn" id="kbPrint">'+App.icon('file')+'引用至会商（模拟）</button></div>'
+        + '<div class="tiny dim mt3">自行上传文档仅用于演练查阅，正式预案以院内发文为准。</div>'
+      : meta
+        + '<div class="section-title">'+ic('file',15)+(st?'文档正文（依据 2025 版院发正式预案）':'文档正文（条目化模拟）')+'</div>'
+        + (st ? renderStructured(st)
+          : '<div class="timeline">'+c.steps.map(function(s,i){
+              return '<div class="tl-item ok"><span class="tl-dot"></span><div class="tl-title">第'+(i+1)+'条</div><div class="tl-desc">'+App.esc(s)+'</div></div>';
+            }).join('')+'</div>')
+        + '<div class="divider"></div>'
+        + '<div class="flex gap2">'
+        + '<button class="btn primary" id="kbDl">'+App.icon('download')+'下载文档（txt）</button>'
+        + '<button class="btn" id="kbPrint">'+App.icon('file')+'引用至会商（模拟）</button></div>'
+        + '<div class="tiny dim mt3">预览内容为演练虚拟文本，正式预案以院内发文为准。</div>';
+
+    App.drawer({ title:'在线预览 · '+App.esc(d.name), body:body,
+      onOpen:function(ov){
+        var dl = ov.querySelector('#kbDl');
+        if(dl) dl.onclick = function(ev){
+          if(uploaded){ ev.preventDefault(); API.addAudit('下载预案文档：'+d.name); window.open(d.url, '_blank'); return false; }
+          downloadDoc(d);
+        };
+        ov.querySelector('#kbPrint').onclick = function(){
+          API.sendChat('inner', '【演练模拟】引用预案《'+d.name+'》相关条款，请各岗位对照执行。');
+          App.toast('已引用至院内会商组（演练模拟）','ok');
+        };
+      } });
+  }
+
+  /* ---------- 编辑文档（元数据 + 结构化正文） ---------- */
+  /* 深拷贝结构化对象（避免编辑时直接修改 docs 中的原始对象） */
+  function cloneJson(v){
+    try { return JSON.parse(JSON.stringify(v)); } catch(e){ return v; }
+  }
+  function openEdit(id){
+    var d = docs.filter(function(x){ return x.id===id; })[0];
+    if(!d) return;
+    var isUploaded = !!d.filePath;
+    var st = isUploaded ? null : parseStructured(d);
+
+    /* 编辑中状态 */
+    var edit = {
+      name: d.name, cat: d.cat, size: d.size, pages: d.pages || 0,
+      contentMode: 'visual', /* visual=可视化章节编辑, json=JSON原文编辑 */
+      structured: st ? cloneJson(st) : { ver:'', base:'', scope:'', sections:[] },
+      rawContent: st ? JSON.stringify(cloneJson(st), null, 2) : (d.content || ''),
+      isStructured: !!st
+    };
+
+    var catOptions = cats.filter(function(c){ return c!=='全部'; })
+      .map(function(c){ return '<option value="'+App.esc(c)+'"'+(c===d.cat?' selected':'')+'>'+App.esc(c)+'</option>'; }).join('');
+
+    function renderSections(){
+      var secs = edit.structured.sections || [];
+      return secs.map(function(sec, si){
+        var itemsHtml = (sec.items||[]).map(function(it, ii){
+          return '<div class="kb-edit-item" data-si="'+si+'" data-ii="'+ii+'">'
+            + '<textarea class="kb-item-input" rows="2" placeholder="条目内容">'+App.esc(it)+'</textarea>'
+            + '<div class="kb-item-acts">'
+            + '<button class="btn sm outline" data-act="up" title="上移">↑</button>'
+            + '<button class="btn sm outline" data-act="down" title="下移">↓</button>'
+            + '<button class="btn sm danger" data-act="del" title="删除">×</button>'
+            + '</div></div>';
+        }).join('');
+        return '<div class="kb-edit-sec" data-si="'+si+'">'
+          + '<div class="kb-edit-sec-head">'
+          + '<input class="kb-sec-title" placeholder="章节标题，如：一、总则" value="'+App.esc(sec.t||'')+'">'
+          + '<div class="kb-sec-acts">'
+          + '<button class="btn sm outline" data-act="add-item">+ 条目</button>'
+          + '<button class="btn sm outline" data-act="dup">复制章节</button>'
+          + '<button class="btn sm outline" data-act="up-sec">↑</button>'
+          + '<button class="btn sm outline" data-act="down-sec">↓</button>'
+          + '<button class="btn sm danger" data-act="del-sec">删除章节</button>'
+          + '</div></div>'
+          + '<div class="kb-edit-items">'+itemsHtml+'</div>'
+          + '</div>';
+      }).join('');
+    }
+
+    function buildBody(){
+      var metaHtml =
+        '<div class="kb-meta-row">'
+        + '<div class="form-row"><label class="f-label">文档名称<span style="color:var(--err)"> *</span></label>'
+        + '<input class="input" id="ebName" maxlength="100" value="'+App.esc(edit.name)+'"></div>'
+        + '<div class="form-row" style="max-width:180px"><label class="f-label">分类</label>'
+        + '<select class="select" id="ebCat">'+catOptions+'<option value="上传文档"'+(d.cat==='上传文档'?' selected':'')+'>上传文档</option></select></div>'
+        + '</div>'
+        + '<div class="kb-meta-row-3">'
+        + '<div class="form-row"><label class="f-label">页数</label><input class="input" id="ebPages" type="number" min="0" max="9999" value="'+edit.pages+'"></div>'
+        + '<div class="form-row"><label class="f-label">大小</label><input class="input" id="ebSize" placeholder="如：1.2 MB" value="'+App.esc(edit.size)+'"></div>'
+        + '</div>'
+        + (isUploaded ? '<div class="tiny dim">本记录已关联上传原件，如需替换原文件请使用删除后重新上传。</div>' : '');
+
+      if(isUploaded){
+        /* 上传文档只允许编辑元数据 */
+        return metaHtml + '<div class="divider"></div>'
+          + '<div class="tiny dim">已上传文档的原文件由上传者负责维护，此处仅修改知识库元数据。</div>';
+      }
+
+      /* 结构化正文编辑 */
+      var st = edit.structured;
+      var visualMode = edit.contentMode === 'visual';
+
+      var contentMeta =
+        '<div class="kb-meta-row-3">'
+        + '<div class="form-row"><label class="f-label">版本标注</label>'
+        + '<input class="input" id="ebVer" placeholder="如：2025版 · L2-016" value="'+App.esc(st.ver||'')+'"></div>'
+        + '<div class="form-row"><label class="f-label">依据文件</label>'
+        + '<input class="input" id="ebBase" placeholder="如：《示例医院网络安全事件应急预案》" value="'+App.esc(st.base||'')+'"></div>'
+        + '<div class="form-row"><label class="f-label">适用范围</label>'
+        + '<input class="input" id="ebScope" placeholder="如：全院各科室" value="'+App.esc(st.scope||'')+'"></div>'
+        + '</div>';
+
+      var sectionsHtml =
+        '<div class="kb-edit-sections">'
+        + renderSections()
+        + '<div class="flex gap2 mt2">'
+        + '<button class="btn outline" id="ebAddSec">+ 新增章节</button>'
+        + '<span class="tiny dim" id="ebSecHint"></span>'
+        + '</div>'
+        + '</div>';
+
+      var jsonEditor =
+        '<textarea id="ebJson" spellcheck="false" style="width:100%;min-height:320px;font-family:monospace;font-size:12.5px;border:1px solid var(--border);border-radius:6px;padding:10px">'+App.esc(edit.rawContent)+'</textarea>'
+        + '<div class="tiny dim mt1">直接编辑 JSON 原文（{ver, base, scope, sections:[{t, items:[]}]}），保存前会做格式校验。</div>';
+
+      return metaHtml
+        + '<div class="divider mt3"></div>'
+        + '<div class="section-title">'+App.icon('file',14)+' 文档正文</div>'
+        + '<div class="form-row" style="flex-direction:row;align-items:center;gap:16px">'
+        + '<label class="f-label" style="margin-bottom:0">编辑模式</label>'
+        + '<label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="radio" name="ebMode" value="visual"'+(visualMode?' checked':'')+' style="accent-color:var(--accent)">分章节可视化</label>'
+        + '<label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="radio" name="ebMode" value="json"'+(!visualMode?' checked':'')+' style="accent-color:var(--accent)">JSON 原文</label>'
+        + '</div>'
+        + (visualMode
+            ? contentMeta + '<div class="divider mt2"></div>' + sectionsHtml
+            : jsonEditor);
+    }
+
+    function bindEvents(ov){
+      ov.querySelector('#ebName').value = edit.name;
+      ov.querySelector('#ebCat').value = edit.cat;
+      ov.querySelector('#ebPages').value = edit.pages;
+      ov.querySelector('#ebSize').value = edit.size;
+      if(!isUploaded){
+        ov.querySelector('#ebVer').value = edit.structured.ver || '';
+        ov.querySelector('#ebBase').value = edit.structured.base || '';
+        ov.querySelector('#ebScope').value = edit.structured.scope || '';
+        bindSectionEvents(ov);
+        /* 编辑模式切换 */
+        ov.querySelectorAll('input[name="ebMode"]').forEach(function(radio){
+          radio.onchange = function(){
+            edit.contentMode = radio.value;
+            var body = buildBody();
+            ov.querySelector('.m-body').innerHTML = body;
+            bindEvents(ov);
+          };
+        });
+        /* 章节/条目输入时实时同步 */
+        ov.querySelector('.kb-edit-sections').addEventListener('input', function(ev){
+          var tr = ev.target;
+          if(tr.classList.contains('kb-sec-title')){
+            var si = Number(tr.closest('.kb-edit-sec').dataset.si);
+            edit.structured.sections[si].t = tr.value;
+          } else if(tr.classList.contains('kb-item-input')){
+            var kbItem = tr.closest('.kb-edit-item');
+            var si = Number(kbItem.dataset.si);
+            var ii = Number(kbItem.dataset.ii);
+            edit.structured.sections[si].items[ii] = tr.value;
+          }
+        });
+      }
+    }
+
+    function bindSectionEvents(ov){
+      /* 章节条目操作 */
+      ov.querySelectorAll('.kb-edit-item').forEach(function(el){
+        var si = Number(el.dataset.si), ii = Number(el.dataset.ii);
+        el.querySelectorAll('[data-act]').forEach(function(btn){
+          btn.onclick = function(){
+            var act = btn.dataset.act;
+            var sec = edit.structured.sections[si];
+            if(!sec) return;
+            if(act==='del'){
+              sec.items.splice(ii, 1);
+            } else if(act==='up' && ii>0){
+              var tmp = sec.items[ii]; sec.items[ii] = sec.items[ii-1]; sec.items[ii-1] = tmp;
+            } else if(act==='down' && ii<sec.items.length-1){
+              var tmp = sec.items[ii]; sec.items[ii] = sec.items[ii+1]; sec.items[ii+1] = tmp;
+            }
+            rerender();
+          };
+        });
+      });
+      /* 章节级操作 */
+      ov.querySelectorAll('.kb-edit-sec-head').forEach(function(head){
+        var secEl = head.closest('.kb-edit-sec');
+        var si = Number(secEl.dataset.si);
+        head.querySelectorAll('[data-act]').forEach(function(btn){
+          btn.onclick = function(){
+            var act = btn.dataset.act;
+            var secs = edit.structured.sections;
+            if(act==='add-item'){
+              secs[si].items = secs[si].items || [];
+              secs[si].items.push('');
+            } else if(act==='dup'){
+              var copy = cloneJson(secs[si]);
+              secs.splice(si+1, 0, copy);
+            } else if(act==='del-sec'){
+              secs.splice(si, 1);
+            } else if(act==='up-sec' && si>0){
+              var tmp = secs[si]; secs[si] = secs[si-1]; secs[si-1] = tmp;
+            } else if(act==='down-sec' && si<secs.length-1){
+              var tmp = secs[si]; secs[si] = secs[si+1]; secs[si+1] = tmp;
+            }
+            rerender();
+          };
+        });
+      });
+      /* 新增章节 */
+      var addSecBtn = ov.querySelector('#ebAddSec');
+      if(addSecBtn) addSecBtn.onclick = function(){
+        edit.structured.sections.push({ t:'', items:[''] });
+        rerender();
+      };
+      updateSecHint(ov);
+    }
+
+    function updateSecHint(ov){
+      var secs = edit.structured.sections;
+      var hint = ov.querySelector('#ebSecHint');
+      if(hint) hint.textContent = secs.length + ' 个章节，共 ' + secs.reduce(function(s, x){ return s + (x.items||[]).length; }, 0) + ' 条';
+    }
+
+    /* rerender 仅更新章节容器，不重建整个 body，避免丢失焦点 */
+    function rerender(){
+      /* 收集当前输入框的值回写到 edit 对象（只收集不重建的那几个） */
+      var modal = document.querySelector('.modal');
+      if(!modal) return;
+      var body = modal.querySelector('.m-body');
+      if(!body) return;
+
+      var modeRadio = modal.querySelector('input[name="ebMode"]:checked');
+      var currentMode = modeRadio ? modeRadio.value : 'visual';
+      if(currentMode !== edit.contentMode){ edit.contentMode = currentMode; }
+
+      edit.pages = Number(body.querySelector('#ebPages').value) || 0;
+      edit.size = body.querySelector('#ebSize').value;
+      if(!isUploaded && edit.contentMode === 'visual'){
+        edit.structured.ver = body.querySelector('#ebVer').value;
+        edit.structured.base = body.querySelector('#ebBase').value;
+        edit.structured.scope = body.querySelector('#ebScope').value;
+      }
+
+      /* 仅替换章节容器 innerHTML */
+      var secsEl = body.querySelector('.kb-edit-sections');
+      if(secsEl){
+        secsEl.innerHTML = renderSections();
+        bindSectionEvents(modal);
+        updateSecHint(modal);
+      }
+    }
+
+    App.modal({
+      title:'编辑知识库文档 · '+App.esc(d.id), full:true,
+      body: buildBody(),
+      foot:
+        '<button class="btn" id="ebCancel">取消</button>'
+        + '<button class="btn primary" id="ebSave">'+App.icon('check')+'保存修改</button>',
+      onOpen: function(ov){
+        bindEvents(ov);
+        ov.querySelector('#ebName').oninput = function(){ edit.name = this.value; };
+        ov.querySelector('#ebCat').onchange = function(){ edit.cat = this.value; };
+        ov.querySelector('#ebPages').oninput = function(){ edit.pages = Number(this.value)||0; };
+        ov.querySelector('#ebSize').oninput = function(){ edit.size = this.value; };
+
+        ov.querySelector('#ebCancel').onclick = function(){ ov.close(); };
+
+        ov.querySelector('#ebSave').onclick = function(){
+          /* 收集最新值 */
+          edit.name = ov.querySelector('#ebName').value.trim();
+          edit.cat = ov.querySelector('#ebCat').value.trim();
+          edit.pages = Number(ov.querySelector('#ebPages').value) || 0;
+          edit.size = ov.querySelector('#ebSize').value.trim();
+          if(!isUploaded){
+            if(edit.contentMode === 'visual'){
+              edit.structured.ver = ov.querySelector('#ebVer').value.trim();
+              edit.structured.base = ov.querySelector('#ebBase').value.trim();
+              edit.structured.scope = ov.querySelector('#ebScope').value.trim();
+              /* 去空章节 */
+              edit.structured.sections = (edit.structured.sections||[])
+                .map(function(s){
+                  return { t:(s.t||'').trim(), items:(s.items||[]).map(function(it){ return String(it||'').trim(); }).filter(Boolean) };
+                })
+                .filter(function(s){ return s.t || s.items.length; });
+            } else {
+              var raw = ov.querySelector('#ebJson').value;
+              try { edit.structured = JSON.parse(raw); }
+              catch(e){ App.toast('JSON 格式错误，请检查语法','err'); return; }
+              if(!edit.structured.sections){ App.toast('缺少 sections 字段','err'); return; }
+            }
+          }
+
+          /* 构建 patch */
+          var patch = {
+            name: edit.name, cat: edit.cat,
+            pages: edit.pages, size: edit.size
+          };
+          if(!isUploaded){
+            patch.content = JSON.stringify(edit.structured);
+          }
+          if(!patch.name){ App.toast('文档名称不能为空','err'); return; }
+          if(!patch.cat){ App.toast('分类不能为空','err'); return; }
+
+          var btn = this; btn.disabled = true; btn.textContent = '保存中…';
+          API.updateKnowledge(d.id, patch).then(function(r){
+            ov.close();
+            docs = MOCK.KNOWLEDGE;
+            refreshCats(); renderTabs(); renderTable();
+            App.toast('文档 '+d.id+' 已更新','ok');
+          }).catch(function(err){
+            btn.disabled = false; btn.innerHTML = App.icon('save')+'保存修改';
+            App.toast((err&&err.message)||'保存失败，请稍后重试','err');
+          });
+        };
+      }
+    });
+  }
+
+  renderTabs(); renderTable();
+});
+App.boot('knowledge');
+</script>
+<style>
+  /* ===== 知识库文档编辑器样式（适配 full modal flex 布局） ===== */
+  /* 整体策略：m-body 无 gap，各区块自己用 margin 控制间距；sections 拿满剩余高度 */
+  .modal.full .m-body { display:flex; flex-direction:column; }
+  .kb-edit-sections { flex:1 1 auto; min-height:240px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:6px; margin-top:8px; }
+  .kb-edit-sec { border:1px solid var(--border); border-radius:8px; background:var(--panel); }
+  .kb-edit-sec-head { display:flex; align-items:center; gap:6px; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--border); }
+  .kb-sec-title { flex:1; font-size:13.5px; font-weight:600; padding:5px 10px; border:1px solid transparent; border-radius:5px; background:transparent; transition:border-color .15s; font-family:inherit; color:var(--text); }
+  .kb-sec-title:hover, .kb-sec-title:focus { border-color:var(--accent); background:var(--bg); outline:none; }
+  .kb-sec-acts { display:flex; gap:4px; flex-wrap:wrap; }
+  .kb-edit-items { padding:6px 10px; display:flex; flex-direction:column; gap:5px; }
+  .kb-edit-item { display:flex; gap:8px; align-items:flex-start; padding:4px 8px; background:var(--bg); border:1px solid var(--border); border-radius:5px; }
+  .kb-item-input { flex:1; font-size:12.5px; line-height:1.5; padding:5px 7px; border:1px solid var(--border); border-radius:4px; background:var(--bg); color:var(--text); resize:vertical; font-family:inherit; min-height:30px; }
+  .kb-item-input:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 2px rgba(0,120,255,.15); }
+  .kb-item-acts { display:flex; flex-direction:column; gap:2px; flex-shrink:0; }
+  .kb-edit-items .btn.sm { padding:2px 7px; font-size:10.5px; }
+  .kb-edit-sec-head .btn.sm { padding:3px 7px; font-size:10.5px; }
+  .divider { height:1px; background:var(--border); margin:8px 0; flex:none; }
+  .section-title { font-size:13.5px; font-weight:700; margin:6px 0 4px; display:flex; align-items:center; gap:6px; color:var(--text); flex:none; }
+  .form-row { display:flex; flex-direction:column; gap:2px; margin-bottom:6px; flex:none; }
+  .form-row .f-label { font-size:11.5px; font-weight:600; color:var(--muted); }
+  .input, .select { font-size:12.5px; padding:6px 8px; border:1px solid var(--border); border-radius:5px; background:var(--bg); color:var(--text); font-family:inherit; }
+  .input:focus, .select:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 2px rgba(0,120,255,.15); }
+  .mt1 { margin-top:4px; } .mt2 { margin-top:8px; } .mt3 { margin-top:12px; }
+  .dim { opacity:.7; }
+  .tiny { font-size:11.5px; line-height:1.4; }
+  .flex { display:flex; } .gap2 { gap:8px; }
+  #ebJson { flex:1 1 auto; min-height:320px; font-family:'Consolas','Menlo',monospace; font-size:12px; line-height:1.5; tab-size:2; resize:none; }
+  /* 压缩 meta 表单区域高度，让 sections 拿到更多空间 */
+  .kb-meta-row { display:flex; gap:10px; flex:none; margin-bottom:4px; }
+  .kb-meta-row .form-row { flex:1; min-width:0; margin-bottom:0; }
+  .kb-meta-row-3 { display:flex; gap:10px; flex:none; margin-bottom:4px; }
+  .kb-meta-row-3 .form-row { flex:1; min-width:0; margin-bottom:0; }
+</style>
+</body>
+</html>

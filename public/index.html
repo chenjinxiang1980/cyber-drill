@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>登录 · 示例医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<link rel="stylesheet" href="styles.css?v=20261104b">
+<style>
+/* ===== 登录页 v2：左栏角色为主体，右栏登录 + 平台简介 ===== */
+.role-grid .role-cell{font:inherit;width:100%;appearance:none;-webkit-appearance:none;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:56px}
+.role-cell:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+.role-cell[aria-pressed="true"]{border-color:var(--accent);color:#fff;background:var(--accent-dim)}
+
+.login-card{width:min(1052px,calc(100vw - 64px));grid-template-columns:minmax(0,1fr) 392px;margin:32px 0}
+.login-left{padding:28px 26px 22px;background:linear-gradient(160deg,#0e2039 0%,#0a1220 58%);border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0}
+.login-right{padding:28px 24px 24px;display:flex;flex-direction:column;min-width:0}
+
+.login-left .l-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
+.login-left .l-eyebrow{display:none}
+.login-left .l-h2{font-size:15px;font-weight:700;margin:0;color:var(--text);white-space:nowrap}
+.login-left .l-h2::before{content:"";display:inline-block;width:3px;height:13px;border-radius:2px;background:linear-gradient(180deg,var(--accent2),var(--accent));margin-right:8px;vertical-align:-2px}
+.login-left .l-count{margin-left:auto;font-size:11px;color:var(--text3);line-height:1.55;max-width:66%;text-align:right}
+
+.login-left .role-grid{grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;padding:0}
+.login-left .role-cell{min-height:56px;padding:9px 6px;font-size:12px;line-height:1.25}
+.login-left .role-cell .r-ic{margin-bottom:3px}
+.login-left .role-cell .r-ic svg{width:17px;height:17px}
+.login-left .role-grid.dense .role-cell{font-size:11.5px;padding:8px 5px}
+
+/* 职责面板：按最长文案定高，15 个角色均不出滚动条 */
+.login-left .role-duty{margin:0 0 16px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--elev);height:132px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;font-size:12px;line-height:1.7;color:var(--text2)}
+.role-duty b{color:var(--text);font-size:12.5px;margin-right:6px}
+.role-duty .duty-hint{color:var(--text3)}
+.login-left .l-foot{margin-top:auto;font-size:10.5px;line-height:1.75}
+.login-left .l-foot .l-copy{display:block;margin-top:2px;color:var(--text3)}
+
+/* 右栏：居中品牌 → 剧本规模 → 登录表单（表单沉底） */
+.login-right .brand-row{display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px;margin-bottom:24px}
+.login-right .brand-row .login-logo{width:64px;height:64px;flex:none}
+.login-right .brand-sys{font-size:21px;font-weight:700;line-height:1.3;letter-spacing:.3px;white-space:nowrap;margin-top:4px}
+.login-right .brand-unit{font-size:13.5px;color:var(--text3);line-height:1.4;letter-spacing:.5px}
+.login-right .form-row{margin-bottom:11px}
+.login-right .l-intro{order:1;margin:0 0 4px}
+.login-right .form-block{order:2;margin-top:auto;padding-top:16px;border-top:1px dashed var(--border)}
+.login-right .l-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;letter-spacing:.4px}
+.login-right .l-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.login-right .l-stats .st{border:1px solid var(--border);border-radius:var(--r-sm);background:var(--elev);padding:9px 4px;text-align:center}
+.login-right .l-stats b{display:block;font-size:20px;line-height:1.15;font-weight:700;color:var(--accent2)}
+.login-right .l-stats span{display:block;font-size:11px;color:var(--text3);margin-top:3px}
+.login-right .l-features{display:grid;grid-template-columns:1fr 1fr;gap:9px 14px;font-size:11.5px;color:var(--text2)}
+.login-right .l-features .f-item{display:flex;gap:7px;align-items:flex-start;line-height:1.5}
+.login-right .l-features svg{width:14px;height:14px;color:var(--accent2);flex:none;margin-top:2px}
+
+/* 右栏宽度由内容决定：最宽元素是两列能力清单（330px），加 24px 左右内边距 = 392px。
+   栏内品牌 / 剧本规模 / 登录表单均为满宽块，共用同一条左边缘线，不再单独约束内列宽度 */
+.login-right .brand-row,.login-right .l-intro,.login-right .form-block{width:auto;max-width:none}
+
+/* 窄屏：登录优先，角色区随后；整页纵向滚动，无横向滚动 */
+@media (max-width:900px){
+  .login-bg{position:static;inset:auto;display:block;min-height:100vh;min-height:100svh;padding:calc(env(safe-area-inset-top,0px) + 12px) 12px calc(env(safe-area-inset-bottom,0px) + 16px);overflow:visible}
+  .login-card{width:100%;max-width:460px;margin:0 auto;display:flex;flex-direction:column}
+  .login-right{order:1;padding:22px 20px 20px}
+  .login-left{order:2;border-right:0;border-top:1px solid var(--border);padding:20px 20px 18px}
+  .login-right .brand-row{gap:8px;margin-bottom:18px}
+  .login-right .brand-row .login-logo{width:56px;height:56px}
+  .login-right .brand-sys{font-size:18.5px;white-space:nowrap}
+  .login-right .brand-unit{font-size:12.5px}
+  .login-right .l-intro{order:0;margin:16px 0 0}
+  .login-right .form-block{order:0;margin-top:0;padding-top:0;border-top:0}
+  .login-left .l-head{display:block;margin-bottom:12px}
+  .login-left .l-count{display:none}
+  .login-left .l-foot{display:block;margin-top:0;padding-top:12px;border-top:1px dashed var(--border);font-size:11px;line-height:1.8;color:var(--text3)}
+  .login-left .role-grid{grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .login-left .role-cell{min-height:56px}
+  .login-left .role-duty{height:150px;font-size:12.5px}
+  .screen-entry{position:static;display:flex;width:max-content;margin:calc(env(safe-area-inset-top,0px) + 10px) auto 0;right:auto;top:auto}
+}
+@media (max-width:480px){
+  .login-left .role-grid{grid-template-columns:repeat(2,1fr)}
+  .login-left .role-cell{font-size:12px;padding:10px 4px;min-height:54px}
+  .login-right .l-features{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<a class="screen-entry" id="screenEntry" href="screen.html" target="_blank" rel="noopener">
+  <span class="dot"></span><span id="screenEntryIcon"></span>演练监视大屏<em>免登录 · 全屏投屏</em>
+</a>
+<div class="login-bg">
+  <div class="login-card">
+    <div class="login-left">
+      <div class="l-head">
+        <span class="l-eyebrow">Roles</span>
+        <h2 class="l-h2">参演角色与职责</h2>
+        <div class="l-count" id="roleCount">正在加载角色…</div>
+      </div>
+      <div class="role-grid" id="roleGrid"></div>
+      <div class="role-duty" id="roleDuty" aria-live="polite" aria-atomic="true"><span class="duty-hint">将鼠标移到角色卡片，或按 Tab 聚焦、点击卡片，查看该角色的职责说明。</span></div>
+      <div class="l-foot">
+        ⚠ 本系统仅用于应急演练与桌面推演，所有告警、处置动作均为<b>模拟记录</b>，不下发真实网络配置命令，与医院生产网络物理隔离。<br>
+        演练内容不具备真实法律效力；演练数据请使用虚拟测试数据。<br>
+        <span class="l-copy">Cyber-Drill-System 1.0.0 · © 2026 陈金祥 · 软件著作权登记：未登记（截至 1.0.0）</span>
+      </div>
+    </div>
+    <div class="login-right">
+      <div class="brand-row">
+        <span class="logo login-logo" id="brandIcon"><img src="img/logo.png" alt="医院院徽"></span>
+        <div>
+          <div class="brand-unit" data-brand="unit">盘州市人民医院</div>
+          <div class="brand-sys" data-brand="system">网络安全应急演练系统</div>
+        </div>
+      </div>
+      <div class="form-block">
+        <div class="form-row"><label class="f-label">账号 <span class="req">*</span></label>
+          <input class="input" id="inUser" placeholder="请输入平台分配的账号" autocomplete="username">
+        </div>
+        <div class="form-row"><label class="f-label">密码 <span class="req">*</span></label><input class="input" id="inPass" type="password" placeholder="请输入密码；首次登录后需修改初始口令" autocomplete="current-password"></div>
+        <div class="form-row" id="capRow"><label class="f-label">验证码 <span class="req">*</span></label>
+          <div class="captcha-row">
+            <input class="input" id="inCap" maxlength="6" placeholder="请填写计算结果">
+            <span class="captcha-box" id="capBoxWrap" title="点击刷新">
+              <img id="capBox" alt="验证码" title="点击刷新" crossorigin="anonymous">
+              <span class="cap-skel" id="capSkel" aria-hidden="true"></span>
+            </span>
+            <button type="button" class="captcha-reload" id="capReload" title="换一张">换一张</button>
+          </div>
+        </div>
+        <div class="login-err" id="loginErr"></div>
+        <button class="btn primary block" id="btnLogin" style="padding:10px;font-size:14px">登 录</button>
+        <div class="tiny dim mt3" style="text-align:center">连续密码错误将在当前网络下临时锁定 · 初始口令由平台管理员一次性发放，首次登录必须修改</div>
+      </div>
+      <div class="l-intro">
+        <div class="l-title">内置演练剧本</div>
+        <div class="l-stats">
+          <div class="st"><b>21</b><span>演练剧本</span></div>
+          <div class="st"><b>8</b><span>网络安全演练</span></div>
+          <div class="st"><b>13</b><span>数据安全演练</span></div>
+        </div>
+        <div class="l-features" id="featList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="system.js"></script>
+<script src="app.js"></script>
+<script src="api.js"></script>
+<script>
+(function(){
+  DRILL.loadBrand().then(function(b){ if(b) DRILL.applyBrand(b); });
+  document.getElementById('screenEntryIcon').innerHTML = App.icon('screen');
+  /* 剧本规模写死为当前实际数量（21 = 网络安全 8 + 数据安全 13）：
+     登录页处于未登录状态，/api/bootstrap 与 /api/content/scenarios 均需鉴权，
+     此处拿不到真实统计；若后续提供免登录统计接口，改为此处动态取值即可。 */
+  var feats = [['net','剧本库按两类归档'],['flow','剧本可视化编排 · 版本管理'],['dashboard','态势看板 · 多角色协同'],['replay','回放 · 考评 · 报告导出']];
+  document.getElementById('featList').innerHTML = feats.map(function(f){ return '<div class="f-item">'+App.icon(f[0])+'<span>'+f[1]+'</span></div>'; }).join('');
+
+  var ROLE_ICON = { commander:'shield', duty:'bell', netsec:'net', sysadmin:'db', itlead:'user', medlead:'hospital', clinical:'building', healthbureau:'hospital', cac:'bell', cyberpolice:'evidence', platformadmin:'admin', role_mvnaewi63am:'db', office:'building', legal:'file', isp:'send' };
+  var HREF = { dashboard:'dashboard.html', screen:'screen.html', workbench:'workbench.html', collab:'collab.html',
+    scenarios:'scenarios.html', projects:'projects.html', evidence:'evidence.html',
+    knowledge:'knowledge.html', replay:'replay.html', evaluation:'evaluation.html',
+    report:'report.html', ledger:'ledger.html', admin:'admin.html' };
+
+  /* ---------- 角色职责映射（独立成块，后续可整体迁到后端） ----------
+     接口 /api/auth/roles 目前返回 id/name/desc 等字段，没有面向参演人员的
+     完整职责说明。此处按角色 id 维护展示文案；后端如新增 duty 字段，
+     可删除本块并改为读取 r.duty。未收录的自定义角色回退到 r.desc。 */
+  var ROLE_DUTY = {
+    platformadmin: '演练平台维护角色，负责账号与角色授权、剧本与表单发布、字典维护、日志审计与数据备份导出；不参与事件研判、处置与评分判定，不代替参演人员填报。发现异常先核对平台日志，再决定是否回滚发布版本。',
+    commander: '演练中的指挥决策角色，负责批准响应级别与启动、结束响应，统一对外口径，并在演练收尾阶段主持复盘总结。职责边界是不直接操作主机与网络设备，不代替信息科定级与处置；具体技术动作由信息科及网络安全管理员执行。',
+    itlead: '演练中的信息科统筹角色，负责组织事件定级与升级研判、向院应急指挥部报告并建议启动预案、签发对外上报文书、牵头复盘整改。边界是不替代值班员核实告警、不直接执行主机隔离；对外报送须经指挥部批准。',
+    duty: '演练中的一线发现角色，负责接报告警、核实受影响系统与账号归属、记录首次发现时间与影响范围，为信息科负责人研判提供事实依据。边界是不自行定级、不越权处置或对外发布；核实结论必须留下时间与证据。',
+    sysadmin: '演练中的系统恢复角色，负责禁用异常账号与回收授权、切换备用存储、从备份恢复业务并验证可用性、补丁加固与终端复查。边界是不负责对外上报与定级；恢复后必须验证业务可用性，避免覆盖证据。',
+    netsec: '演练中的技术处置角色，负责隔离失陷主机、封堵攻击源、流量清洗与限速、取证留痕及运营商协同；处置后核对策略基线并排查横向利用。边界是不决定响应级别、不对外发布口径；运营商工单与回执须留档。',
+    medlead: '演练中的医疗业务协调角色，负责在系统不可用时组织门诊、住院等环节启用手工流程，并牵头患者告知与法律评估，告知内容须经法务审核。边界是不承担技术处置与对外上报；对外口径由院应急指挥部统一发布。',
+    clinical: '演练中的业务执行角色，负责按医务处启用的手工流程承接收费与窗口业务，恢复后按手工单逐笔补录、双人复核，差异逐笔登记并配合稽核。边界是不自行对外解释事件、不决定兜底启用与回切；补录封账须经医务处确认。',
+    healthbureau: '作为市卫生健康局的参演角色，负责接收医院上报、研判事件等级与行业影响、提出处置与报告要求；以只读方式查看演练进展，不直接操作医院系统。边界是行业指导不替代院方处置，填报与材料提交由院方代为完成。',
+    cac: '作为市互联网信息办公室（网信办）的参演角色，负责接收医院上报、提供舆情与监管口径指导、关注事件社会影响；以只读方式参与，不进入医院生产系统。边界是不代替院方研判与处置，需提交材料由院方代为填报。',
+    cyberpolice: '作为市公安局网络安全保卫支队的参演角色，负责接收报案与材料、提出取证要求、提供处置指导并出具受理回执；以只读方式参与演练。边界是不代替院方取证与处置，受理回执与补充材料由院方代为记录归档。',
+    role_mvnaewi63am: '演练中的数据安全角色，负责核对备份恢复点、抽验备份可读性，并配合系统管理员完成恢复前后的数据核对。边界是不承担主机与网络处置、不对外发布结论；发现备份不可用或数据缺失须立即报信息科负责人。'
+  };
+
+  var pinnedRole = null, ROLES = [];
+  var inUser = document.getElementById('inUser');
+
+  /* ---------- 图形验证码（后端 + 客户端统一换色） ----------
+     后端随机生成 SVG 颜色（bg 浅色 + fg 深色，hue 范围覆盖全色谱），
+     任何 CSS filter（invert+hue-rotate / grayscale+sepia 等）都无法对任意原始颜色
+     稳定地产生"蓝色文字 + 融入 cardBG 背景"——filter 作用于已渲染像素，受抗锯齿
+     和非线性影响，5 张随机 captcha 实测 hue 散布 109°-345°，零命中 200-230° 蓝区。
+     因此改用 JS 方案：fetch 原始 SVG → DOMParser 解析 → 替换 rect 为 cardBG、
+     text/line 为 --accent2 亮蓝 → 重新 base64 作为 data URI。
+     不碰 server/，不引入依赖，仅客户端预处理。*/
+  function swapCaptchaColors(dataUri){
+    try{
+      var b64 = dataUri.replace(/^data:image\/svg\+xml;base64,/, '');
+      var xml = atob(b64);
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(xml, 'image/svg+xml');
+      // 0.8.4 起数字/运算符也改用 <rect> 绘制：只把 100% 宽高的背景矩形换成 cardBG，
+      // 其余 rect 保持无 fill，继承下方 <g fill> 的字符蓝；否则笔画会被涂成背景色而“消失”。
+      doc.querySelectorAll('rect').forEach(function(el){
+        if (el.getAttribute('width') === '100%') el.setAttribute('fill', '#111c2e');
+      });
+      // text / tspan / 所有带 fill 的非 rect 元素 → 主题蓝（--accent2 #4d9bff）
+      // 遍历所有元素，只要有 fill 属性且不是 rect（rect 已单独处理），就换成字符蓝
+      var charBlue = '#4d9bff';
+      doc.querySelectorAll('*').forEach(function(el){
+        if (el.tagName && el.tagName.toLowerCase() !== 'rect' && el.hasAttribute('fill')) {
+          el.setAttribute('fill', charBlue);
+        }
+      });
+      // line / polyline / path → 同主题蓝（描边色）
+      doc.querySelectorAll('line, polyline, path').forEach(function(el){
+        if (el.hasAttribute('stroke')) el.setAttribute('stroke', charBlue);
+      });
+      var serializer = new XMLSerializer();
+      var newXml = serializer.serializeToString(doc.documentElement);
+      return 'data:image/svg+xml;base64,' + btoa(newXml);
+    }catch(e){
+      // 解析失败 → 原样返回，不阻断
+      return dataUri;
+    }
+  }
+  var capId = '', capAvailable = false;
+  var capBoxWrap = document.getElementById('capBoxWrap');
+  var capBox = document.getElementById('capBox');
+  var capRow = document.getElementById('capRow');
+  var inCap = document.getElementById('inCap');
+  function loadCaptcha(){
+    capBoxWrap.classList.remove('loaded');
+    fetch('/api/auth/captcha', { method:'GET' })
+      .then(function(r){
+        if(!r.ok) throw new Error('captcha-fail');
+        return r.json();
+      })
+      .then(function(data){
+        if(!data || !data.image || !data.id) throw new Error('captcha-invalid');
+        capId = data.id;
+        capBox.src = swapCaptchaColors(data.image);
+        capBox.onload = function(){ capBoxWrap.classList.add('loaded'); };
+        if(capBox.complete && capBox.naturalWidth){ capBoxWrap.classList.add('loaded'); }
+        capAvailable = true;
+        capRow.style.display = '';
+      })
+      .catch(function(){
+        capAvailable = false;
+        capRow.style.display = 'none';
+        capId = '';
+        capBoxWrap.classList.add('loaded');
+      });
+  }
+  capBoxWrap.onclick = function(){ loadCaptcha(); inCap.value=''; };
+  document.getElementById('capReload').onclick = function(){ loadCaptcha(); inCap.value=''; };
+  loadCaptcha();
+
+  var grid = document.getElementById('roleGrid');
+  var dutyBox = document.getElementById('roleDuty');
+  var DUTY_HINT = '<span class="duty-hint">将鼠标移到角色卡片，或按 Tab 聚焦、点击卡片，查看该角色的职责说明。</span>';
+  function err(m){ document.getElementById('loginErr').textContent = m; }
+  grid.innerHTML = '<div class="tiny dim" style="grid-column:1/-1;padding:14px 4px">正在加载角色…</div>';
+
+  function dutyOf(r){ return ROLE_DUTY[r.id] || r.desc || r.descr || '该角色暂未配置职责说明。'; }
+  function roleById(id){
+    for(var i=0;i<ROLES.length;i++){ if(ROLES[i].id===id) return ROLES[i]; }
+    return null;
+  }
+  function syncPressed(){
+    grid.querySelectorAll('.role-cell').forEach(function(x){
+      x.setAttribute('aria-pressed', x.getAttribute('data-id') === pinnedRole ? 'true' : 'false');
+    });
+  }
+  var shownRole = null;
+  function showDuty(r, pin){
+    if(!r) return;
+    if(shownRole !== r.id){
+      dutyBox.innerHTML = '<b>'+App.esc(r.name)+'</b>'+App.esc(dutyOf(r));
+      shownRole = r.id;
+    }
+    if(pin !== undefined){
+      pinnedRole = pin ? r.id : null;
+      syncPressed();
+    }
+  }
+  function restoreDuty(){
+    if(pinnedRole){ showDuty(roleById(pinnedRole)); return; }
+    if(shownRole !== null){ dutyBox.innerHTML = DUTY_HINT; shownRole = null; }
+  }
+
+  function renderRoles(){
+    grid.classList.toggle('dense', ROLES.length > 9);
+    grid.innerHTML = ROLES.map(function(r){
+      return '<button type="button" class="role-cell" data-id="'+App.esc(r.id)+'" aria-pressed="false" aria-label="'+App.esc(r.name)+'" aria-describedby="roleDuty"><span class="r-ic">'+App.icon(ROLE_ICON[r.id]||'user')+'</span>'+App.esc(r.name)+'</button>';
+    }).join('');
+    syncPressed();
+    restoreDuty();
+  }
+
+  fetch('/api/auth/roles').then(function(r){ if(!r.ok) throw new Error('角色加载失败'); return r.json(); })
+  .then(function(res){
+    ROLES = res || [];
+    document.getElementById('roleCount').textContent = '系统内置 ' + ROLES.length + ' 类业务角色，登录后按账号主角色展示差异化工作台；角色卡仅展示职责，不用于选择账号';
+    renderRoles();
+  }).catch(function(e){
+    grid.innerHTML = '';
+    err('无法连接服务端，请确认服务已启动后刷新页面');
+  });
+
+  /* 角色卡纯展示：悬停/聚焦查看职责，点击固定/取消固定；不再选中账号 */
+  grid.addEventListener('mouseover', function(e){
+    var c = e.target.closest('.role-cell'); if(!c) return;
+    var r = roleById(c.getAttribute('data-id')); if(r) showDuty(r);
+  });
+  grid.addEventListener('mouseleave', function(){ restoreDuty(); });
+  grid.addEventListener('focusin', function(e){
+    var c = e.target.closest('.role-cell'); if(!c) return;
+    var r = roleById(c.getAttribute('data-id')); if(r) showDuty(r);
+  });
+  grid.addEventListener('focusout', function(e){
+    if(!grid.contains(e.relatedTarget)) restoreDuty();
+  });
+  grid.addEventListener('click', function(e){
+    var c = e.target.closest('.role-cell'); if(!c) return;
+    var r = roleById(c.getAttribute('data-id')); if(!r) return;
+    showDuty(r, pinnedRole !== r.id);
+  });
+  grid.addEventListener('keydown', function(e){
+    if(e.key !== 'Escape' || !pinnedRole) return;
+    pinnedRole = null; syncPressed(); restoreDuty();
+  });
+
+  document.getElementById('btnLogin').onclick = function(){
+    err('');
+    var user = inUser.value.trim();
+    var pass = document.getElementById('inPass').value;
+    if(!user){ err('请输入账号'); return; }
+    if(pass.length < 1){ err('请输入密码'); return; }
+    if(capAvailable && !inCap.value.trim()){ err('请输入验证码'); return; }
+
+    var btn = document.getElementById('btnLogin');
+    btn.disabled = true; btn.textContent = '登录中…';
+    API.login(user, pass, '', capAvailable ? capId : '', capAvailable ? inCap.value.trim() : '').then(function(r){
+      App.toast('登录成功，欢迎 ' + r.user.name, 'ok');
+      // 首登强制改密：服务端只签发受限令牌，前端立即跳转改密页
+      var target = (r.user && r.user.mustChange) ? 'password.html' : null;
+      if(!target){
+        var nav = r.role.nav || [];
+        target = nav.indexOf('dashboard') >= 0 ? 'dashboard.html' : (HREF[nav[0]] || 'workbench.html');
+      }
+      setTimeout(function(){ location.href = target; }, 450);
+    }).catch(function(e){
+      btn.disabled = false; btn.textContent = '登 录';
+      var msg = (e && e.message) || '登录失败，请检查账号与密码';
+      var status = (e && e.status) || 0;
+      if(status === 400 && msg.indexOf('验证码') >= 0){
+        err('验证码错误');
+        loadCaptcha(); inCap.value = '';
+      } else if(status === 423){
+        // 账号锁定：后端通常返回带"请 N 分钟后再试"的 message
+        err(msg);
+      } else if(status === 401){
+        // 账号/密码错误
+        if(capAvailable){ loadCaptcha(); inCap.value = ''; }
+        err(msg);
+      } else {
+        if(capAvailable){ loadCaptcha(); inCap.value = ''; }
+        err(msg);
+      }
+    });
+  };
+  inCap.addEventListener('keydown', function(e){ if(e.key==='Enter') document.getElementById('btnLogin').click(); });
+  document.getElementById('inPass').addEventListener('keydown', function(e){ if(e.key==='Enter') document.getElementById('btnLogin').click(); });
+})();
+</script>
+</body>
+</html>

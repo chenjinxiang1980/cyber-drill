@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>复盘评估 · 示例医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<link rel="stylesheet" href="styles.css?v=20261104b">
+<style>
+.ev-mode{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ev-mode .badge{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--border2)}
+.ev-mode .badge.base{color:var(--accent2);background:var(--accent-dim)}
+.ev-mode .badge.real{color:var(--warn);background:rgba(210,153,34,.1);border-color:rgba(210,153,34,.4)}
+.ev-row{display:flex;align-items:flex-start;gap:14px;padding:12px 0;border-bottom:1px dashed var(--border)}
+.ev-row:last-child{border-bottom:none}
+.ev-row .ev-name{width:210px;flex:none;font-size:12.5px;line-height:1.65}
+.ev-row .ev-rule{flex:1;font-size:11.5px;color:var(--text3);line-height:1.7}
+.ev-row .ev-ro{width:180px;flex:none;text-align:right}
+.ev-total{font-size:34px;font-weight:700;font-family:var(--mono);color:var(--accent2)}
+.ev-legend{font-size:11.5px;color:var(--text3);line-height:1.9}
+.st-list{max-height:340px;overflow:auto}
+.st-item{padding:9px 0;border-bottom:1px dashed var(--border);font-size:12.5px}
+.st-item:last-child{border-bottom:none}
+.st-item .st-h{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.rpt-flash{box-shadow:0 0 0 2px var(--accent2),0 0 18px rgba(45,120,255,.28);transition:box-shadow .25s}
+@media(max-width:640px){
+  .ev-row{flex-wrap:wrap;gap:6px}
+  .ev-row .ev-name{width:100%}
+  .ev-row .ev-rule{flex:1 1 100%;width:100%}
+  .ev-row .ev-ro{width:100%;text-align:left}
+}
+</style>
+</head>
+<body data-page="evaluation">
+<script src="system.js"></script><script src="app.js"></script><script src="api.js"></script><script src="report.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+  var qpid = '';
+  try { qpid = new URLSearchParams(location.search).get('projectId') || ''; } catch (err) {}
+  var proj = (qpid && (MOCK.PROJECTS || []).filter(function(p){ return p.id === qpid; })[0]) || API.activeProject();
+  var canEval = ['commander','itlead','platformadmin'].indexOf(role.id) >= 0;
+  var canExport = ['commander','itlead','platformadmin'].indexOf(role.id) >= 0;
+  var canAdd = true;
+  var WB = null;
+  var SNAP = null;      /* 封存/重算版本快照（含逐节点扣分明细） */
+  var SNAP_LIST = [];   /* 全部快照版本 */
+  var SEAL = null;      /* 项目结束封存记录 */
+  var ENDEX = null;     /* 有缺项结束说明 */
+  var wbWaiters = [];
+  function whenWB(){
+    if (WB) return Promise.resolve(WB);
+    return new Promise(function(res){ wbWaiters.push(res); });
+  }
+  function flushWB(v){
+    WB = v;
+    var ws = wbWaiters; wbWaiters = [];
+    ws.forEach(function(fn){ fn(v); });
+  }
+
+  /* ---------- 无演练：展示空态 ---------- */
+  if (!proj) {
+    Promise.all([API.getScenarios(), API.getProjects(), API.getScriptNodes()]).then(function(r){
+      var scens = Array.isArray(r[0]) ? r[0] : [];
+      var projs = Array.isArray(r[1]) ? r[1] : [];
+      var nodes = Array.isArray(r[2]) ? r[2] : [];
+      page.innerHTML =
+        '<div class="standby-hero">'
+        + '<div class="sb-icon" style="background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.28);color:var(--warn)">'+App.icon('score')+'</div>'
+        + '<div class="sb-body">'
+        +   '<span class="sb-tag" style="color:var(--warn);background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.28)"><span class="dot" style="background:var(--warn)"></span>AWAITING DRILL · 待复盘</span>'
+        +   '<h2>暂无演练可复盘评估</h2>'
+        +   '<div class="sb-sub">复盘评估依据演练项目中的处置记录、节点完成情况与剧本基线自动计算。请先创建演练项目并完成至少一次推演，系统将自动生成本次演练的考评明细、改进建议与评估汇总。</div>'
+        +   '<div class="sb-acts">'
+        +     '<a class="btn primary" href="projects.html">'+App.icon('projects')+'创建演练项目</a>'
+        +     '<a class="btn" href="scenarios.html">'+App.icon('flow')+'选择剧本启动推演</a>'
+        +     '<a class="btn" href="dashboard.html">'+App.icon('dashboard')+'返回态势总看板</a>'
+        +   '</div>'
+        +   '<div class="sb-meta">'
+        +     '<div class="m-item"><b>'+scens.length+'</b>内置场景</div>'
+        +     '<div class="m-item"><b>'+nodes.length+'</b>剧本节点</div>'
+        +     '<div class="m-item"><b>'+projs.length+'</b>历史项目</div>'
+        +   '</div>'
+        + '</div></div>'
+        + '<div class="card"><div class="card-title">'+App.icon('score')+'复盘评估机制说明</div>'
+        +   '<div class="small" style="line-height:2">系统支持<b>两种演练模式</b>，考评口径不同（扣分基数均为本剧本各节点分值合计，满分随剧本不同，如 S01 为 112 分）：<br>'
+        +   '<b>· 基础版（诱导演练）</b>：逐节点下发任务并提供引导提示。<b>超时完成扣本节点分值的 20%</b>，演练结束时仍未完成或已跳过的正确流程<b>扣该流程全部分值</b>；不设质量规则与证据门槛。<br>'
+        +   '<b>· 实战版（自主研判）</b>：仅展示已发现故障，参演人员在角色工作台自主选择处置动作。超时完成扣本节点 20%，接收人选择错误扣 30%，处置关键词必含项缺失按缺失比例合计最多扣 30%，处置文本质量不达标扣 20%，证据未提交或未命中要求扣 20%，<b>单节点合计扣分上限 80%</b>；执行混淆流程扣该流程全部分值，演练结束仍未完成扣全部分值，演练中强制查看脚本扣 10 分。<br>'
+        +   '演练模式在创建项目时选定，创建后不可切换。系统在演练进行中即可实时显示考评，演练结束后可一键导出报告。</div>'
+        + '</div>';
+    }).catch(function(){
+      page.innerHTML = '<div class="forbidden">'+App.icon('alert')+'<h2>数据加载失败</h2><p>请检查网络或联系管理员</p></div>';
+    });
+    return;
+  }
+
+  function mins(t){ var m=/^(\d{1,2}):(\d{2})/.exec(String(t||'')); return m ? (+m[1])*60 + (+m[2]) : null; }
+  function grade(v){ return v>=90?'优秀':v>=80?'良好':v>=70?'合格':'不合格'; }
+  function gradeCls(v){ return v>=90?'green':v>=80?'blue':v>=70?'yellow':'red'; }
+  /* 分制口径：满分取后端 maxScore（不同剧本不同，S01 为 112），百分比 = 原始分 / 满分 */
+  function maxOf(s){ var m = Number(s && s.maxScore); return isFinite(m) && m > 0 ? m : 0; }
+  function pctOf(sc, max){ sc = Number(sc); max = Number(max); if(!isFinite(sc) || !isFinite(max) || max <= 0) return null; return Math.round(sc / max * 1000 + 1e-6) / 10; }
+  function gradeByPct(p){ return (p === null || p === undefined) ? '未考评' : (p>=90?'优秀':p>=80?'良好':p>=70?'合格':'不合格'); }
+  function stateTag(s){ return s==='按时'?'<span class="tag green">按时</span>':s==='超时'?'<span class="tag yellow">超时</span>':s==='遗漏'?'<span class="tag red">遗漏</span>':s==='待处置'?'<span class="tag yellow">待处置</span>':s==='决策有误'?'<span class="tag red">决策有误</span>':'<span class="tag gray">'+App.esc(s)+'</span>'; }
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>复盘评估</h1><div class="sub">'+App.esc(proj.name)+' · 系统自动考评 · '+
+      (WB?'':'按演练模式差异化计分')+'</div></div>'
+    + '<div class="acts">'
+    + (canEval?'<button class="btn" id="evReEval">'+App.icon('refresh')+'重新自动考评</button>':'')
+    + (canExport?'<button class="btn primary" id="evReport">'+App.icon('file')+'导出演练报告</button>':'')+'</div></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>考评由系统按演练数据自动计算：<b>基础版</b>逐节点下发任务，超时完成扣本节点 20%，结束仍未完成扣全部分值（不设质量规则与证据门槛）；<b>实战版</b>任务中心只展示已发现的系统故障，由参演人员在角色工作台自主选择处置动作，按<b>超时 20%、接收人错误 30%、关键词必含项缺失按比例最多 30%、文本质量 20%、证据未提交或未命中 20%（单节点合计上限 80%）、执行混淆流程扣全部分值、未完成扣全部分值、演练中强制查看脚本扣 10 分</b>计算。所有数据均为演练记录。</span></div>'
+    + '<div class="grid eval-row">'
+    +   '<div class="card"><div class="card-title">'+App.icon('score')+'考评明细<span class="more" id="evTitle"></span></div><div id="evItems"><div class="loading-block">正在加载考评数据…</div></div></div>'
+    +   '<div class="col gap4">'
+    +     '<div class="card"><div class="card-title">'+App.icon('dashboard')+'评估汇总</div>'
+    +       '<div class="flex" style="align-items:baseline;gap:10px"><span class="ev-total" id="smTotal">—</span><span class="muted" id="smMax"></span><span class="right tag" id="smRate"></span></div>'
+    +       '<div class="progress mt3"><div class="bar" id="smBar" style="width:0%"></div></div>'
+    +       '<div class="flex mt3" style="justify-content:space-between;align-items:center"><span class="small dim">评估等级（自动）</span><span id="smGrade"></span></div>'
+    +       '<div class="tiny dim mt2" id="smFormula"></div>'
+    +       '<div class="section-title mt4">评分封存</div><div class="tiny dim" id="smSeal">—</div>'
+    +       '<div class="section-title mt4">演练模式</div><div class="ev-mode" id="smMode"></div>'
+    +       '<div class="section-title mt4">关键统计</div><div id="smStats"></div></div>'
+    +     '<div class="card"><div class="card-title">'+App.icon('edit')+'改进建议（自动生成）</div>'
+    +       '<div class="small" id="evSug" style="line-height:1.9;white-space:pre-wrap">—</div></div>'
+    +   '</div>'
+    + '</div>'
+    + (canExport?'<div class="card" id="evReportCard" style="margin-top:14px">'+ReportExport.panelHTML(proj)+'</div>':'')
+    + '<div class="card" id="evStepsCard" style="margin-top:14px"></div>';
+
+  if (canExport) {
+    ReportExport.bind(document.getElementById('evReportCard'), {
+      project: proj,
+      getWorkbench: function(){ return WB; },
+      ensureWorkbench: whenWB
+    });
+    var evReportBtn = document.getElementById('evReport');
+    if (evReportBtn) evReportBtn.onclick = function(){
+      var card = document.getElementById('evReportCard');
+      if (!card) return;
+      card.scrollIntoView({behavior:'smooth', block:'center'});
+      card.classList.add('rpt-flash');
+      setTimeout(function(){ card.classList.remove('rpt-flash'); }, 1200);
+    };
+  }
+  var btnRe = document.getElementById('evReEval');
+
+  /* ---------- 渲染 ---------- */
+  /* 已封存项目以封存快照为准；未封存项目回落实时考评 */
+  function effScore(){
+    return (SNAP && SNAP.snapshot && SNAP.snapshot.score) ? SNAP.snapshot.score : WB.score;
+  }
+  function effGrade(){
+    var s = effScore() || {};
+    // 等级只认可后端值：演练进行中/未封存时 grade 为空，不再按过程分本地推算评级。
+    if (s.grade) return s.grade;
+    if (SNAP && SNAP.snapshot && SNAP.grade) return SNAP.grade;
+    return '未考评';
+  }
+  function renderSeal(){
+    var box = document.getElementById('smSeal');
+    if (!box) return;
+    if (!SEAL) {
+      box.innerHTML = '未封存：当前展示实时考评。结束演练后系统将写入评分快照（支持完整/有缺项两种结束方式）。';
+      return;
+    }
+    var s = SNAP || {};
+    var ex = ENDEX || {};
+    var curVer = s.version || SEAL.snapshotVersion;
+    var isSealVer = curVer === SEAL.snapshotVersion;
+    var html = '<div>已封存 <b>v'+App.esc(curVer)+'</b> · '+App.esc(SEAL.endMode)+' · '+App.esc(s.sealedAt||SEAL.sealedAt)+' · '+App.esc(s.sealedBy||SEAL.sealedBy)
+      + (isSealVer ? '' : '　<span style="color:var(--warn)">当前查看历史/重算版本，非封存版本</span>')+'</div>'
+      + '<div class="mt2">核心证据完整率 '+App.esc(s.coreCompleteRate)+'%（'+(s.coreDone||0)+'/'+(s.coreTotal||0)+'） · 证据完整率 '+App.esc(s.evidenceCompleteRate)+'%</div>'
+      + '<div class="mt2">规则版本 '+App.esc(s.ruleVersion||'—')+' · 剧本版本 '+App.esc(s.scenarioVersion||'—')+'</div>';
+    if (SEAL.endMode === '有缺项' && ex.reason) {
+      html += '<div class="mt2" style="color:var(--warn)">缺项结束：'+App.esc(ex.reason)+'；批准人 '+App.esc(ex.approver||'—')+'；责任人 '+App.esc(ex.owner||'—')+'；补录时限 '+App.esc(ex.deadline||'—')+'</div>';
+    }
+    var others = (SNAP_LIST||[]).filter(function(x){ return x.version !== curVer; });
+    if (others.length) {
+      html += '<div class="mt2">历史版本（点击切换）：'+others.map(function(x){
+        return '<span class="link" data-snap="'+x.version+'">v'+x.version+'</span>（'+App.esc(x.snapshotStatus)+(x.recalcReason?'·'+App.esc(x.recalcReason):'')+'）';
+      }).join('、')+'</div>';
+    }
+    box.innerHTML = html;
+    (box.querySelectorAll('[data-snap]')||[]).forEach(function(el){
+      el.onclick = function(){ loadSnapshotVersion(Number(el.getAttribute('data-snap'))); };
+    });
+  }
+
+  function loadSnapshotVersion(ver){
+    DRILL.get('/content/evaluation?projectId=' + encodeURIComponent(proj.id) + '&snapshotVersion=' + ver).then(function(ev){
+      ev = ev || {};
+      SNAP = ev.snapshot || null;
+      SNAP_LIST = ev.snapshots || [];
+      SEAL = ev.seal || null;
+      ENDEX = ev.endException || null;
+      renderItems(); renderSummary(); renderSuggestions(); renderSteps(); renderSeal();
+    }).catch(function(err){ App.toast((err&&err.message)||'读取历史版本失败','err'); });
+  }
+
+  function renderMode(){
+    var mode = WB.mode;
+    var isBase = mode === '基础版';
+    var mx = maxOf(effScore());
+    var maxTxt = mx ? ('满分 ' + mx + ' 分') : '满分按剧本节点分值合计';
+    document.getElementById('smMode').innerHTML =
+      '<span class="badge '+(isBase?'base':'real')+'">'+App.esc(mode)+'</span>'
+      + '<span class="tiny dim">'+(isBase
+        ? '诱导演练：系统逐节点下发任务与引导提示，超时扣本节点 20%、结束未完成扣全部分值，'+maxTxt
+        : '自主研判：任务中心仅展示已发现故障，参演人员在角色工作台选择处置动作，按偏离剧本与时效扣分，'+maxTxt)+'</span>'
+      + '<div class="tiny dim mt2">演练模式在新建演练项目时选定，创建后不可切换（保证两种模式使用同一套剧本基线）。</div>';
+  }
+
+  function renderItems(){
+    var s = effScore();
+    var baselineCnt = WB.nodes.filter(function(n){ return n.required && n.type!=='end'; }).length;
+    document.getElementById('evTitle').textContent = (SNAP ? '评分快照 v'+SNAP.version+' · ' : '') + (WB.mode==='实战版'
+      ? WB.mode + ' · 已发现故障 ' + s.total + ' 项 · 剧本基线 ' + baselineCnt + ' 项'
+      : WB.mode + ' · 考评单元 ' + s.total + ' 项 · 覆盖基线节点 ' + baselineCnt + ' 项');
+    var rows = s.nodes.map(function(n, i){
+      var plan = n.plan || '—';
+      var actual = n.actual || '—';
+      var deds = (s.deductions||[]).filter(function(d){ return d.nodeId===n.id; });
+      var dedTip = deds.length ? deds.map(function(d){ return App.esc(d.type)+'（扣 '+d.point+' 分）'; }).join('；') : '';
+      return '<div class="ev-row">'
+        + '<div class="ev-name"><div class="bold">'+(i+1)+'. '+App.esc(n.title)+'</div>'
+        +   '<div class="mt2 tiny dim">'+App.esc(roleName(n.role))+' · '+App.esc(plan)+'</div></div>'
+        + '<div class="ev-rule">实际：'+App.esc(actual)+'</div>'
+        + '<div class="ev-ro">'+stateTag(n.state)
+        +   (dedTip?'<div class="tiny" style="color:var(--err);margin-top:4px">'+dedTip+'</div>':'')+'</div>'
+        + '</div>';
+    }).join('');
+    if(!rows) rows = '<div class="empty">'+App.icon('file')+'<div>剧本未配置考评单元</div><div class="tiny dim mt2">请先在剧本管理中补充基线节点</div></div>';
+    document.getElementById('evItems').innerHTML = rows;
+  }
+
+  function roleName(rid){
+    var r = (MOCK.ROLES||[]).filter(function(x){ return x.id===rid || x.short===rid || x.name===rid; })[0];
+    return r ? r.name : (rid||'—');
+  }
+
+  function renderSummary(){
+    var s = effScore() || {};
+    var max = maxOf(s);
+    var pct = pctOf(s.score, max);
+    var pctVal = (pct === null) ? s.score : pct;
+    document.getElementById('smTotal').textContent = (s.score === null || s.score === undefined) ? '—' : s.score;
+    document.getElementById('smMax').textContent = max ? ('/ ' + max + ' 分（满分）') : '';
+    var rate = document.getElementById('smRate');
+    rate.className = 'right tag ' + gradeCls(pctVal);
+    rate.textContent = (pct === null) ? ('扣分后 '+s.score+' 分') : ('得分率 '+pct+'%');
+    var bar = document.getElementById('smBar');
+    bar.style.width = (pct === null ? 0 : Math.min(100, pct)) + '%';
+    bar.className = 'bar ' + (pctVal>=85?'ok':pctVal>=70?'warn':'err');
+    var eg = effGrade();
+    var hasGrade = !!eg && eg !== '未考评';
+    document.getElementById('smGrade').innerHTML = '<span class="tag '+(hasGrade?gradeCls(pctVal):'gray')+'"><span class="dot"></span>'+App.esc(eg)+' · '+(SNAP?'评分快照':'系统自动考评')+'</span>';
+    document.getElementById('smFormula').textContent = s.formula;
+    var pairs = WB.mode==='基础版'
+      ? [['按时完成',s.ontime],['超时/遗漏',s.total-s.ontime]]
+      : [['符合基线',s.hit],['待处置',s.pending||0],['决策偏离',s.wrong||0],['超时',s.late||0],['未处置',s.missed],['跳过混淆',s.skippedDistract||0]];
+    document.getElementById('smStats').innerHTML = '<div class="flex gap3 wrap">'+pairs.map(function(x){
+      return '<span class="small"><b style="font-family:var(--mono)">'+x[1]+'</b> <span class="dim">'+x[0]+'</span></span>';
+    }).join('')+'</div>';
+  }
+
+  function renderSuggestions(){
+    var s = effScore();
+    var lines = [];
+    var missed = s.nodes.filter(function(n){ return !n.hit; });
+    var late = s.nodes.filter(function(n){ return n.hit && !n.ontime; });
+    var dedSum = function(arr){ return Math.round(arr.reduce(function(a,n){ return a + Math.abs(Number(n.earned)||0); }, 0) * 10) / 10; };
+    if(WB.mode==='基础版'){
+      if(late.length) lines.push('1. 时限执行：'+late.map(function(n){ return '「'+n.title+'」'; }).join('、')+' 未在处置时长内完成，建议明确各节点处置时长与责任人。');
+      if(missed.length) lines.push((lines.length+1)+'. 流程执行：'+missed.length+' 项任务未按时闭环（合计扣 '+dedSum(missed)+' 分），建议在下一轮演练中重点跟踪。');
+      if(!lines.length) lines.push('本次基础版演练各节点均在处置时长内完成，建议增加实战版无脚本抽测以验证真实处置能力。');
+    } else {
+      var wrong = s.nodes.filter(function(n){ return n.state==='决策有误'; });
+      var omitted = s.nodes.filter(function(n){ return n.state==='遗漏'; });
+      if(wrong.length) lines.push('1. 决策偏离：'+wrong.map(function(n){ return '「'+n.title+'」'; }).join('、')+' 所选处置与剧本基线偏离（执行混淆流程，扣该流程全部分值，合计扣 '+dedSum(wrong)+' 分），建议围绕该环节开展专项研判训练。');
+      if(late.length) lines.push((lines.length+1)+'. 处置超时：'+late.map(function(n){ return '「'+n.title+'」'; }).join('、')+' 超出处置时长（扣本节点分值的 20%，合计扣 '+dedSum(late)+' 分），建议优化响应流程与值班力量配置。');
+      if(omitted.length) lines.push((lines.length+1)+'. 环节未处置：'+omitted.map(function(n){ return '「'+n.title+'」（'+n.plan+'）'; }).join('、')+' 演练结束仍未完成（扣该流程全部分值，合计扣 '+dedSum(omitted)+' 分），建议明确责任岗位并补齐处置流程。');
+      if(s.skippedDistract) lines.push((lines.length+1)+'. 跳过混淆流程 '+s.skippedDistract+' 项（不扣分），建议复盘时说明判断依据。');
+      if(!lines.length) lines.push('实战版演练全部基线环节决策正确且处置时长达标，无扣分项，建议固化处置经验并纳入标准剧本。');
+    }
+    document.getElementById('evSug').textContent = lines.join('\n');
+  }
+
+  function renderSteps(){
+    var card = document.getElementById('evStepsCard');
+    if(WB.mode==='基础版'){
+      var bmx = maxOf(effScore());
+      card.innerHTML = '<div class="card-title">'+App.icon('flow')+'基础版引导流程（系统下发）</div>'
+        + '<div class="tiny dim" style="margin-bottom:10px">基础版按剧本节点逐节点下发任务，并提供处置引导提示；参演人员按顺序完成即可。考评以'+(bmx?('本剧本满分 '+bmx+' 分'):'本剧本节点分值合计')+'为基础：超时完成扣本节点分值的 20%，演练结束仍未完成扣该流程全部分值。</div>'
+        + '<div class="table-wrap"><table class="table"><thead><tr><th style="width:60px">序号</th><th>剧本节点</th><th style="width:130px">责任角色</th><th style="width:100px">处置时长(分)</th><th>引导提示</th></tr></thead><tbody>'
+        + WB.nodes.filter(function(n){ return n.type!=='end'; }).map(function(n,i){
+            return '<tr><td class="mono">'+(i+1)+'</td><td>'+App.esc(n.title)+'</td><td class="small">'+App.esc(roleName(n.target))+'</td>'
+              + '<td class="mono small">'+(n.timeout||'—')+'</td>'
+              + '<td class="small muted">'+App.esc(n.guide||'—')+'</td></tr>';
+          }).join('')+'</tbody></table></div>';
+      return;
+    }
+    /* 实战版：展示角色工作台提交的处置决策记录（复盘只读） */
+    var steps = WB.steps || [];
+    /* 演练中只展示已发现故障；演练结束后展示全部基线环节 */
+    var rows = (effScore().nodes || []).map(function(n){
+      var full = WB.nodes.filter(function(x){ return x.id===n.id; })[0] || {};
+      var st = steps.filter(function(x){ return x.matched_node===n.id; })[0];
+      var judge = st
+        ? (st.correct===0?'<span class="tag red">决策偏离</span>':'<span class="tag green">符合基线</span>')
+        : (n.state==='待处置'?'<span class="tag yellow">待处置</span>':'<span class="tag gray">未处置</span>');
+      return '<tr>'
+        + '<td class="mono small">'+(full.timeout?full.timeout+' 分钟':'—')+'</td>'
+        + '<td><div class="small bold">'+App.esc(n.title)+' '+(full.required?'':'<span class="tag yellow">前置告警·不计分</span>')+'</div><div class="tiny dim">'+App.esc(full.target||n.role||'')+'</div></td>'
+        + '<td class="small">'+(st?App.esc(st.choice||'—'):'—')+(st&&st.correct===0?'<div class="tiny" style="color:var(--err);margin-top:3px">正确做法：'+App.esc(n.title)+'</div>':'')+'</td>'
+        + '<td>'+judge+'</td>'
+        + '<td class="mono small">'+App.esc(st?st.step_time:'—')+'</td>'
+        + '<td class="small">'+(st?App.esc(st.found||'—')+'<div class="tiny dim mt2">措施：'+App.esc(st.measure||'—')+'</div><div class="tiny dim">结果：'+App.esc(st.result||'—')+'</div>':'—')+'</td>'
+        + '<td class="small">'+App.esc(st?st.user:'—')+'</td>'
+        + '</tr>';
+    }).join('');
+    card.innerHTML = '<div class="card-title">'+App.icon('shield')+'实战版处置决策记录<span class="more">来源：角色工作台自主提交</span></div>'
+      + '<div class="tiny dim" style="margin-bottom:10px">实战版在角色工作台只展示已发现的系统故障，不发布处置步骤与引导提示；参演人员从混淆方案中选择处置动作，并填写发现时间、发现情况、处置措施与处置结果。下表按剧本基线逐环节比对，复盘页仅展示记录，不提供补录入口。</div>'
+      + '<div class="table-wrap"><table class="table"><thead><tr>'
+      + '<th style="width:80px">处置时长</th><th>处置环节</th><th>选择方案</th><th style="width:90px">判定</th><th style="width:70px">处置时刻</th><th>发现情况 / 措施 / 结果</th><th style="width:90px">处置人</th>'
+      + '</tr></thead><tbody>'+ (rows || '<tr><td colspan="7"><div class="empty">'+App.icon('shield')+'<div>暂无实战处置记录</div></div></td></tr>') +'</tbody></table></div>';
+  }
+
+  /* 无演练进程数据 → 初始化界面（对齐 Node 版空态，不报错） */
+  function renderInit(status){
+    var notStarted = (status === '未开始');
+    var title = notStarted ? '尚未开始演练' : '演练进行中，暂无处置记录';
+    var desc = notStarted
+      ? '当前项目尚未启动，暂无考评数据。请先在演练项目中启动演练；参演人员在角色工作台完成节点处置后，系统会自动生成考评明细与改进建议。'
+      : '演练已启动，但参演人员尚未提交任何处置记录。首个节点处置完成后，这里会自动生成考评明细。';
+    document.getElementById('evTitle').textContent = notStarted ? '尚未开始演练' : '演练进行中';
+    document.getElementById('evItems').innerHTML =
+      '<div class="standby-hero" style="margin:0">'
+      + '<div class="sb-icon" style="background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.28);color:var(--warn)">'+App.icon('score')+'</div>'
+      + '<div class="sb-body">'
+      +   '<span class="sb-tag" style="color:var(--warn);background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.28)"><span class="dot" style="background:var(--warn)"></span>'+(notStarted?'AWAITING START · 待启动':'IN PROGRESS · 演练中')+'</span>'
+      +   '<h2>'+title+'</h2>'
+      +   '<div class="sb-sub">'+desc+'</div>'
+      +   '<div class="sb-acts" style="flex-wrap:wrap">'
+      +     (notStarted?'<a class="btn primary" href="projects.html">'+App.icon('projects')+'前往演练项目启动</a>':'')
+      +     '<a class="btn" href="workbench.html">'+App.icon('workbench')+'前往角色工作台</a>'
+      +   '</div>'
+      + '</div></div>';
+    document.getElementById('smTotal').textContent = '—';
+    document.getElementById('smMax').textContent = '';
+    var rate = document.getElementById('smRate'); rate.className = 'right tag gray'; rate.textContent = notStarted ? '未开始' : '进行中';
+    var bar = document.getElementById('smBar'); bar.style.width = '0%'; bar.className = 'bar';
+    document.getElementById('smGrade').innerHTML = '<span class="tag gray">'+(notStarted?'未开始':'进行中')+'</span>';
+    document.getElementById('smFormula').textContent = '—';
+    document.getElementById('smStats').innerHTML = '';
+    document.getElementById('evSug').textContent = notStarted
+      ? '启动演练并完成节点处置后，系统将自动生成改进建议。'
+      : '暂无处置记录，暂不生成改进建议。';
+    document.getElementById('evStepsCard').innerHTML = '';
+  }
+
+  function load(){
+    var btn = document.getElementById('evReEval');
+    if(btn) btn.disabled = true;
+    Promise.all([
+      API.getDrillWorkbench(proj.id),
+      DRILL.get('/content/evaluation?projectId=' + encodeURIComponent(proj.id)).catch(function(){ return null; })
+    ]).then(function(r){
+      var wb = r[0];
+      var ev = r[1] || {};
+      SNAP = ev.snapshot || null;
+      SNAP_LIST = ev.snapshots || [];
+      SEAL = ev.seal || null;
+      ENDEX = ev.endException || null;
+      if(!wb || !wb.score || !Array.isArray(wb.score.nodes) || !Array.isArray(wb.nodes)){
+        throw new Error('考评数据结构异常：缺少 score/nodes');
+      }
+      flushWB(wb);
+      document.querySelector('.page-head .sub').textContent = proj.name + ' · ' + (SEAL ? ('已封存 v'+SEAL.snapshotVersion+' · '+SEAL.endMode) : '系统自动考评') + ' · ' + wb.mode;
+      var s = wb.score;
+      var st = proj.status || '未开始';
+      var ended = !!s.ended || st === '已结束' || st === '已归档';
+      /* 无演练进程数据：未结束且无步骤、无完成/偏离/跳过记录 → 初始化界面 */
+      var hasProgress = (wb.steps||[]).length > 0 || (s.hit||0) > 0 || (s.ontime||0) > 0 || (s.wrong||0) > 0 || (s.skipped||0) > 0;
+      if(!ended && !hasProgress){
+        renderInit(st);
+        renderSeal();
+        if(btn) btn.disabled = false;
+        return;
+      }
+      renderMode(); renderItems(); renderSummary(); renderSuggestions(); renderSteps(); renderSeal();
+      if(btn) btn.disabled = false;
+    }).catch(function(err){
+      flushWB(null);
+      renderError((err&&err.message)||'请稍后重试');
+      if(btn) btn.disabled = false;
+    });
+  }
+
+  /* 接口真失败：错误态（与空态、初始化界面区分） */
+  function renderError(msg){
+    document.getElementById('evTitle').textContent = '加载失败';
+    document.getElementById('evItems').innerHTML = '<div class="empty">'+App.icon('alert')+'<div>考评数据加载失败：'+App.esc(msg)+'</div><div class="tiny dim mt2">请检查网络或稍后重试</div></div>';
+    document.getElementById('smTotal').textContent = '—';
+    document.getElementById('smMax').textContent = '';
+    var rate = document.getElementById('smRate'); rate.className = 'right tag gray'; rate.textContent = '加载失败';
+    var bar = document.getElementById('smBar'); bar.style.width = '0%'; bar.className = 'bar';
+    document.getElementById('smGrade').innerHTML = '<span class="tag gray">加载失败</span>';
+    document.getElementById('smFormula').textContent = '—';
+    document.getElementById('smStats').innerHTML = '';
+    document.getElementById('smMode').innerHTML = '';
+    document.getElementById('evSug').textContent = '—';
+    document.getElementById('evStepsCard').innerHTML = '';
+  }
+
+  if(btnRe){
+    btnRe.onclick = function(){
+      var b = this; b.disabled = true; b.innerHTML = App.icon('refresh')+'自动考评计算中…';
+      API.recalcDrillScore(proj.id).then(function(s){
+        var mx = maxOf(s), p = pctOf(s.score, mx);
+        App.toast('自动考评完成：'+s.score+(mx?(' / '+mx):'')+' 分'+(p!==null?('（得分率 '+p+'%，'+gradeByPct(p)+'）'):('（'+grade(s.score)+'）'))+' · '+s.formula,'ok');
+        load();
+      }).catch(function(err){
+        App.toast((err&&err.message)||'考评失败','err');
+        b.disabled = false; b.innerHTML = App.icon('refresh')+'重新自动考评';
+      });
+    };
+  }
+
+  load();
+});
+App.boot('evaluation');
+</script>
+</body>
+</html>

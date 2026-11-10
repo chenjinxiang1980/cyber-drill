@@ -1,0 +1,103 @@
+# =============================================================================
+# Windows Docker Desktop —— Go 容器 + **MySQL 容器**（全容器）
+#
+# 用法：
+#   cp .env.example .env
+#   # DB_HOST 用 mysql（compose 内部 DNS），不要改
+#   # MYSQL_ROOT_PASSWORD 必须与 DB_ROOT_PASSWORD 完全一致
+#   # DB_USER / DB_PASSWORD / DB_NAME 与 MYSQL_* 对应
+#   #
+#   # MYSQL_ROOT_PASSWORD / DB_ROOT_PASSWORD / DB_PASSWORD 用占位符
+#   # 首次部署务必替换成真实值
+#
+#   docker compose -f docker-compose.full.yml up -d --build
+#   # 首次启动后自动跑 bootstrap（初始化数据库 + 种子数据）
+#
+# 停止并删除数据卷（重置）：
+#   docker compose -f docker-compose.full.yml down -v
+#
+# =============================================================================
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: drill-mysql-local
+    restart: unless-stopped
+    environment:
+      # ⚠️ 全部 __REPLACE_WITH__ 占位符必须替换
+      MYSQL_ROOT_PASSWORD: __REPLACE_WITH_MYSQL_ROOT_PASSWORD__
+      MYSQL_DATABASE:   drill_system
+      MYSQL_USER:       __REPLACE_WITH_DB_USER__
+      MYSQL_PASSWORD:   __REPLACE_WITH_DB_PASSWORD__
+      TZ:               Asia/Shanghai
+    ports:
+      - "127.0.0.1:3307:3306"   # 仅回环，避免把 MySQL 暴露到局域网
+    volumes:
+      - drill-desktop-mysql:/var/lib/mysql
+      # 首次启动 mysql 官方镜像会自动跑 /docker-entrypoint-initdb.d/*.sql
+      - ../../migrations:/docker-entrypoint-initdb.d:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --max-connections=300
+      --default-time-zone='+08:00'
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p__REPLACE_WITH_MYSQL_ROOT_PASSWORD__"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ---------- Bootstrap（一次性，初始化 MySQL + 种子数据）----------
+  bootstrap:
+    build:
+      context: ../..
+      dockerfile: deploy/linux/Dockerfile
+    image: drill-server:latest
+    container_name: drill-bootstrap-local
+    env_file:
+      - .env
+    environment:
+      DB_HOST: mysql
+      APP_ENV: production
+    command: ["/opt/drill/bin/drill-server-bootstrap", "-root=/opt/drill"]
+    restart: on-failure
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # ---------- App ----------
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/linux/Dockerfile
+    image: drill-server:latest
+    container_name: drill-app-local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: mysql
+      APP_ENV: development
+    ports:
+      - "8090:8090"
+    volumes:
+      - ../../public:/opt/drill/public:ro
+      - ../../data:/opt/drill/data
+      - drill-desktop-uploads:/opt/drill/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+
+volumes:
+  drill-desktop-mysql:
+  drill-desktop-uploads:

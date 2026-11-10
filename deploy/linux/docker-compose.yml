@@ -1,0 +1,152 @@
+# =============================================================================
+# drill-server —— Docker Compose 一键起 MySQL + 应用
+#
+# 启动（首次，VMware NAT 场景）：
+#   # 1) 准备 .env（从 drill.env.example 拷贝，改占位符）
+#   cp drill.env.example .env
+#   vi .env
+#   # 注意：DB_HOST 必须是 mysql（compose 内部 DNS），不要写 127.0.0.1
+#   #       APP_HOST_PORT 默认 8090，VMware NAT 两阶段见 README-FIRST.md
+#   #       MYSQL_* 值（compose 里）必须与 DB_* 值（.env 里）一致
+#
+#   # 2) 启动（--build 自动从源码编译 Go 二进制）
+#   docker compose up -d --build
+#
+#   # 3) 首次部署：
+#   #    有 drill_system-dump.sql → 导入 dump（不要跑 bootstrap）
+#   #    没有 dump → 跑 bootstrap 初始化空库
+#
+# 两阶段端口方案（VMware NAT + Windows 宿主 8090 冲突）：
+#   阶段一（Windows Go 还在跑）：
+#     .env 里设 APP_HOST_PORT=8091
+#     vmnetnat.conf 里 [incomingtcp] 加 8091 = <VM-IP>:8090
+#     局域网访问 http://<宿主IP>:8091
+#   阶段二（停掉 Windows Go 后）：
+#     .env 里改 APP_HOST_PORT=8090（或直接删这行，默认就是 8090）
+#     vmnetnat.conf 改回 8090 = <VM-IP>:8090
+#     局域网访问回到 http://<宿主IP>:8090
+#
+# 停止：
+#   docker compose down        # 停止保留数据
+#   docker compose down -v     # 彻底删除（含数据卷，重置）
+#
+# 说明：
+#   - 本 compose 不做 HTTPS 卸载（Go 进程只监听明文 8090）。
+#     HTTPS 在 VM 内 nginx/Caddy 终止（转发宿主 443 → VM 443），
+#     不要在 NAT 转发层做 TLS。
+#   - compose 版本要求：v2（`docker compose`，不是旧版 `docker-compose`）
+#
+# =============================================================================
+
+services:
+  # ---------- MySQL 8 ----------
+  mysql:
+    image: mysql:8.0
+    container_name: drill-mysql
+    restart: unless-stopped
+    environment:
+      # ⚠️ 全部 __REPLACE_WITH__ 占位符必须替换成真实值
+      # MYSQL_ROOT_PASSWORD 必须与 .env 里的 DB_ROOT_PASSWORD 一致
+      MYSQL_ROOT_PASSWORD: __REPLACE_WITH_MYSQL_ROOT_PASSWORD__
+      MYSQL_DATABASE:   drill_system
+      MYSQL_USER:       __REPLACE_WITH_DB_USER__
+      MYSQL_PASSWORD:   __REPLACE_WITH_DB_PASSWORD__
+      TZ:               Asia/Shanghai
+    ports:
+      # 仅绑定宿主机回环地址，容器内 app 仍通过 mysql:3306 访问；
+      # 生产环境不建议对外开放数据库端口。
+      - "127.0.0.1:${MYSQL_HOST_PORT:-3306}:3306"
+    volumes:
+      - drill-mysql-data:/var/lib/mysql
+      # migrations 首次启动时自动执行（mysql 官方镜像特性）
+      - ../../migrations:/docker-entrypoint-initdb.d:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --max-connections=300
+      --default-time-zone='+08:00'
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p__REPLACE_WITH_MYSQL_ROOT_PASSWORD__"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - drill-net
+
+  # ---------- Bootstrap（一次性初始化数据库 + 种子数据）----------
+  # 用法：docker compose run --rm bootstrap
+  # 这个服务 **不会** 被 app 自动触发，你需要手动 run
+  # 首次部署必跑；后续升级一般不需要跑（除非 schema 变了要补 migration）
+  bootstrap:
+    build:
+      context: ../..
+      dockerfile: deploy/linux/Dockerfile
+      args:
+        VERSION: ${VERSION:-1.0.0}
+    image: drill-server:${VERSION:-1.0.0}
+    container_name: drill-bootstrap
+    env_file:
+      - .env
+    environment:
+      DB_HOST: mysql               # compose 内部 DNS 覆盖
+      APP_ENV: production
+    command: ["/opt/drill/bin/drill-server-bootstrap", "-root=/opt/drill"]
+    restart: on-failure             # 失败了可以 docker compose up 再试
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - drill-net
+
+  # ---------- App ----------
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/linux/Dockerfile
+      args:
+        VERSION: ${VERSION:-1.0.0}
+    image: drill-server:${VERSION:-1.0.0}
+    container_name: drill-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: mysql               # compose 内部 DNS 覆盖
+      APP_ENV: production
+      # compose 内部网段，Gin 信任这个网段的 X-Forwarded-For
+      TRUSTED_PROXIES: "172.17.0.0/16,127.0.0.1/32"
+    ports:
+      # 宿主端口可配置，支持 VMware NAT 两阶段：
+      #   阶段一（Windows 宿主 8090 被占）：APP_HOST_PORT=8091
+      #   阶段二（Windows Go 已停）：        APP_HOST_PORT=8090（或不设，默认 8090）
+      - "${APP_HOST_PORT:-8090}:8090"
+    volumes:
+      # 运行时可写数据（上传文件、备份），用命名卷持久化
+      - drill-app-data:/opt/drill/data
+      - drill-app-uploads:/opt/drill/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully   # 等 bootstrap 跑完再启 app
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - drill-net
+
+# ---------- 命名卷 ----------
+volumes:
+  drill-mysql-data:      # MySQL 数据（不会因容器删而丢）
+  drill-app-data:        # /opt/drill/data
+  drill-app-uploads:     # /opt/drill/uploads
+
+# ---------- 网络 ----------
+networks:
+  drill-net:
+    driver: bridge

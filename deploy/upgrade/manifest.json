@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-10",
+  "default_registry": "ghcr",
+  "registries": {
+    "ghcr": "ghcr.io/chenjinxiang1980/cyber-drill",
+    "swr": "swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill"
+  },
+  "releases": [
+    {
+      "version": "0.5.0",
+      "previous": null,
+      "channel": "stable",
+      "best_effort": true,
+      "published_at": "2026-11-06",
+      "image": { "tags": ["0.5.0"], "digest": null, "digest_unknown": true, "size_bytes": 0, "layers": 0 },
+      "migrations": { "from_exclusive": "0000_bootstrap", "through": "0003_login_lock", "count": 3, "contains_ddl": true, "backward_compatible": true },
+      "schema_migrations_total": 3,
+      "min_free_bytes": 1610612736,
+      "health": { "path": "/api/health", "expect_version": "0.5.0", "timeout_seconds": 90 }
+    },
+    {
+      "version": "0.5.1",
+      "previous": "0.5.0",
+      "channel": "stable",
+      "best_effort": true,
+      "published_at": "2026-11-06",
+      "image": { "tags": ["0.5.1"], "digest": null, "digest_unknown": true, "size_bytes": 0, "layers": 0 },
+      "migrations": { "from_exclusive": "0003_login_lock", "through": "0010_s01_seq_order", "count": 7, "contains_ddl": true, "backward_compatible": true },
+      "schema_migrations_total": 10,
+      "min_free_bytes": 1610612736,
+      "health": { "path": "/api/health", "expect_version": "0.5.1", "timeout_seconds": 90 }
+    },
+    {
+      "version": "0.6.0",
+      "previous": "0.5.1",
+      "channel": "stable",
+      "best_effort": true,
+      "published_at": "2026-11-07",
+      "image": { "tags": ["0.6.0"], "digest": null, "digest_unknown": true, "size_bytes": 0, "layers": 0 },
+      "migrations": { "from_exclusive": "0010_s01_seq_order", "through": "0012_form_template_code", "count": 2, "contains_ddl": true, "backward_compatible": true },
+      "schema_migrations_total": 12,
+      "min_free_bytes": 1610612736,
+      "health": { "path": "/api/health", "expect_version": "0.6.0", "timeout_seconds": 90 },
+      "notes_url": "https://github.com/chenjinxiang1980/cyber-drill/releases/tag/v0.6.0"
+    },
+    {
+      "version": "0.8.3",
+      "previous": "0.6.0",
+      "channel": "stable",
+      "published_at": "2026-11-07",
+      "image": { "tags": ["0.8.3"], "digest": null, "digest_unknown": true, "size_bytes": 0, "layers": 0 },
+      "migrations": { "from_exclusive": "0012_form_template_code", "through": "0090_distractor_rewrite_v2", "count": 35, "contains_ddl": true, "backward_compatible": true },
+      "schema_migrations_total": 47,
+      "min_free_bytes": 1610612736,
+      "health": { "path": "/api/health", "expect_version": "0.8.3", "timeout_seconds": 90 },
+      "notes_url": "https://github.com/chenjinxiang1980/cyber-drill/releases/tag/v0.8.3"
+    },
+    {
+      "version": "0.8.6",
+      "previous": "0.8.3",
+      "channel": "stable",
+      "published_at": "2026-11-08",
+      "image": {
+        "tags": ["0.8.6"],
+        "digest": { "ghcr": "sha256:cde759a249a9147b8308e004eb9b89b91256ed58fc5a7a3107d73acfa9f75dbf",
+                    "swr": "sha256:cde759a249a9147b8308e004eb9b89b91256ed58fc5a7a3107d73acfa9f75dbf" },
+        "size_bytes": 79733766,
+        "layers": 10
+      },
+      "migrations": { "from_exclusive": "0090_distractor_rewrite_v2", "through": "0104_brand_version_086", "count": 13, "contains_ddl": true, "backward_compatible": true },
+      "schema_migrations_total": 60,
+      "min_free_bytes": 1610612736,
+      "health": { "path": "/api/health", "expect_version": "0.8.6", "timeout_seconds": 90 },
+      "notes_url": "https://github.com/chenjinxiang1980/cyber-drill/releases/tag/v0.8.6"
+    },
+    {
+      "version": "0.8.7",
+      "previous": "0.8.6",
+      "channel": "internal",
+      "published_at": "2026-11-08",
+      "image": { "tags": ["0.8.7"], "digest": null, "digest_unknown": true, "size_bytes": 193276444, "layers": 9 },
+      "migrations": { "from_exclusive": "0104_brand_version_086", "through": "0109_brand_version_087", "count": 5, "contains_ddl": true, "backward_compatible": true },
+      "schema_migrations_total": 65,
+      "min_free_bytes": 1610612736,
+      "health": { "path": "/api/health", "expect_version": "0.8.7", "timeout_seconds": 90 }
+    },
+    {
+      "version": "0.8.8",
+      "previous": "0.8.7",
+      "channel": "stable",
+      "published_at": "2026-11-09",
+      "image": { "tags": ["0.8.8"], "digest": null, "digest_unknown": true, "size_bytes": 194149816, "layers": 9 },
+      "migrations": { "from_exclusive": "0109_brand_version_087", "through": "0114_brand_version_088", "count": 5, "contains_ddl": false, "backward_compatible": true },
+      "schema_migrations_total": 70,
+      "min_free_bytes": 1610612736,
+      "health": { "path": "/api/health", "expect_version": "0.8.8", "timeout_seconds": 90 }
+    },
+    {
+      "version": "0.8.9",
+      "previous": "0.8.8",
+      "channel": "stable",
+      "published_at": "2026-11-09",
+      "image": { "tags": ["0.8.9"], "digest": null, "digest_unknown": true, "size_bytes": 194154948, "layers": 9 },
+      "migrations": { "from_exclusive": "0114_brand_version_088", "through": "0118_brand_version_089", "count": 1, "contains_ddl": false, "backward_compatible": true },
+      "schema_migrations_total": 71,
+      "min_free_bytes": 2147483648,
+      "health": { "path": "/api/health", "expect_version": "0.8.9", "timeout_seconds": 90 }
+    },
+    {
+      "version": "0.9.0",
+      "previous": "0.8.9",
+      "channel": "stable",
+      "published_at": "2026-11-09",
+      "image": {
+        "tags": ["0.9.0", "latest"],
+        "digest": { "ghcr": "sha256:105e638cf1cdf6de4b37e5bac3d33fccc57d6ce47d2362bf44adcf61a192c395",
+                    "swr": "sha256:105e638cf1cdf6de4b37e5bac3d33fccc57d6ce47d2362bf44adcf61a192c395" },
+        "size_bytes": 194741696,
+        "layers": 9
+      },
+      "migrations": { "from_exclusive": "0118_brand_version_089", "through": "0122_brand_version_090", "count": 4, "contains_ddl": false, "backward_compatible": true },
+      "schema_migrations_total": 75,
+      "min_free_bytes": 2147483648,
+      "health": { "path": "/api/health", "expect_version": "0.9.0", "timeout_seconds": 90 },
+      "notes_url": "https://github.com/chenjinxiang1980/cyber-drill/releases/tag/v0.9.0"
+    },
+    {
+      "version": "1.0.0",
+      "previous": "0.9.0",
+      "channel": "stable",
+      "best_effort": false,
+      "published_at": "2026-11-10",
+      "image": {
+        "tags": ["1.0.0", "latest"],
+        "digest": { "ghcr": "sha256:53fbf2204a1ef8524d54f03e3d60fa4e5e744e96a190b1c026c804bf368d6c9e",
+                    "swr": "sha256:53fbf2204a1ef8524d54f03e3d60fa4e5e744e96a190b1c026c804bf368d6c9e" },
+        "size_bytes": 194943620,
+        "layers": 9
+      },
+      "migrations": { "from_exclusive": "0122_brand_version_090", "through": "0123_brand_version_100", "count": 1, "contains_ddl": false, "backward_compatible": true },
+      "schema_migrations_total": 76,
+      "min_free_bytes": 2147483648,
+      "health": { "path": "/api/health", "expect_version": "1.0.0", "timeout_seconds": 90 },
+      "notes_url": "https://github.com/chenjinxiang1980/cyber-drill/releases/tag/v1.0.0"
+    }
+  ]
+}

@@ -1,0 +1,2048 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>角色工作台 · 示例医院网络安全应急演练系统</title>
+<link rel="icon" type="image/png" href="img/logo.png">
+<link rel="stylesheet" href="styles.css?v=20261104b">
+<style>
+/* 待办任务处置弹窗：左右分栏（左 30% 研判参考 / 右 70% 表单填写提交） */
+.modal.wb-split-modal{width:min(1180px,94vw);height:86vh;max-height:86vh}
+.modal.wb-split-modal .m-body{padding:16px;overflow:hidden;flex:1;min-height:0}
+.modal.wb-split-modal #wbTaskBody{height:100%;min-height:0}
+.wb-split{display:flex;gap:16px;height:100%;min-height:0}
+.wb-split-left{flex:0 0 30%;max-width:30%;min-width:0;overflow-y:auto;min-height:0;padding-right:4px}
+.wb-split-right{flex:1 1 70%;min-width:0;overflow-y:auto;min-height:0;padding-right:4px}
+@media (max-width:900px){
+  .modal.wb-split-modal{width:min(100vw - 24px,560px);height:auto;max-height:86dvh}
+  .modal.wb-split-modal .m-body{overflow-y:auto;padding:14px}
+  .wb-split{flex-direction:column;height:auto}
+  .wb-split-left{flex:none;max-width:100%;width:100%;overflow:visible;padding-right:0}
+  .wb-split-right{flex:none;width:100%;overflow:visible;padding-right:0}
+}
+/* 上一节点处置详情：只读弹窗（长文本内部滚动，不撑破布局） */
+.modal.pred-detail-modal{width:min(880px,94vw);max-width:94vw}
+.pred-detail-text{white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;line-height:1.75}
+.pred-detail-val{white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto}
+@media (max-width:900px){
+  .modal.pred-detail-modal{width:min(100vw - 24px,560px);max-height:86dvh}
+}
+</style>
+</head>
+<body data-page="workbench">
+<script src="system.js"></script>
+<script src="app.js"></script>
+<script src="api.js"></script>
+<script>
+document.addEventListener('app:ready', function(e){
+  var role = e.detail.role;
+  var page = document.getElementById('page');
+  var proj = API.activeProject();
+
+  /* ---------- 无演练项目：展示待机空态 ---------- */
+  if (!proj) {
+    Promise.all([API.getScenarios(), API.getProjects(), API.getScriptNodes()]).then(function(r){
+      var scens = Array.isArray(r[0]) ? r[0] : [];
+      var projs = Array.isArray(r[1]) ? r[1] : [];
+      var nodes = Array.isArray(r[2]) ? r[2] : [];
+      page.innerHTML =
+        '<div class="page-head"><div><h1>'+App.esc(role.name)+' · 工作台</h1>'
+        + '<div class="sub">当前无进行中的演练项目 · 待命状态</div></div>'
+        + '<div class="acts"><button class="btn" id="btnScript">'+App.icon('file-text')+'查看演练脚本</button></div></div>'
+        + '<div class="standby-hero">'
+        + '<div class="sb-icon" style="background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.28);color:var(--ok)">'+App.icon('workbench')+'</div>'
+        + '<div class="sb-body">'
+        +   '<span class="sb-tag" style="color:var(--ok);background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.28)"><span class="dot" style="background:var(--ok)"></span>READY · 工作台就绪</span>'
+        +   '<h2>'+App.esc(role.name)+' · 工作台待机中</h2>'
+        +   '<div class="sb-sub">当前无进行中的演练项目，工作台处于待命状态。演练启动后，系统将按剧本节点自动为本角色生成待办任务、故障通报、处置表单与证据采集指引。</div>'
+        +   '<div class="sb-acts">'
+        +     '<a class="btn primary" href="projects.html">'+App.icon('projects')+'创建演练项目</a>'
+        +     '<a class="btn" href="scenarios.html">'+App.icon('scenarios')+'选择剧本启动推演</a>'
+        +     '<a class="btn" href="dashboard.html">'+App.icon('dashboard')+'返回态势总看板</a>'
+        +   '</div>'
+        +   '<div class="sb-meta">'
+        +     '<div class="m-item"><b>'+scens.length+'</b>内置场景</div>'
+        +     '<div class="m-item"><b>'+nodes.length+'</b>剧本节点</div>'
+        +     '<div class="m-item"><b>'+projs.length+'</b>历史项目</div>'
+        +   '</div>'
+        + '</div></div>'
+        + '<div class="card"><div class="card-title">'+App.icon('workbench')+'工作台功能概览</div>'
+        +   '<div class="small" style="line-height:2">角色工作台是演练期间参演人员的<b>主要操作界面</b>，承载四类核心能力：<br>'
+        +   '<b>· 待办任务处置</b>：按剧本节点自动生成本角色待办，支持基础版（按引导逐步执行）和实战版（自主研判选择处置动作）两种演练模式。<br>'
+        +   '<b>· 故障通报与引导</b>：演练开始时弹窗展示剧本预设故障通报，工作台顶部持续显示醒目告警条，处置节点提供引导提示、决策问题与干扰处置。<br>'
+        +   '<b>· 表单分步填写</b>：处置表单采用分步向导逐字段引导，支持一键模拟数据预填并自动归档至取证模块；实战版需自行研判流转对象。<br>'
+        +   '<b>· 证据采集与打分</b>：处置过程中可上传文件或屏幕截图，系统自动生成告警与故障截图作为取证材料；演练期间实时显示评分与偏离情况。</div>'
+        + '</div>';
+      var bScriptEmpty = document.getElementById('btnScript');
+      if(bScriptEmpty) bScriptEmpty.onclick = function(){ App.openScript(null, {canExport:false}); };
+    }).catch(function(){
+      page.innerHTML = '<div class="forbidden">'+App.icon('alert')+'<h2>数据加载失败</h2><p>请检查网络或联系管理员</p></div>';
+    });
+    return;
+  }
+
+  var isExternal = !!role.external;
+  var isPractical = proj.mode === '实战版';
+
+  /* 各角色关注态势（工作台统一承载待办任务与处置执行） */
+  /* DEFAULT_FEED 与 src/seed_data.js DICT.role_feed_mapping 保持一致 */
+  var DEFAULT_FEED = {
+    commander:'messages', duty:'messages', netsec:'evidence', sysadmin:'impact', itlead:'messages',
+    medlead:'impact', clinical:'impact', healthbureau:'docs', cac:'docs',
+    cyberpolice:'docs', platformadmin:'audit'
+  };
+  var FEED = (MOCK.DICT.role_feed_mapping && typeof MOCK.DICT.role_feed_mapping === 'object') ? MOCK.DICT.role_feed_mapping : DEFAULT_FEED;
+  var feed = FEED[role.id] || 'messages';
+
+  /* 演练事件模拟数据：按当前项目场景取 SIM_DATA，供表单自动预填与自动取证截图（全部虚拟数据） */
+  var SCEN = (MOCK.SCENARIOS||[]).filter(function(s){ return s.id===proj.scenarioId; })[0] || null;
+  /* 剧本故障通报：演练开始后先弹窗展示，再在页面正上方固定显示；内容来自剧本编排「演练初始故障通报」 */
+  var ALERT = String((SCEN && SCEN.alert) || '').trim()
+    || (SCEN ? (SCEN.desc || SCEN.name || '') : '');
+  var started = proj.status === '演练中';
+  /* 实战版：可选下一节点接收角色 + 取证材料完成情况（未归档不允许结束演练） */
+  var RECEIVERS = [];
+  var EV = { done:0, total:0, pending:0, core:0, coreDone:0, corePending:0, support:0, supportDone:0, supportPending:0, pendingItems:[] };
+  /* 新任务语音提醒基线：仅在待办项新增时播报，首次加载与完成推进不播报 */
+  var lastTaskSig = null;
+  function announceNewTasks(ids, label){
+    var sig = ids.map(String).sort().join(',');
+    if(lastTaskSig === null){ lastTaskSig = sig; return; }
+    if(sig === lastTaskSig) return;
+    var prev = lastTaskSig ? lastTaskSig.split(',') : [];
+    var added = ids.filter(function(x){ return prev.indexOf(String(x)) < 0; });
+    lastTaskSig = sig;
+    if(added.length) App.voice.speak('有新的'+label+'到达，共 '+added.length+' 项，请及时处理');
+  }
+  var SIM = MOCK.SIM_DATA || {};
+  /* 按场景类型取模拟数据：优先 simType/type 精确命中，其次用场景名做包含匹配，
+     最后回落「通用」。此前恒取「通用」导致勒索病毒场景的专业预填数据从未生效。 */
+  var simKey = '';
+  if(SCEN){
+    [SCEN.simType, SCEN.type, SCEN.name].forEach(function(k){ if(k && SIM[k]) simKey = k; });
+    if(!simKey){
+      Object.keys(SIM).forEach(function(k){
+        if(k !== '通用' && String(SCEN.name||'').indexOf(k) >= 0) simKey = k;
+      });
+    }
+  }
+  var FACTS = (simKey && SIM[simKey]) || SIM['通用'] || {
+    sys:'院内业务系统（模拟地址 10.20.x.x）', fault:'模拟故障现象（通用兜底，请按实际修改）',
+    alert:'态势感知平台（模拟）：推送安全告警', ip:'10.20.x.x（模拟可疑IP）',
+    sample:'模拟样本摘要（占位）', scope:'模拟范围（无真实业务影响）',
+    action:'按预案模拟处置', progress:'按剧本推进中（模拟）',
+    backup:'备份有效性校验（模拟）', impact:'无真实业务影响（模拟）', measure:'按预案启用纸质/人工兜底（模拟）'
+  };
+
+  function p2(n){ return n<10 ? '0'+n : String(n); }
+  /* 演练计时文案：以服务端 started_at 为唯一基准；历史数据缺开始时刻时显示"计时未启动" */
+  function liveTxt(p){ var sec = API.elapsedOf(p); return (sec === null) ? '计时未启动' : ('T+' + API.fmtElapsed(sec)); }
+  function fmtSize(b){ return b<1024 ? b+' B' : b<1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
+
+  /* 代填：仅信息科负责人/平台管理员，且当前登录人不是外部单位时可对外部单位任务代填 */
+  var canProxy = !isExternal && (role.id === 'itlead' || role.id === 'platformadmin');
+  function extRoleMap(){
+    var m = {};
+    (MOCK.ROLES || []).forEach(function(r){ if(r && r.external) m[r.id] = r.name; });
+    return m;
+  }
+
+  page.innerHTML =
+    '<div class="page-head"><div><h1>'+App.esc(role.name)+' · 工作台</h1>'
+    + '<div class="sub">'+App.esc(proj.name)+' · '+(isPractical?'实战版：自主研判处置':'基础版：按剧本流程逐步执行')+(isExternal?' · <span style="color:var(--warn)">外部单位只读视图</span>':'')+'</div></div>'
+    + '<div class="acts">'
+    + (started ? '<span class="live-chip" id="wbLive"><span class="dot"></span>演练进行中 · '+liveTxt(proj)+'</span>' : '')
+    + '<button class="btn" id="btnFault">'+App.icon('alert')+'查看故障通报</button>'
+    + '<button class="btn" id="btnScript">'+App.icon('file-text')+'查看演练脚本</button>'
+    + (isPractical && proj.status==='演练中' && ['commander','platformadmin','itlead'].indexOf(role.id)>=0
+        ? '<button class="btn danger" id="btnFinish">'+App.icon('check')+'完成演练</button>' : '')
+    + '<button class="btn" id="btnRefresh">'+App.icon('refresh')+'刷新</button></div></div>'
+    + '<div id="wbFault"></div>'
+    + '<div class="sim-banner">'+App.icon('alert')+'<span>工作台所有处置动作均为<b>演练模拟记录</b>（写入审计日志与取证模块），系统不会向医院真实网络、HIS/EMR等生产系统下发任何命令。</span></div>'
+    + '<div class="wb-grid">'
+    +   '<div class="card"><div class="card-title">'+App.icon('shield')+'岗位职责</div>'
+    +     '<div class="kv">'
+    +     '<span class="k">角色</span><span class="bold">'+App.esc(role.name)+' <span class="tag gray">'+App.esc(role.short)+'</span>'+(isExternal?' <span class="tag yellow">外部单位</span>':'')+'</span>'
+    +     '<span class="k">职责描述</span><span class="small">'+App.esc(role.desc)+'</span>'
+    +     '<span class="k">当前用户</span><span class="small">'+App.esc(App.curUser())+'</span>'
+    +     '<span class="k">可见模块</span><span class="small muted">'+App.esc((role.nav||[]).length)+' 个（分级权限隔离）</span>'
+    +     '</div>'
+    +     (isExternal?'<div class="tiny dim mt3">依据分级权限策略：外部单位仅可查看医院主动上报的文书与公告材料，不可查看内网原始技术日志、告警明细与会商内部讨论。</div>':'')
+    +   '</div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色待办任务<span class="more">'+(isPractical?'已发现故障 · 自主处置':'按剧本流程逐步执行')+'</span></div>'
+    +     '<div id="wbTasks"><div class="small dim">加载中…</div></div></div>'
+    +   (canProxy ? '<div class="card"><div class="card-title">'+App.icon('shield')+'外部单位代填<span class="more">信息科负责人代填 · 全程留痕</span></div>'
+    +     '<div class="tiny dim" style="line-height:1.75;margin-bottom:8px">外部单位（公安、运营商、市卫生健康局、市网信办等）不登录系统时，由信息科负责人代填其任务与表单。提交将记录填写人、被代填单位、代填时间，并写入审计日志与演练报告。</div>'
+    +     '<select class="select" id="wbProxySel"><option value="">全部外部单位</option></select>'
+    +     '<div id="wbProxyList" class="small dim" style="margin-top:8px">加载中…</div></div>' : '')
+    +   '<div class="card"><div class="card-title">'+App.icon('score')+'演练评分<span class="more">'+(isPractical?'偏离/超时扣分':'标准处置时长达成率')+'</span></div><div id="wbScore" class="small dim">正在汇总…</div></div>'
+    +   '<div class="card"><div class="card-title">'+App.icon('eye')+'本角色关注态势</div><div id="wbFeed"><div class="small dim">加载中…</div></div></div>'
+    + '</div>';
+
+  document.getElementById('btnRefresh').onclick = function(){
+    App.toast('正在刷新工作台数据…','ok');
+    if(isPractical){ renderPractical(); renderScore(); } else { renderBasic(); renderScore(); }
+    if(canProxy) renderProxy();
+  };
+
+  /* 页头演练计时：按真实起止时刻每秒刷新 */
+  if(started){
+    setInterval(function(){
+      var el = document.getElementById('wbLive');
+      if(!el) return;
+      var p = API.activeProject() || proj;
+      if(p.status==='暂停'){
+        el.className = 'live-chip none';
+        el.innerHTML = '<span class="dot"></span>演练已暂停 · '+liveTxt(p);
+      } else {
+        el.className = 'live-chip';
+        el.innerHTML = '<span class="dot"></span>演练进行中 · '+liveTxt(p);
+      }
+    }, 1000);
+  }
+
+  /* ---------- 关联剧本节点 ---------- */
+  function nodeForTask(t){
+    var list = MOCK.SCRIPT_NODES || [];
+    var n = t.nodeId ? list.filter(function(x){ return x.id===t.nodeId; })[0] : null;
+    if(n) return n;
+    if(t.forms && t.forms.length) n = list.filter(function(x){ return x.form===t.forms[0]; })[0];
+    return n || null;
+  }
+
+  /* ---------- 表单字段解析与分步填写向导 ---------- */
+  function fieldOf(fl){
+    if(typeof fl === 'string') return { label:String(fl||'').trim(), hint:'', required:true, type:'auto', options:[], 'default':'' };
+    return {
+      label:String((fl&&(fl.label||fl.name))||'').trim(),
+      hint:String((fl&&fl.hint)||''),
+      required:!(fl&&fl.required===false),
+      type:(fl&&fl.type)||'auto',
+      options:Array.isArray(fl&&fl.options)?fl.options.slice():(typeof (fl&&fl.options)==='string'?fl.options.split(/[、,，|｜]/).map(function(s){return String(s).trim();}).filter(Boolean):[]),
+      /* 模板配置的默认值（不是字段说明、也不是输入框 placeholder）：为空表示未配置 */
+      'default':String((fl&&(fl['default']!==undefined?fl['default']:fl.defaultValue))||'').trim()
+    };
+  }
+  function wizFields(raw){
+    return (raw||[]).map(fieldOf).filter(function(x){ return !!x.label; });
+  }
+  /* 控件类型：模板显式指定优先，否则按字段名识别 */
+  function wizType(f){
+    if(f.type==='multiselect' && f.options && f.options.length) return 'multiselect';
+    if(f.type==='select' && f.options && f.options.length) return 'select';
+    if(f.type==='textarea' || f.type==='text' || f.type==='datetime') return f.type;
+    if(/时间$|日期$/.test(f.label)) return 'datetime';
+    if(/说明|描述|意见|摘要|进展|清单|方案|依据|经过|情况|范围|措施|过程|计划|整改|现象|判断|趋势|建议|次数/.test(f.label)) return 'textarea';
+    return 'text';
+  }
+  /* 下拉值归一：模拟/预填数据必须落在选项范围内（忽略空格差异，允许包含匹配） */
+  function fitOption(opts, v){
+    v = String(v||'').trim();
+    var norm = function(x){ return String(x||'').replace(/\s+/g,''); };
+    if(!v || !opts || !opts.length) return '';
+    if(opts.indexOf(v) >= 0) return v;
+    for(var i=0;i<opts.length;i++){ if(norm(opts[i]) === norm(v)) return opts[i]; }
+    for(var j=0;j<opts.length;j++){
+      var o = norm(opts[j]);
+      if(o && (o.indexOf(norm(v)) >= 0 || norm(v).indexOf(o) >= 0)) return opts[j];
+    }
+    return '';
+  }
+
+  /* ---------- 表单字段模拟值（按剧本与场景生成，全部为虚拟数据） ---------- */
+  function simValue(fd, t, node){
+    var d = new Date();
+    var tm = p2(d.getHours())+':'+p2(d.getMinutes());
+    if(/起止/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+tm+' 至 '+(parseInt(tm,10)+1)+':30（模拟）';
+    if(/时间|日期/.test(fd)) return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+'T'+tm;
+    if(/发现方式/.test(fd)) return String(FACTS.alert||'').split('：')[0] || '安全告警系统';
+    if(/受攻击系统|受影响系统|受影响业务系统|涉及系统/.test(fd)) return FACTS.sys;
+    if(/IP|域名/i.test(fd)) return FACTS.ip;
+    if(/基本情况|事件经过/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'；发现方式：'+FACTS.alert+'（模拟数据，请核对修改）';
+    if(/现场处置过程|处置过程/.test(fd)) return '1. 接报后初步核实并留存告警截图；2. 隔离受影响主机（'+FACTS.ip+'）；3. 封堵攻击源并保留取证记录（模拟处置）';
+    if(/事件处置结果|处置结果/.test(fd)) return '受影响业务已恢复，故障现象消除，未发现数据外泄（模拟结果，请核对）';
+    if(/整改|工作计划/.test(fd)) return '1. 修补漏洞并更新防护策略；2. 完善备份与恢复演练；3. 责任部门：信息科，7 个工作日内完成复查（模拟计划）';
+    if(/异常现象|描述|现象/.test(fd)) return FACTS.fault;
+    if(/判断/.test(fd)) return '结合告警与样本特征（'+FACTS.sample+'），初步判定为该类事件（模拟判定）';
+    if(/核实人|确认人|审批人|联系人|报送人|填报人|研判人|报案人|评估人/.test(fd)) return App.curUser()||role.short;
+    if(/影响范围|范围/.test(fd)) return FACTS.scope;
+    if(/进展/.test(fd)) return FACTS.progress;
+    if(/建议响应等级/.test(fd)){
+      var lv = (SCEN&&SCEN.level)||t.level||'较大';
+      return lv==='特别重大'?'Ⅰ级':(lv==='重大'?'Ⅱ级':(lv==='较大'?'Ⅲ级':'Ⅳ级'));
+    }
+    if(/风险等级/.test(fd)) return '低';
+    if(/等级/.test(fd)) return (SCEN&&SCEN.level)||t.level||'较大';
+    if(/类型/.test(fd)) return SCEN?SCEN.name:'模拟事件';
+    if(/单位/.test(fd)) return (proj.units&&proj.units[0]) || ((DRILL.brand()||{}).unitName) || '示例医院';
+    if(/摘要|依据/.test(fd)) return (SCEN?SCEN.desc:FACTS.fault)+'（系统自动填充，请核对修改）';
+    if(/患者数/.test(fd)) return '0（虚拟数据，无真实患者）';
+    if(/损失/.test(fd)) return FACTS.impact;
+    if(/证据清单/.test(fd)) return FACTS.sample+'、告警与故障截图（自动取证）';
+    if(/校验|备份/.test(fd)) return FACTS.backup;
+    if(/验证结果|结果/.test(fd)) return '业务功能验证通过（模拟，无真实影响）';
+    if(/兜底|方案/.test(fd)) return FACTS.measure;
+    if(/措施/.test(fd)) return FACTS.action;
+    if(/意见/.test(fd)) return '同意，按预案执行（模拟审批）';
+    if(/监测渠道/.test(fd)) return '网信办舆情监测、院内值班巡查（模拟）';
+    if(/传播趋势/.test(fd)) return '传播缓慢，未发现大范围扩散（模拟）';
+    if(/口径建议/.test(fd)) return '统一由院宣传部门答复，不透露患者信息（模拟口径）';
+    if(/恢复系统/.test(fd)) return FACTS.sys;
+    if(/清单/.test(fd)) return FACTS.sys;
+    return '模拟数据·自动填充';
+  }
+
+  /* 向导状态：key → { fields, values, step, done } */
+  var WIZ = {};
+  function wizState(key, fields, t, node, prefill){
+    if(!WIZ[key]) WIZ[key] = { fields: fields, values: {}, step: 0, done: false, inited: false, t: t, node: node };
+    var s = WIZ[key];
+    s.fields = fields; s.t = t; s.node = node;
+    if(!s.inited){
+      fields.forEach(function(f){
+        var v = '';
+        if(prefill){
+          /* 回填优先级：模板配置的默认值 > 前端模拟数据兜底（用户已手改的值存在 s.values，不会被重算） */
+          v = String(f['default']||'').trim();
+          if(!v) v = String(simValue(f.label, t, node)||'');
+        }
+        if(prefill && wizType(f) === 'select' && f.options.length){
+          v = fitOption(f.options, v) || f.options[0];
+        }
+        if(prefill && wizType(f) === 'multiselect' && f.options.length){
+          /* 多选预填必须收敛到 options，避免写入模板外的系统名污染业务影响状态 */
+          var picked = String(v||'').split(/[、,，;；\/\s]+/).filter(function(x){
+            return x && f.options.indexOf(x) >= 0;
+          });
+          v = picked.join('、');
+        }
+        s.values[f.label] = v;
+      });
+      s.inited = true;
+    }
+    return s;
+  }
+
+  /* 字段自动朗读文本：「请填写」在前，仅跟字段说明内容 */
+  function speechHint(h){
+    var t = String(h||'').replace(/\s+/g,' ').trim().replace(/[。！？；，,.;\s]+$/,'');
+    return t ? '请填写，' + t : '请填写';
+  }
+
+  /* 在容器内渲染分步填写向导：逐字段展示说明，支持一键模拟数据与上一步/下一步 */
+  function mountWizard(host, key, opts){
+    var fields = wizFields(opts.fields);
+    if(!fields.length){ host.innerHTML = ''; return null; }
+    var s = wizState(key, fields, opts.t, opts.node, !!opts.prefill);
+    var name = opts.name || '表单';
+    var speechSeq = 0;
+
+    function paint(){
+      if(s.done){
+        host.innerHTML = '<div class="wz-head"><span class="bold">'+App.esc(name)+'</span><span class="tag green">已完成 '+fields.length+' / '+fields.length+'</span></div>'
+          + '<div class="wz-sum">' + fields.map(function(f){
+              var dv = String(s.values[f.label]||'—');
+              if(wizType(f) === 'datetime') dv = dv.replace('T',' ');
+              return '<div class="wz-item"><span class="k">'+App.esc(f.label)+'</span><span class="v">'+App.esc(dv)+'</span></div>';
+            }).join('') + '</div>'
+          + '<div class="wz-acts"><button class="btn sm" data-edit>'+App.icon('edit')+'返回修改</button><span class="grow"></span><span class="tiny dim">已逐字段完成填写，可提交</span></div>';
+        host.querySelector('[data-edit]').onclick = function(){ s.done = false; s.step = 0; paint(); };
+        return;
+      }
+      var f = fields[s.step];
+      var type = wizType(f);
+      var val = String(s.values[f.label]||'');
+      var ctl;
+      if(type === 'select'){
+        ctl = '<select class="input" id="wzInp"><option value="">请选择</option>'
+          + f.options.map(function(o){ return '<option value="'+App.esc(o)+'"'+(val===o?' selected':'')+'>'+App.esc(o)+'</option>'; }).join('')
+          + '</select>';
+      } else if(type === 'multiselect'){
+        /* 下拉多选：渲染为 checkbox 列表，值用顿号分隔存储 */
+        var picked = val ? val.split(/[、,，]/).map(function(x){ return x.trim(); }).filter(Boolean) : [];
+        ctl = '<div id="wzInp"><label class="tiny dim" style="margin-bottom:6px;display:block">请勾选可多选（按 Ctrl 或 Command 可多选）</label>'
+          + '<div class="wz-chkbox" style="display:flex;flex-wrap:wrap;gap:6px">'
+          + f.options.map(function(o){
+              var checked = picked.indexOf(o) >= 0 ? ' checked' : '';
+              return '<label style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;font-size:13px">'
+                + '<input type="checkbox" data-o="'+App.esc(o)+'"'+checked+'>'+App.esc(o)+'</label>';
+            }).join('')
+          + '</div></div>';
+      } else if(type === 'datetime'){
+        ctl = '<input class="input" id="wzInp" type="datetime-local" step="60" value="'+App.esc(val)+'">'
+          + '<div class="tiny dim mt2">'+App.icon('clock')+' 使用日期时间选择器填写，统一为 YYYY-MM-DD HH:mm 格式</div>';
+      } else {
+        ctl = type === 'textarea'
+          ? '<textarea class="textarea" id="wzInp" rows="3" placeholder="请按字段说明填写">'+App.esc(val)+'</textarea>'
+          : '<input class="input" id="wzInp" value="'+App.esc(val)+'" placeholder="请按字段说明填写">';
+      }
+      host.innerHTML = '<div class="wz-head"><span class="bold">'+App.esc(name)+'</span><span class="tiny dim">字段 '+(s.step+1)+' / '+fields.length+'</span></div>'
+        + '<div class="wz-bar"><i style="width:'+Math.round((s.step+1)/fields.length*100)+'%"></i></div>'
+        + '<div class="wz-hint"><b>字段说明</b><span>'+(f.hint?App.esc(f.hint):'请按实际情况填写')+'</span></div>'
+        + '<label class="f-label" style="display:block;margin:8px 0 4px">'+App.esc(f.label)+(f.required?'<span class="req"> *</span>':'<span class="tiny dim">（选填）</span>')+'</label>'
+        + ctl
+        + '<div class="wz-acts"><button class="btn sm" data-sim>'+App.icon('refresh')+'一键模拟数据</button><span class="grow"></span>'
+        + '<button class="btn sm" data-prev'+(s.step===0?' disabled':'')+'>上一步</button>'
+        + '<button class="btn primary sm" data-next>'+(s.step===fields.length-1?'完成填写':'下一步')+'</button></div>'
+        + '<div class="tiny dim mt2">一键模拟数据按当前演练剧本与场景生成（虚拟数据），请核对修改后提交。</div>';
+
+      var inp = host.querySelector('#wzInp');
+      if(inp){
+        inp.oninput = function(){ s.values[f.label] = inp.value; };
+        if(type === 'select' || type === 'datetime') inp.onchange = function(){ s.values[f.label] = inp.value; };
+        if(type === 'multiselect'){
+          inp.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+            cb.onchange = function(){
+              var arr = [];
+              inp.querySelectorAll('input[type=checkbox]:checked').forEach(function(c){ arr.push(c.dataset.o); });
+              s.values[f.label] = arr.join('、');
+            };
+          });
+        }
+      }
+
+      /* 打开流程/切换字段后延时 0.5 秒再朗读，避免语音被页面渲染打断导致播报不全 */
+      var seq = ++speechSeq, hintAtPaint = speechHint(f.hint);
+      setTimeout(function(){
+        if(s.done || seq !== speechSeq) return;
+        App.voice.speak(hintAtPaint, { force:true });
+      }, 500);
+      host.querySelector('[data-sim]').onclick = function(){
+        fields.forEach(function(x){
+          var v = String(simValue(x.label, opts.t, opts.node)||'');
+          var wt = wizType(x);
+          if(wt === 'select' && x.options.length && x.options.indexOf(v) < 0){
+            v = fitOption(x.options, v) || x.options[0];
+          } else if(wt === 'multiselect' && x.options.length){
+            /* 多选：随机选 1-2 个，顿号拼接 */
+            var pool = x.options.slice();
+            var n = Math.min(pool.length, 1 + Math.floor(Math.random()*2));
+            var picks = [];
+            for(var k=0; k<n; k++){ var idx = Math.floor(Math.random()*pool.length); picks.push(pool.splice(idx,1)[0]); }
+            v = picks.join('、');
+          }
+          s.values[x.label] = v;
+        });
+        paint();
+        App.toast('已按剧本生成模拟数据，请逐字段核对修改','ok');
+      };
+      var prev = host.querySelector('[data-prev]');
+      if(prev) prev.onclick = function(){ if(s.step>0){ s.step--; paint(); } };
+      host.querySelector('[data-next]').onclick = function(){
+        var cur = f.label;
+        var v = String(s.values[cur]||'').trim();
+        if(wizType(f) === 'multiselect' && cur === f.label){
+          /* 多选必填：检查至少勾了一个 */
+          if(f.required && !v){ App.toast('请至少勾选一项「'+cur+'」','err'); return; }
+        } else {
+          if(f.required && !v){ App.toast('请填写「'+cur+'」后再继续','err'); return; }
+        }
+        if(s.step < fields.length-1){ s.step++; paint(); }
+        else { s.done = true; paint(); }
+      };
+    }
+    paint();
+    return s;
+  }
+
+  /* 基础版表单：逐字段引导填写（初始按剧本自动填充模拟数据） */
+  function formsHtml(t, node){
+    var forms = (t.forms||[]).map(function(fid){
+      return (MOCK.FORM_TEMPLATES||[]).filter(function(f){ return f.id===fid; })[0];
+    }).filter(Boolean);
+    if(!forms.length) return '';
+    return '<div class="section-title mt3">'+App.icon('edit')+'需提交表单 <span class="tiny dim" style="font-weight:400">已按场景【'+App.esc(SCEN?SCEN.name:'通用')+'】生成模拟数据，请按字段说明逐项核对</span></div>'
+      + forms.map(function(f, fi){
+          var key = 'b-'+t.id+'-'+f.id;
+          return '<div class="card mb3" style="padding:12px 14px"><div class="small bold mb2">'+App.esc(App.formDisplayName(f))+' <span class="tag gray">'+App.esc(f.code || f.id)+'</span></div>'
+            + '<div class="wz-host" data-wz="'+App.esc(key)+'" data-wzfid="'+App.esc(f.id)+'"></div>'
+            + '<div class="flex gap3 mt3" style="align-items:center;flex-wrap:wrap"><button class="btn primary sm" data-form="'+t.id+'|'+fi+'">'+App.icon('upload')+'提交表单（模拟）</button>'
+            + '<span class="tiny dim">点击「下一步」逐字段填写并核对，完成全部字段后可提交</span></div></div>';
+        }).join('');
+  }
+
+  /* ---------- 前置节点处置情况：可折叠骨架 ---------- */
+  function predecessorSectionSkel(wrapId){
+    wrapId = wrapId || 'wbPredWrap';
+    return '<div class="card" style="padding:10px 14px;margin-bottom:12px;background:rgba(15,23,42,.4);border:1px solid rgba(47,129,247,.28)">'
+      + '<div class="flex" style="align-items:center;justify-content:space-between" data-pred-toggle="'+wrapId+'">'
+      +   '<div class="section-title" style="margin:0">'+App.icon('flow')+'上一节点处置情况 <span class="tiny dim" style="font-weight:400">研判参考 · 只读</span></div>'
+      +   '<span class="tag gray" data-pred-state>加载中…</span>'
+      + '</div>'
+      + '<div class="small dim mt2" data-pred-body="'+wrapId+'" style="line-height:1.8">正在获取前置节点处置记录…</div>'
+      + '</div>';
+  }
+
+  /* 角色中文名：优先用接口下发的剧本责任角色（script_nodes.target 已是中文），
+     英文 role key 回退到后端下发的角色清单（MOCK.ROLES），不在前端硬编码映射表 */
+  function roleDisplayName(v){
+    var s = String(v||'').trim();
+    if(!s) return '';
+    if(/[\u4e00-\u9fa5]/.test(s)) return s;
+    var rs = (window.MOCK && MOCK.ROLES) || [];
+    var hit = rs.filter(function(x){ return String(x.id)===s; })[0];
+    return hit ? (hit.name || hit.short || s) : s;
+  }
+
+  /* 剧本节点（取处置时长与依赖；数据来自 /api/bootstrap 下发的 scriptNodes） */
+  function scriptNodeOf(nodeId){
+    var list = (window.MOCK && MOCK.SCRIPT_NODES) || [];
+    return list.filter(function(n){ return String(n.id)===String(nodeId); })[0] || null;
+  }
+
+  function parseLocalMs(s){
+    var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(s||''));
+    if(!m) return NaN;
+    return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0)).getTime();
+  }
+
+  function fmtDateTime(ms){
+    var d = new Date(ms);
+    var p2 = function(n){ return n < 10 ? '0'+n : ''+n; };
+    return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())
+      + ' '+p2(d.getHours())+':'+p2(d.getMinutes());
+  }
+
+  /* 实战版 stepTime 只有 HH:mm：以演练开始时刻所在日期补全，早于开始时刻则视为跨天 */
+  function msFromStepTime(tm){
+    var m = /^(\d{2}):(\d{2})/.exec(String(tm||''));
+    if(!m) return NaN;
+    var baseDate = String(proj.startedAt||'').slice(0,10) || String(proj.date||'').slice(0,10);
+    if(!baseDate) return NaN;
+    var ms = parseLocalMs(baseDate + ' ' + m[1] + ':' + m[2] + ':00');
+    if(!isFinite(ms)) return NaN;
+    var base = parseLocalMs(proj.startedAt||'');
+    if(isFinite(base) && ms < base) ms += 86400000;
+    return ms;
+  }
+
+  /* 节点完成时刻（毫秒）：基础版取 tasks.completed_at；实战版优先取 drill_steps.created_at（含秒），退化到 stepTime */
+  function nodeCompletedMsOf(nodeId, p, steps){
+    if(p && p.completedAt){
+      var ms = parseLocalMs(p.completedAt);
+      if(isFinite(ms)) return ms;
+    }
+    var s = steps && steps[String(nodeId)];
+    if(s && s.created_at){
+      var ms2 = parseLocalMs(s.created_at);
+      if(isFinite(ms2)) return ms2;
+    }
+    if(p && p.stepTime) return msFromStepTime(p.stepTime);
+    return NaN;
+  }
+
+  /* 起算点 = 全部前置节点完成时刻中的最晚值。
+     前置数据来源：基础版取 /drill/predecessor 下发的 completedAt（不受当前角色任务过滤影响），
+     实战版取 /drill/workbench 的 drill_steps.created_at。任一前置未完成则不计算。 */
+  var predStartCache = {};
+  function loadPredStart(nodeId){
+    nodeId = String(nodeId);
+    if(predStartCache[nodeId]) return predStartCache[nodeId];
+    var sn = scriptNodeOf(nodeId);
+    var deps = (sn && sn.deps) || [];
+    if(!deps.length){
+      predStartCache[nodeId] = Promise.resolve({deps: deps.slice()});
+      return predStartCache[nodeId];
+    }
+    var jobSteps = loadPredSteps();
+    var jobApi = (isPractical || !API.getPredecessor)
+      ? Promise.resolve(null)
+      : API.getPredecessor(nodeId, proj.id).catch(function(){ return null; });
+    predStartCache[nodeId] = Promise.all([jobSteps, jobApi]).then(function(r){
+      var steps = r[0] || {}, api = r[1] || null;
+      var apiMap = {};
+      ((api && api.predecessors) || []).forEach(function(x){ apiMap[String(x.nodeId)] = x; });
+      var times = [], missing = [];
+      deps.forEach(function(d){
+        var ms = NaN, ap = apiMap[String(d)], stp = steps[String(d)];
+        if(ap && ap.completedAt) ms = parseLocalMs(ap.completedAt);
+        if(!isFinite(ms) && stp && stp.created_at) ms = parseLocalMs(stp.created_at);
+        if(!isFinite(ms) && ap && ap.stepTime) ms = msFromStepTime(ap.stepTime);
+        if(!isFinite(ms) && stp && stp.step_time) ms = msFromStepTime(stp.step_time);
+        if(!isFinite(ms)) missing.push(String(d));
+        else times.push({nodeId:String(d), ms:ms, at:fmtDateTime(ms)});
+      });
+      var latest = null;
+      times.forEach(function(x){ if(!latest || x.ms > latest.ms) latest = x; });
+      return {deps: deps.slice(), times: times, latest: latest,
+        startMs: latest ? latest.ms : NaN, missing: missing};
+    });
+    return predStartCache[nodeId];
+  }
+
+  /* 实际耗时（分钟）：起点为前置节点最晚完成时刻，终点为本节点完成时刻。
+     仅当「剧本设了处置时长 + 存在前置 + 已完成 + 全部前置已完成且有真实完成时刻」才返回数值；
+     初始告警节点、未设时限节点、任一前置未完成一律返回 null（不显示、不判超时）。 */
+  function actualMinutesOf(startInfo, endMs, timeout, deps){
+    if(!timeout || !deps || !deps.length || !startInfo) return null;
+    if((startInfo.missing||[]).length) return null;
+    if(!isFinite(startInfo.startMs) || !isFinite(endMs)) return null;
+    if(endMs < startInfo.startMs) return null;
+    return Math.round((endMs - startInfo.startMs) / 60000);
+  }
+
+  /* 前置节点状态归一：兼容 tasks.status（已完成/处理中/待处理）与实战版 completed 标记 */
+  function predStatusOf(p){
+    var s = String(p.status||'').trim();
+    if(s==='已完成') return {key:'done', label:'已完成', cls:'green'};
+    if(s==='处理中' || s==='处置中') return {key:'doing', label:'处置中', cls:'yellow'};
+    if(s==='超时') return {key:'done', label:'已完成（超时）', cls:'red'};
+    if(s==='待处理' || s==='待处置' || !s) return p.completed
+      ? {key:'done', label:'已完成', cls:'green'}
+      : {key:'todo', label:'待处置', cls:'gray'};
+    return {key:'done', label:s, cls:'green'};
+  }
+
+  /* 填充前置节点处置情况区域 */
+  function fillPredecessorSection(wrapId, data){
+    var wrap = document.querySelector('[data-pred-body="'+wrapId+'"]');
+    var state = document.querySelector('[data-pred-toggle="'+wrapId+'"] [data-pred-state]');
+    var toggle = document.querySelector('[data-pred-toggle="'+wrapId+'"]');
+    if(!wrap) return;
+    /* 可折叠 */
+    if(toggle && !toggle.dataset.bound){
+      toggle.dataset.bound = '1';
+      toggle.onclick = function(){
+        wrap.style.display = (wrap.style.display === 'none') ? '' : 'none';
+      };
+    }
+    /* 外部单位仅能查看本院主动上报的材料，不展示院内处置明细 */
+    if(isExternal){
+      wrap.innerHTML = '<div class="tiny dim">外部单位仅可查看本院主动上报的材料，无院内处置明细查看权限。</div>';
+      if(state){ state.textContent='—'; state.className='tag gray'; }
+      return;
+    }
+    var preds = (data && data.predecessors) || [];
+    if(!preds.length){
+      wrap.innerHTML = '<div class="tiny dim">当前节点无前置依赖，按剧本起始节点直接处置即可。</div>';
+      if(state) { state.textContent = '无前置节点'; state.className = 'tag gray'; }
+      return;
+    }
+
+    /* 复用现有附件查询接口，取各前置任务的证据附件清单；同时合并取证模块里的同一任务材料 */
+    function evidenceOfPred(p){
+      return ((window.MOCK && MOCK.EVIDENCE) || []).filter(function(e){
+        if(e.projectId && proj.id && String(e.projectId) !== String(proj.id)) return false;
+        if(p.taskId && String(e.taskId || '') === String(p.taskId)) return true;
+        return !e.taskId && p.nodeId && String(e.nodeId || '') === String(p.nodeId);
+      }).map(function(e){
+        return {name:e.name, url:e.url, by:e.uploader, size:e.size, time:e.time, auto:e.auto};
+      });
+    }
+    function mergeAtts(base, extra){
+      var seen = {}, out = [];
+      (base || []).concat(extra || []).forEach(function(a){
+        var key = String(a.url || '') + '|' + String(a.name || '');
+        if(seen[key]) return;
+        seen[key] = 1; out.push(a);
+      });
+      return out;
+    }
+    var jobs = preds.map(function(p){
+      var evs = evidenceOfPred(p);
+      if(!p.taskId){ p.attachments = mergeAtts([], evs); return Promise.resolve(p); }
+      return API.getTaskAttachments(p.taskId).then(function(list){
+        p.attachments = mergeAtts((list||[]).map(function(a){
+          return {name:a.name, url:a.url, by:a.by, size:a.size, time:a.time, auto:a.auto};
+        }), evs);
+        return p;
+      }).catch(function(){ p.attachments = mergeAtts([], evs); return p; });
+    });
+
+    Promise.all(jobs).then(function(list){
+      var statuses = list.map(predStatusOf);
+      var startJobs = list.map(function(p, i){
+        return statuses[i].key === 'todo' ? Promise.resolve(null) : loadPredStart(p.nodeId);
+      });
+      return Promise.all([Promise.all(startJobs), loadPredSteps()]).then(function(ctx){
+        var startInfos = ctx[0], stepsMap = ctx[1] || {};
+        var anyDone = statuses.some(function(s){ return s.key!=='todo'; });
+        var html = '';
+        if(!anyDone) html += '<div class="tiny" style="color:#fbbf24;margin-bottom:8px">上一节点尚未处置</div>';
+        html += list.map(function(p, i){ return predecessorCardHtml(p, statuses[i], startInfos[i], stepsMap); }).join('');
+        wrap.innerHTML = html;
+        if(state){
+          var doneN = statuses.filter(function(s){ return s.key!=='todo'; }).length;
+          state.textContent = doneN + '/' + list.length + ' 已处置';
+          state.className = 'tag ' + (doneN===list.length ? 'green' : 'gray');
+        }
+        bindPredAttachments(wrap);
+        bindPredDetailButtons(wrap, list);
+      });
+    }).catch(function(){
+      wrap.innerHTML = '<div class="tiny dim">前置节点处置情况加载失败，请刷新后重试。</div>';
+      if(state){ state.textContent='加载失败'; state.className='tag gray'; }
+    });
+  }
+
+  /* 证据附件：点击查看/下载 */
+  function bindPredAttachments(wrap){
+    wrap.querySelectorAll('[data-pred-att]').forEach(function(el){
+      el.onclick = function(){
+        var url = el.dataset.url;
+        var name = el.dataset.name || '附件';
+        if(!url) return;
+        if(/\.(png|jpe?g|gif|webp|bmp)$/i.test(url)){
+          App.modal({ title:'附件预览 · '+App.esc(name), wide:true,
+            body:'<img src="'+App.esc(API.mediaUrl(url))+'" style="max-width:100%;display:block;border-radius:6px">',
+            foot:'<button class="btn" id="paNo">关闭</button><a class="btn primary" href="'+App.esc(url)+'" download="'+App.esc(name)+'">下载</a>',
+            onOpen:function(m){ m.querySelector('#paNo').onclick = m.close; } });
+        } else {
+          var a = document.createElement('a');
+          a.href = url; a.download = name; a.target = '_blank';
+          document.body.appendChild(a); a.click(); a.remove();
+        }
+      };
+    });
+  }
+
+  /* 完成时间统一 YYYY-MM-DD HH:mm（基础版 completedAt / 实战版 stepTime）
+     实战版 stepTime 无日期：以演练开始日期补全，早于开始时刻按跨天 +1 处理，避免负数/错日 */
+  function predCompletedAtOf(p){
+    if(p.completedAt) return String(p.completedAt).replace('T',' ').slice(0,16);
+    if(p.stepTime){
+      var tm = String(p.stepTime);
+      if(/^\d{2}:\d{2}/.test(tm)){
+        var ms = msFromStepTime(tm);
+        if(isFinite(ms)) return fmtDateTime(ms);
+        var pDate = String(proj.startedAt||'').slice(0,10) || String(proj.date||'').slice(0,10);
+        return pDate ? (pDate + ' ' + tm.slice(0,5)) : '';
+      }
+      return tm.replace('T',' ').slice(0,16);
+    }
+    return '';
+  }
+
+  /* 实战版完整处置记录：found / skipped / skip_reason 仅在 workbench.steps 中下发。
+     每个节点取最早一条，与 predecessor 接口 ORDER BY id LIMIT 1 保持一致；失败静默降级。 */
+  var predStepsPromise = null;
+  function loadPredSteps(){
+    if(predStepsPromise) return predStepsPromise;
+    predStepsPromise = (proj && proj.id && API.getDrillWorkbench)
+      ? API.getDrillWorkbench(proj.id).then(function(wb){
+          var map = {};
+          ((wb && wb.steps) || []).forEach(function(s){
+            var nid = String(s.matched_node || s.matchedNode || '');
+            if(!nid) return;
+            if(!map[nid] || (Number(s.id)||0) < (Number(map[nid].id)||0)) map[nid] = s;
+          });
+          return map;
+        }).catch(function(){ return {}; })
+      : Promise.resolve({});
+    return predStepsPromise;
+  }
+
+  /* 只读详情弹窗：只渲染传入的这一个前置节点，弹窗内无任何可编辑控件 */
+  function openPredDetail(p){
+    if(!p) return;
+    var st = predStatusOf(p);
+    var title = p.title || p.nodeTitle || p.nodeId;
+    App.modal({
+      title:'上一节点处置详情 · '+App.esc(title),
+      wide:true,
+      body:'<div id="predDetailBody"><div class="small dim">正在加载处置记录…</div></div>',
+      foot:'<button class="btn" id="predDetailClose">关闭</button>',
+      onOpen:function(ov){
+        var mEl = ov.querySelector('.modal');
+        if(mEl) mEl.classList.add('pred-detail-modal');
+        ov.querySelector('#predDetailClose').onclick = ov.close;
+        loadPredStart(p.nodeId).then(function(startInfo){
+          return loadPredSteps().then(function(steps){
+            var host = ov.querySelector('#predDetailBody');
+            if(!host) return;
+            host.innerHTML = predDetailHtml(p, st, (steps||{})[String(p.nodeId)] || null, startInfo, steps||{});
+            bindPredAttachments(host);
+          });
+        });
+      }
+    });
+  }
+
+  /* 详情正文：元信息 + 自由文本原文 + 提交表单 + 证据附件 */
+  function predDetailHtml(p, st, step, startInfo, steps){
+    var sn = scriptNodeOf(p.nodeId);
+    var timeout = Number((sn && sn.timeout) || 0) || 0;
+    var deps = (sn && sn.deps) || [];
+    var title = p.title || p.nodeTitle || p.nodeId;
+    var roleName = roleDisplayName(p.target || p.role || (step && step.role_id)) || '—';
+    var completedAt = predCompletedAtOf(p);
+    var skipped = !!(step && Number(step.skipped) === 1);
+    var statusLabel = skipped ? '已跳过' : st.label;
+    var statusCls = skipped ? 'yellow' : st.cls;
+
+    var meta = '<div class="kv">'
+      + '<span class="k">节点</span><span class="small"><span class="mono">'+App.esc(p.nodeId)+'</span> · '+App.esc(title)+'</span>'
+      + '<span class="k">状态</span><span><span class="tag '+statusCls+'">'+App.esc(statusLabel)+'</span></span>'
+      + '<span class="k">责任角色</span><span class="small">'+App.esc(roleName)+'</span>'
+      + '<span class="k">完成时间</span><span class="mono small">'+(completedAt?App.esc(completedAt):'—')+'</span>';
+    if(timeout > 0 && deps.length && st.key === 'done' && !skipped){
+      var actual = actualMinutesOf(startInfo, nodeCompletedMsOf(p.nodeId, p, steps), timeout, deps);
+      if(actual !== null){
+        var ontime = actual <= timeout;
+        meta += '<span class="k">标准处置时长</span><span class="small">剧本 '+timeout+' 分钟 · 实际 '+actual+' 分钟'
+          + '<span class="tag '+(ontime?'green':'red')+'" style="margin-left:6px">'+(ontime?'按时':'超时')+'</span></span>';
+      }
+    }
+    if(skipped){
+      meta += '<span class="k">跳过原因</span><span class="small pred-detail-text">'+App.esc(String(step.skip_reason||'').trim()||'未填写')+'</span>';
+    }
+    meta += '</div>';
+
+    var texts = [];
+    function addText(label, val){
+      var s = (val===null || val===undefined) ? '' : String(val).replace(/\r\n/g,'\n').trim();
+      if(!s) return;
+      texts.push('<div class="mt2"><div class="tiny" style="color:var(--accent2)">'+label+'</div>'
+        + '<div class="small pred-detail-text">'+App.esc(s)+'</div></div>');
+    }
+    addText('发现过程', (step && step.found) || p.found);
+    addText('处置措施', (step && step.measure) || p.measure);
+    addText('处置结果', (step && step.result) || p.result);
+    var textHtml = texts.length ? texts.join('')
+      : '<div class="small dim mt2">该节点未填写自由文本处置内容，具体处置以提交的表单记录为准。</div>';
+
+    var fList = (p.forms || []).filter(function(f){
+      return (f.fields || []).some(function(x){
+        return String(x.value===null||x.value===undefined?'':x.value).trim() !== '';
+      });
+    });
+    fList.sort(function(a,b){ return String(a.time||'').localeCompare(String(b.time||'')); });
+    var formsHtml;
+    if(!fList.length){
+      formsHtml = '<div class="small dim mt2">该节点未提交表单</div>';
+    } else {
+      formsHtml = fList.map(function(f){
+        var fname = App.formDisplayName({name: f.formName || f.label || '', mode: f.mode});
+        var rows = (f.fields||[]).map(function(x){
+          var v = String(x.value===null||x.value===undefined?'':x.value);
+          return '<span class="k">'+App.esc(x.label)+'</span><span class="small pred-detail-val">'+(v?App.esc(v):'—')+'</span>';
+        }).join('');
+        return '<div class="card" style="padding:10px 12px;margin-top:10px;background:rgba(255,255,255,.03)">'
+          + '<div class="flex wrap" style="justify-content:space-between;gap:8px;align-items:center">'
+          +   '<div class="small bold">'+App.esc(fname)+'</div>'
+          +   '<div class="tiny dim">'+(f.submitter?App.esc(f.submitter)+' · ':'')+(f.time?App.esc(f.time):'')+'</div>'
+          + '</div><div class="kv mt2">'+rows+'</div></div>';
+      }).join('');
+    }
+
+    var attList = p.attachments || [];
+    var attHtml;
+    if(attList.length){
+      attHtml = '<div class="flex wrap gap2">' + attList.map(function(a){
+        var nm = a.name || '附件';
+        var hasUrl = !!a.url;
+        var img = hasUrl && /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(a.url));
+        var sub = (a.time?App.esc(a.time)+' · ':'')+(a.size?App.esc(a.size):'')+(hasUrl?'':' · 无文件');
+        var content = img
+          ? '<img src="'+App.esc(API.mediaUrl(a.url))+'" alt="" style="width:40px;height:32px;object-fit:cover;border-radius:4px;display:block;flex:none">'
+          : App.icon('file');
+        var clickable = hasUrl ? ' style="cursor:pointer" data-pred-att data-url="'+App.esc(a.url)+'" data-name="'+App.esc(nm)+'" title="点击查看/下载"' : ' title="历史记录无关联文件"';
+        return '<span class="file-chip"'+clickable+'>'+content+App.esc(nm)+'<span class="fc-size">'+sub+'</span></span>';
+      }).join('') + '</div>';
+    } else if(step && String(step.evidence||'').trim()){
+      attHtml = '<div class="small pred-detail-text">'+App.esc(String(step.evidence).trim())+'</div>';
+    } else {
+      attHtml = '<div class="small dim">无附件记录</div>';
+    }
+
+    return '<div class="tiny dim">只读视图 · 不可修改或提交</div>'
+      + '<div class="mt2">'+meta+'</div>'
+      + '<div class="section-title mt3">具体处置内容</div>'+textHtml
+      + '<div class="section-title mt3">提交的表单</div>'+formsHtml
+      + '<div class="section-title mt3">证据附件</div>'+attHtml;
+  }
+
+  /* 为每张已处置卡片绑定「查看处置详情」，多前置互不影响 */
+  function bindPredDetailButtons(wrap, list){
+    var byId = {};
+    (list||[]).forEach(function(p){ byId[String(p.nodeId)] = p; });
+    wrap.querySelectorAll('[data-pred-detail]').forEach(function(btn){
+      btn.onclick = function(){ openPredDetail(byId[String(btn.dataset.predDetail)]); };
+    });
+  }
+
+  /* 单个前置节点卡片（只读；实战版仅展示实际提交内容，绝不展示剧本属性） */
+  function predecessorCardHtml(p, st, startInfo, steps){
+    st = st || predStatusOf(p);
+    var statusTag = '<span class="tag '+st.cls+'">'+st.label+'</span>';
+
+    var sn = scriptNodeOf(p.nodeId);
+    var timeout = Number((sn && sn.timeout) || 0) || 0;
+    var deps = (sn && sn.deps) || [];
+    var title = p.title || p.nodeTitle || p.nodeId;
+    var roleName = roleDisplayName(p.target || p.role);
+
+    /* 完成时间统一 YYYY-MM-DD HH:mm */
+    var completedAt = predCompletedAtOf(p);
+
+    var timeoutInfo = timeout > 0 ? ('剧本配置 '+timeout+' 分钟') : '未设置标准处置时长';
+
+    /* 实际耗时：仅在「剧本设时长 + 有前置 + 已完成 + 全部前置已完成且有真实完成时间」时展示 */
+    var actualInfo = '';
+    if(st.key === 'done'){
+      var actual = actualMinutesOf(startInfo, nodeCompletedMsOf(p.nodeId, p, steps), timeout, deps);
+      if(actual !== null){
+        var ontime = actual <= timeout;
+        actualInfo = '<div class="mt1 tiny" style="color:'+(ontime?'var(--ok,#22c55e)':'#fbbf24')+'">'
+          + (ontime?'⏱ ':'⏰ ')+'实际耗时 '+actual+' 分钟（'+(ontime?'按时完成':'超时完成')+'）</div>';
+      }
+    }
+
+    var notYetHint = '';
+    if(st.key === 'todo'){
+      notYetHint = '<div class="tiny dim mt1">上一节点尚未处置</div>';
+    }
+
+    /* 已处置节点才提供详情入口；未处置不渲染按钮，避免空弹窗 */
+    var detailBtn = '';
+    if(st.key !== 'todo' && p.completed !== false){
+      detailBtn = '<div class="mt2" style="text-align:right">'
+        + '<button class="btn sm outline" data-pred-detail="'+App.esc(p.nodeId)+'">'+App.icon('eye')+'查看处置详情</button></div>';
+    }
+
+    return '<div class="card" style="padding:10px 12px;margin-bottom:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)">'
+      + '<div class="flex" style="justify-content:space-between;align-items:center;gap:10px">'
+      +   '<div><span class="mono tiny" style="color:var(--accent2)">'+App.esc(p.nodeId)+'</span> · <span class="bold small">'+App.esc(title)+'</span></div>'
+      +   statusTag + '</div>'
+      + '<div class="kv mt2">'
+      +   '<span class="k">责任角色</span><span class="small">'+(roleName?App.esc(roleName):'—')+'</span>'
+      +   '<span class="k">标准处置时长</span><span class="tiny">'+timeoutInfo+'</span>'
+      +   '<span class="k">完成时间</span><span class="mono tiny">'+(completedAt?App.esc(completedAt):'—')+'</span>'
+      + '</div>'
+      + actualInfo
+      + notYetHint
+      + detailBtn
+      + '</div>';
+  }
+
+  /* ---------- 基础版：按剧本依赖并行开放，前置全部完成即可处置 ---------- */
+  function stepCard(t, node, idx, total){
+    var action = node ? (node.action || '应急处置') : '应急处置';
+    var desc = node ? node.desc : (t.desc || '按预案完成本岗处置');
+    var guide = node ? node.guide : '';
+    var limit = (node && node.timeout) ? node.timeout+' 分钟' : '—';
+    var predWrapId = 'wbPred-' + t.id;
+    return '<div class="wb-split">'
+      /* 左：研判参考区（当前节点处置内容 + 引导信息 + 上一节点处置情况），独立滚动 */
+      + '<div class="wb-split-left">'
+      +   '<div class="section-title" style="margin-top:0">'+App.icon('flow')+'当前节点处置内容</div>'
+      +   '<div class="card" style="padding:14px 16px;border-color:rgba(47,129,247,.35)">'
+      +     '<div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px">'
+      +       '<div><div class="small bold">'+App.esc(t.title)+'</div>'
+      +       '<div class="tk-meta mt2"><span class="mono">'+App.esc(t.id)+'</span><span>标准处置时长 '+limit+'</span>'+App.levelTag(t.level)+'</div></div>'
+      +       App.statusTag(t.status)+'</div>'
+      +     '<div class="kv mt3">'
+      +       '<span class="k">处置动作</span><span class="bold">'+App.esc(action)+'</span>'
+      +       '<span class="k">处置内容</span><span class="small" style="line-height:1.75">'+App.esc(desc)+'</span>'
+      +       (node&&node.receiver?'<span class="k">下一节点接收人</span><span class="bold">'+App.esc(node.receiver)+' <span class="tag gray">剧本预设</span></span>':'')
+      +     '</div>'
+      +     (guide?'<div class="tiny mt3" style="color:var(--accent2);line-height:1.8">'+App.icon('flow')+' 引导：'+App.esc(guide)+'</div>':'')
+      +   '</div>'
+      +   predecessorSectionSkel(predWrapId)
+      + '</div>'
+      /* 右：表单填写与提交区 */
+      + '<div class="wb-split-right">'
+      +   '<div class="card" style="padding:14px 16px;border-color:rgba(47,129,247,.35)">'
+      +     '<div class="section-title" style="margin-top:0">需完成事项 <span class="tiny dim" style="font-weight:400">完成本流程后，满足前置条件的后续流程将并行开放</span></div>'
+      +     '<div class="small" style="line-height:1.95">1. 按引导提示完成本节点处置动作<br>'
+      +       '2. 核对并提交下方表单（已自动填充模拟数据）<br>'
+      +       '3. 上传证据附件（可上传文件或直接屏幕截图）</div>'
+      +     '<div class="section-title mt3">'+App.icon('file')+'证据附件 <button class="btn sm outline" data-att="'+t.id+'">'+App.icon('upload')+'上传 / 截图</button></div>'
+      +     '<div class="flex wrap gap2" id="watt-'+t.id+'">'+attHtml(t)+'</div>'
+      +     formsHtml(t, node)
+      +     '<div class="divider"></div>'
+      +     '<button class="btn ok" data-finish="'+t.id+'">'+App.icon('check')+'完成本流程</button>'
+      +     '<div class="tiny dim mt2">仅基础版展示正确处置流程；完成本流程后归档，其后续流程在满足前置条件时自动开放。</div>'
+      +   '</div>'
+      + '</div>'
+      + '</div>';
+  }
+
+  /* 列表行：完成态可查看归档记录；可处置 / 前置未完成 区分展示 */
+  function basicRow(t, node, state){
+    var done = state === 'done', locked = state === 'locked';
+    var limit = (node && node.timeout) ? node.timeout+' 分钟' : '—';
+    var meta = '<span class="mono">'+App.esc(t.id)+'</span>'
+      + '<span>标准处置时长 '+limit+'</span>'
+      + (node&&node.action?'<span>'+App.esc(node.action)+'</span>':'');
+    var blocked = (t.blockedBy||[]).map(function(x){ return x.title||x.id; });
+    if(locked && blocked.length) meta += '<span style="color:var(--warn)">待完成：'+App.esc(blocked.join('、'))+'</span>';
+    var tag = done ? '<span class="tag green">已完成</span>'
+      : (locked ? '<span class="tag gray">前置未完成</span>' : '<span class="tag red">可处置（并行）</span>');
+    return '<div class="tn-row '+(done?'done':'cur')+'" '+(locked?'style="opacity:.55;cursor:not-allowed" ':'')
+      + 'data-'+(done?'view':(locked?'lock':'open'))+'="'+App.esc(t.id)+'" role="button" tabindex="0">'
+      + '<span class="tn-ic">'+(done?App.icon('check'):(locked?App.icon('lock'):App.icon('alert')))+'</span>'
+      + '<div class="tn-main"><div class="tn-title">'+App.esc(t.title)+'</div><div class="tn-meta">'+meta+'</div></div>'
+      + tag
+      + '<span class="tn-go">'+(done?'查看归档记录 ›':(locked?'请先完成前置流程':'打开处置表单 ›'))+'</span></div>';
+  }
+
+  function renderBasic(){
+    var host = document.getElementById('wbTasks');
+    host.innerHTML = '<div class="small dim">正在加载本角色待办任务…</div>';
+    API.getTasks().then(function(ts){
+      var mine = (ts||[]).filter(function(t){ return t.projectId===proj.id && t.role===role.id; });
+      var done = mine.filter(function(t){ return t.status==='已完成'; });
+      var avail = mine.filter(function(t){ return t.status!=='已完成' && t.available!==false; });
+      var locked = mine.filter(function(t){ return t.status!=='已完成' && t.available===false; });
+      announceNewTasks(avail.map(function(t){ return t.id; }), '待办任务');
+      if(!mine.length){
+        host.innerHTML = '<div class="empty">'+App.icon('check')+'<div>本角色暂无待办任务</div><div class="tiny dim mt2">剧本基线中未分配本角色节点，或任务已完成</div></div>';
+        return;
+      }
+      var head = '<div class="tiny dim" style="margin-bottom:10px">本角色流程进度 <b>'+done.length+' / '+mine.length+'</b> 步 · 当前可处置 <b style="color:var(--accent2)">'+avail.length+'</b> 项（可并行）· 点击列表行打开完整处置表单（弹窗形式）</div>';
+      var rows = done.map(function(t){ return basicRow(t, nodeForTask(t), 'done'); }).join('')
+        + avail.map(function(t){ return basicRow(t, nodeForTask(t), 'cur'); }).join('')
+        + locked.map(function(t){ return basicRow(t, nodeForTask(t), 'locked'); }).join('');
+      host.innerHTML = head + '<div class="task-nav">'+rows+'</div>'
+        + (avail.length ? '<div class="tiny dim mt2">当前有 '+avail.length+' 项流程可并行处置：需点开弹窗核对处置动作、提交表单与附件；完成后满足前置条件的后续流程自动开放。</div>'
+          : (locked.length ? '<div class="tiny dim mt2">当前暂无可处置流程，等待前置流程完成后自动开放（置灰项为前置未完成）。</div>'
+            : '<div class="empty mt3">'+App.icon('check')+'<div>本角色负责的流程已全部完成</div><div class="tiny dim mt2">可前往复盘评估查看标准处置时长达成情况</div></div>'));
+      host.querySelectorAll('[data-open]').forEach(function(row){
+        row.onclick = function(){
+          var t = mine.filter(function(x){ return String(x.id)===String(row.dataset.open); })[0];
+          if(t) openBasicTask(t, 0, mine.length);
+        };
+      });
+      host.querySelectorAll('[data-lock]').forEach(function(row){
+        row.onclick = function(){
+          var t = mine.filter(function(x){ return String(x.id)===String(row.dataset.lock); })[0];
+          var names = t ? (t.blockedBy||[]).map(function(x){ return x.title||x.id; }).join('、') : '';
+          App.toast('请先完成前置流程'+(names?'：'+names:''),'warn');
+        };
+      });
+      host.querySelectorAll('[data-view]').forEach(function(row){
+        row.onclick = function(){
+          var t = mine.filter(function(x){ return String(x.id)===String(row.dataset.view); })[0];
+          if(t) openBasicDone(t);
+        };
+      });
+    }).catch(function(err){
+      host.innerHTML = '<div class="tiny dim">'+App.esc((err&&err.message)||'任务加载失败')+'</div>';
+    });
+  }
+
+  /* ---------- 外部单位代填（信息科负责人 / 平台管理员） ---------- */
+  function renderProxy(){
+    if(!canProxy) return;
+    var sel = document.getElementById('wbProxySel');
+    var host = document.getElementById('wbProxyList');
+    if(!host) return;
+    var rm = extRoleMap();
+    if(sel && sel.options.length <= 1){
+      Object.keys(rm).forEach(function(id){
+        var o = document.createElement('option'); o.value = id; o.textContent = rm[id]; sel.appendChild(o);
+      });
+    }
+    if(sel && !sel.dataset.bound){ sel.dataset.bound = '1'; sel.onchange = renderProxy; }
+    var chosen = sel ? sel.value : '';
+    API.getTasks().then(function(ts){
+      var list = (ts||[]).filter(function(t){
+        return t.projectId === proj.id && rm[t.role] && (!chosen || t.role === chosen);
+      });
+      if(!list.length){
+        host.innerHTML = '<div class="tiny dim">当前演练项目暂无可代填的外部单位任务。</div>';
+        return;
+      }
+      host.innerHTML = list.map(function(t){
+        var st = t.status || '待处理';
+        var cls = st==='已完成' ? 'green' : (st==='处理中' ? 'blue' : 'gray');
+        return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px dashed var(--line)">'
+          + '<div style="flex:1;min-width:0"><div class="small bold">'+App.esc(t.title||'')+'</div>'
+          + '<div class="tiny dim">'+App.esc(rm[t.role])+' · '+App.esc(t.id||'')+'</div></div>'
+          + '<span class="tag '+cls+'">'+App.esc(st)+'</span>'
+          + (st==='已完成' ? '<span class="tag yellow">已代填</span>'
+              : '<button class="btn sm primary" data-proxy="'+App.esc(t.id||'')+'">代填</button>')
+          + '</div>';
+      }).join('');
+      host.querySelectorAll('[data-proxy]').forEach(function(btn){
+        btn.onclick = function(){
+          var t = list.filter(function(x){ return String(x.id)===String(btn.dataset.proxy); })[0];
+          if(t) openBasicTask(t, 0, list.length, {roleId:t.role, roleName:rm[t.role]});
+        };
+      });
+    }).catch(function(err){
+      host.innerHTML = '<div class="tiny dim">'+App.esc((err&&err.message)||'任务加载失败')+'</div>';
+    });
+  }
+
+  /* 完整处置表单以弹窗方式打开 */
+  function openBasicTask(t, idx, total, proxy){
+    proxy = proxy || null;
+    var node = nodeForTask(t);
+    App.modal({
+      title:(proxy ? '代填 · '+App.esc(proxy.roleName)+' · ' : '待办任务处置 · ')+App.esc(t.title),
+      wide:true,
+      body:'<div id="wbTaskBody"><div class="small dim">正在载入处置表单…</div></div>',
+      foot:'<button class="btn" id="wbTaskClose">关闭</button>',
+      onOpen:function(ov){
+        /* 打开处置表单即标记为处置中（导调中心节点操作情况同步展示） */
+        var nid = (node&&node.id)||t.nodeId;
+        if(nid) API.startNode(nid, proj.id).catch(function(){});
+        /* 处置弹窗改为左右分栏（左研判参考 / 右表单） */
+        var mEl = ov.querySelector('.modal');
+        if(mEl) mEl.classList.add('wb-split-modal');
+        ov.querySelector('#wbTaskClose').onclick = ov.close;
+        var box = ov.querySelector('#wbTaskBody');
+        box.innerHTML = (proxy ? '<div class="sim-banner" style="border-color:rgba(247,161,47,.5)">'+App.icon('alert')
+            + '<span><b>代填模式</b>：你正在代 <b>'+App.esc(proxy.roleName)+'</b> 填写并提交。'
+            + '提交后将记录“填写人 '+App.esc(App.curUser())+'（信息科负责人）· 被代填对象 '+App.esc(proxy.roleName)+' · 代填时间”，'
+            + '并写入审计日志与报告，不会显示为该单位本人提交。</span></div>' : '')
+          + stepCard(t, node, idx, total);
+        bindBasic(t, box, function(){
+          ov.close();
+          if(proxy){ renderProxy(); renderScore(); } else { renderBasic(); renderScore(); }
+        }, proxy);
+        /* 异步加载前置节点处置情况 */
+        if(nid && proj.id) API.getPredecessor(nid, proj.id).then(function(data){
+          fillPredecessorSection('wbPred-'+t.id, data);
+        }).catch(function(){
+          var st = box.querySelector('[data-pred-state]');
+          if(st){ st.textContent = '加载失败'; st.className = 'tag gray'; }
+          var bd = box.querySelector('[data-pred-body="wbPred-'+t.id+'"]');
+          if(bd) bd.innerHTML = '<div class="tiny dim">前置节点处置情况加载失败，请刷新后重试。</div>';
+        });
+      }
+    });
+  }
+
+  function openBasicDone(t){
+    var node = nodeForTask(t);
+    App.modal({
+      title:'已完成步骤 · '+App.esc(t.title),
+      body:'<div class="kv">'
+        + '<span class="k">任务编号</span><span class="mono">'+App.esc(t.id)+'</span>'
+        + '<span class="k">处置动作</span><span class="bold">'+App.esc((node&&node.action)||'应急处置')+'</span>'
+        + '<span class="k">处置内容</span><span class="small" style="line-height:1.75">'+App.esc((node&&node.desc)||t.desc||'—')+'</span>'
+        + '<span class="k">标准处置时长</span><span>'+(node&&node.timeout?node.timeout+' 分钟':'未设置')+'</span>'
+        + '<span class="k">当前状态</span><span>'+App.statusTag(t.status)+'</span>'
+        + '</div>'
+        + '<div class="sim-banner mt3">'+App.icon('check')+'<span>本步骤已完成并归档（接单 → 提交处置 → 完成），列表行仅供查看，不可重复提交。</span></div>',
+      foot:'<button class="btn" id="wbDoneClose">关闭</button>',
+      onOpen:function(ov){ ov.querySelector('#wbDoneClose').onclick = ov.close; }
+    });
+  }
+
+  function bindBasic(t, host, onDone, proxy){
+    proxy = proxy || null;
+    var forms = (t.forms||[]).map(function(fid){
+      return (MOCK.FORM_TEMPLATES||[]).filter(function(f){ return f.id===fid; })[0];
+    }).filter(Boolean);
+
+    /* 表单改为分步向导：填写类按剧本预填模拟数据；审议类（mode=review）不预填，
+       避免「同意/不同意」被自动填成同意，必须由审议人明确选择。 */
+    var node = nodeForTask(t);
+    host.querySelectorAll('[data-wz]').forEach(function(h){
+      var fid = h.dataset.wzfid;
+      var f = forms.filter(function(x){ return x.id===fid; })[0];
+      if(!f) return;
+      mountWizard(h, h.dataset.wz, {
+        name:App.formDisplayName(f), fields:f.fields, t:t, node:node,
+        prefill: f.mode !== 'review'
+      });
+      if(f.mode === 'review'){
+        var tip = document.createElement('div');
+        tip.className = 'sim-banner mt2';
+        tip.innerHTML = App.icon('eye')+'<span>本节点为<b>审议节点</b>：请先阅读上方「前置节点提交内容」，再作出审批结论并填写意见。审议结论不参与扣分。</span>';
+        var hostEl = h.parentNode || h;
+        hostEl.insertBefore(tip, h);
+      }
+    });
+
+    host.querySelectorAll('[data-form]').forEach(function(b){
+      b.onclick = function(){
+        var parts = b.dataset.form.split('|');
+        var fi = +parts[1];
+        var f = forms[fi];
+        if(!f) return;
+        var key = 'b-'+t.id+'-'+f.id;
+        var st = WIZ[key];
+        if(!st){ App.toast('表单尚未加载完成，请关闭后重新打开','err'); return; }
+        if(!st.done){ App.toast('请先按「下一步」逐字段完成《'+App.formDisplayName(f)+'》填写','err'); return; }
+        var data = {}, missing = [];
+        st.fields.forEach(function(fd){
+          var v = String(st.values[fd.label]||'').trim();
+          if(wizType(fd) === 'datetime') v = v.replace('T',' ');
+          if(fd.required && !v) missing.push(fd.label);
+          else if(v) data[fd.label] = v;
+        });
+        if(missing.length){ App.toast('《'+App.formDisplayName(f)+'》仍有必填项：'+missing.slice(0,3).join('、'),'err'); return; }
+        b.disabled = true; b.textContent = '提交中…';
+        API.submitForm(t.id, f.id, data, proxy).then(function(res){
+          b.disabled = false; b.innerHTML = App.icon('upload')+'重新提交表单';
+          // 基础版：必填/质量规则只提示不阻断，后端通过 warnings 返回逐字段问题
+          var ws = (res && res.warnings) || [];
+          var oldWarn = host.querySelector('.form-warn');
+          if(oldWarn && oldWarn.parentNode) oldWarn.parentNode.removeChild(oldWarn);
+          if(ws.length){
+            var warnBox = document.createElement('div');
+            warnBox.className = 'sim-banner mt2 form-warn';
+            warnBox.innerHTML = App.icon('alert')+'<span>表单已提交，但有 '+ws.length+' 项填写提示：'
+              + ws.map(function(w){ return App.esc(w.message||''); }).join('；')+'</span>';
+            if(b.parentNode) b.parentNode.insertBefore(warnBox, b);
+            App.toast('表单已提交，存在填写提示，请查看提示条','warn');
+          } else {
+            App.toast('《'+App.formDisplayName(f)+'》'+(proxy?'已代填提交（填写人已留痕）':'已提交并归档至取证模块'),'ok');
+          }
+        }).catch(function(err){
+          b.disabled = false; b.innerHTML = App.icon('upload')+'提交表单（模拟）';
+          App.toast((err&&err.message)||'表单提交失败','err');
+        });
+      };
+    });
+
+    host.querySelectorAll('[data-att]').forEach(function(b){
+      b.onclick = function(){ openAttUpload(t, host); };
+    });
+    var attBox = host.querySelector('#watt-'+t.id);
+    if(attBox) attBox.onclick = function(ev){
+      var evBtn = ev.target.closest ? ev.target.closest('[data-ev-del]') : null;
+      if(evBtn){
+        ev.stopPropagation();
+        var evId = evBtn.dataset.evDel;
+        var rec = evidenceOfTask(t).filter(function(x){ return String(x.id)===String(evId); })[0];
+        confirmRemove('确认删除附件「'+((rec&&rec.name)||evId)+'」？删除后文件与记录一并清理，不可恢复。', function(){
+          API.deleteEvidence(evId).then(function(){
+            t.atts = (t.atts||[]).filter(function(x){ return !(rec && rec.url && x.url===rec.url); });
+            refreshAtt(t, host);
+            App.toast('附件已删除','ok');
+          }).catch(function(err){ App.toast((err&&err.message)||'删除失败','err'); });
+        });
+        return;
+      }
+      var delBtn = ev.target.closest ? ev.target.closest('[data-att-del]') : null;
+      if(delBtn){
+        ev.stopPropagation();
+        var attId = delBtn.dataset.attDel;
+        var att = (t.atts||[]).filter(function(x){ return String(x.id)===String(attId); })[0];
+        confirmRemove('确认删除附件「'+((att&&att.name)||attId)+'」？删除后文件与记录一并清理，不可恢复。', function(){
+          API.deleteTaskAttachment(t.id, attId).then(function(){
+            t.atts = (t.atts||[]).filter(function(x){ return String(x.id)!==String(attId); });
+            if(att && att.url) MOCK.EVIDENCE = (MOCK.EVIDENCE||[]).filter(function(e){ return e.url!==att.url; });
+            refreshAtt(t, host);
+            App.toast('附件已删除','ok');
+          }).catch(function(err){ App.toast((err&&err.message)||'删除失败','err'); });
+        });
+        return;
+      }
+      var chip = ev.target.closest ? ev.target.closest('.att-img') : null;
+      if(!chip) return;
+      var im = chip.querySelector('img');
+      if(!im) return;
+      App.modal({ title:'证据预览 · '+t.id, wide:true,
+        body:'<img src="'+App.esc(API.mediaUrl(im.src))+'" style="max-width:100%;display:block;border-radius:6px">',
+        foot:'<button class="btn" id="pvNo">关闭</button>',
+        onOpen:function(m){ m.querySelector('#pvNo').onclick = m.close; } });
+    };
+
+    var fin = host.querySelector('[data-finish]');
+    if(fin) fin.onclick = function(){
+      App.confirmSim('确认完成「'+t.title+'」？完成后归档并自动进入下一流程（演练模拟）。', function(){
+        fin.disabled = true; fin.textContent = '提交中…';
+        var chain = Promise.resolve();
+        if(t.status==='待处理'||t.status==='超时') chain = chain.then(function(){ return API.acceptTask(t.id, proxy); });
+        chain.then(function(){ return API.submitTask(t.id, '基础版按引导流程完成本节点处置', proxy); })
+          .then(function(){ return API.completeTask(t.id, proxy); })
+          .then(function(){
+            App.toast('本步骤已完成，演练流程进入下一步','ok');
+            App.refreshShell();
+            if(onDone) onDone(); else { renderBasic(); renderScore(); }
+          })
+          .catch(function(err){
+            fin.disabled = false; fin.innerHTML = App.icon('check')+'完成本步骤，进入下一流程';
+            App.toast((err&&err.message)||'操作失败','err');
+          });
+      });
+    };
+  }
+
+  /* ---------- 附件与截图取证 ---------- */
+  var BAD_EXT = /\.(exe|bat|cmd|vbs|scr|msi|com|pif|jar)$/i;
+  var IMG_EXT = /\.(png|jpe?g|gif|bmp|webp|svg)$/i;
+  var MAX_MB = 20;
+
+  function guessType(name, mime){
+    var n = String(name||'').toLowerCase();
+    if(/^image\//.test(mime||'') || IMG_EXT.test(n)) return '截图';
+    if(/\.(pcap|cap|pcapng)$/.test(n)) return '流量包摘要';
+    if(/\.(log|txt|csv)$/.test(n)) return '日志片段';
+    if(/\.(cfg|conf|ini|yaml|yml|json)$/.test(n)) return '配置备份';
+    return '文档';
+  }
+  function evidenceOfTask(t){
+    return ((window.MOCK && MOCK.EVIDENCE) || []).filter(function(e){
+      if(e.taskId && String(e.taskId) === String(t.id)) return true;
+      return !e.taskId && e.nodeId && String(e.nodeId) === String(t.nodeId);
+    }).map(function(e){
+      return { id:e.id, name:e.name, type:e.type, size:e.size, url:e.url, by:e.uploader, time:e.time, auto:!!e.auto, ev:true };
+    });
+  }
+  function attHtml(t){
+    var base = (t.atts||[]).map(function(a){
+      return { id:a.id, name:a.name, type:a.type, size:a.size, url:a.url, by:a.by, time:a.time, auto:a.auto, ev:false };
+    });
+    var seen = {};
+    base.forEach(function(a){ if(a.url) seen[String(a.url)] = 1; });
+    var extra = evidenceOfTask(t).filter(function(e){ return !(e.url && seen[String(e.url)]); });
+    return base.concat(extra).map(function(a){
+      var auto = (a.by==='系统自动' || a.auto) ? '⚙ ' : '';
+      var nm = App.esc(a.name||'附件');
+      var meta = (a.time?a.time+' · ':'')+(a.by||'')+(a.size?(' · '+a.size):'');
+      if(a.by==='系统自动' || a.auto) meta = '自动生成 · '+meta;
+      if(a.ev) meta += (a.url?'':' · 无文件');
+      var del = a.id ? '<button '+(a.ev?'data-ev-del':'data-att-del')+'="'+App.esc(String(a.id))+'" title="删除附件" style="border:0;background:transparent;color:var(--err,#f85149);cursor:pointer;padding:0 0 0 6px;font-size:15px;line-height:1">×</button>' : '';
+      var isImg = a.url && (/^data:image/.test(a.url) || /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(a.url).split('?')[0]));
+      if(isImg){
+        return '<span class="file-chip att-img" title="点击放大预览" style="padding:4px 8px 4px 4px;cursor:pointer"><img src="'+App.esc(API.mediaUrl(a.url))+'" alt="" style="width:56px;height:40px;object-fit:cover;border-radius:4px;display:block;flex:none">'+auto+nm+'<span class="fc-size">'+meta+'</span>'+del+'</span>';
+      }
+      var dl = a.url ? ' <a href="'+App.esc(a.url)+'" target="_blank" rel="noopener" style="color:var(--accent2);margin-left:4px">下载</a>' : '';
+      return '<span class="file-chip">'+App.icon('file')+auto+nm+'<span class="fc-size">'+meta+'</span>'+dl+del+'</span>';
+    }).join('') || '<span class="small dim">暂无附件</span>';
+  }
+  function refreshAtt(t, host){
+    var box = host && host.querySelector ? host.querySelector('#watt-'+t.id) : null;
+    if(box) box.innerHTML = attHtml(t);
+  }
+  function confirmRemove(msg, onOk){
+    App.modal({ title:'删除确认',
+      body:'<p style="font-size:13.5px;line-height:1.8">'+App.esc(msg)+'</p>',
+      foot:'<button class="btn" id="delNo">取消</button><button class="btn primary" id="delYes">确认删除</button>',
+      onOpen:function(ov){
+        ov.querySelector('#delNo').onclick = ov.close;
+        ov.querySelector('#delYes').onclick = function(){ ov.close(); if(onOk) onOk(); };
+      } });
+  }
+  function openAttUpload(t, host){
+    var picked = [];
+    /* 屏幕抓取 API 仅在安全上下文（HTTPS / localhost）可用；内网 HTTP 地址下 navigator.mediaDevices 不存在 */
+    var canScreen = !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+    App.modal({ title:'上传证据附件 · '+t.id,
+      body:'<div class="sim-banner">'+App.icon('alert')+'<span>真实文件上传：可选择本地证据文件，或直接<b>屏幕截图</b>取证。<b>严禁上传可执行程序/脚本/恶意样本</b>，单文件限 '+MAX_MB+'MB。</span></div>'
+        + '<div class="flex wrap gap2 mb3">'
+        + '<button class="btn primary" id="attPick">'+App.icon('file')+'选择文件</button>'
+        + '<button class="btn" id="attShot">'+App.icon('camera')+'屏幕截图</button>'
+        + '<input type="file" id="attFile" multiple style="display:none">'
+        + '<input type="file" id="attShotFile" accept="image/*" multiple style="display:none">'
+        + '</div>'
+        + '<div id="attShotTip" class="tiny" style="display:none;color:#fbbf24;line-height:1.7;margin-bottom:8px"></div>'
+        + '<div id="attList" class="small muted">尚未选择文件</div>',
+      foot:'<button class="btn" id="attNo">取消</button><button class="btn primary" id="attYes">'+App.icon('upload')+'上传归档</button>',
+      onOpen:function(ov){
+        var listBox = ov.querySelector('#attList');
+        var fileIn = ov.querySelector('#attFile');
+        var shotFileIn = ov.querySelector('#attShotFile');
+        var shotTip = ov.querySelector('#attShotTip');
+        function renderPicked(){
+          if(!picked.length){ listBox.innerHTML = '<span class="small muted">尚未选择文件</span>'; return; }
+          listBox.innerHTML = picked.map(function(p){
+            var bad = BAD_EXT.test(p.name) ? ' <span style="color:var(--err)">不允许的类型</span>' : (p.size>MAX_MB*1048576 ? ' <span style="color:var(--err)">超出'+MAX_MB+'MB</span>' : ' <span class="tag green">通过校验</span>');
+            return '<div style="padding:6px 0;border-bottom:1px dashed var(--line)">'+App.esc(p.name)+' · '+fmtSize(p.size)+bad+'</div>';
+          }).join('');
+        }
+        function pushFiles(files){
+          Array.prototype.forEach.call(files||[], function(f){ picked.push(f); });
+          renderPicked();
+        }
+        function commitUpload(){
+          if(!picked.length){ App.toast('请先选择文件','err'); return; }
+          var valid = [], rejected = 0;
+          picked.forEach(function(f){
+            if(BAD_EXT.test(f.name) || f.size>MAX_MB*1048576) rejected++;
+            else valid.push(f);
+          });
+          if(!valid.length){ App.toast('所选文件均未通过类型/大小校验','err'); return; }
+          var fd = new FormData();
+          valid.forEach(function(f){ fd.append('files', f); });
+          API.uploadTaskAttachments(t.id, fd).then(function(r){
+            var list = r.attachments || [];
+            t.atts = t.atts || [];
+            list.forEach(function(a){ t.atts.push(a); });
+            refreshAtt(t, host);
+            ov.close();
+            /* 服务端已把同一份文件镜像到 evidence：回读一次，保证“证据附件”与“取证留痕”两处展示一致 */
+            API.getEvidence().then(function(ev){
+              MOCK.EVIDENCE = ev || [];
+              refreshAtt(t, host);
+            }).catch(function(){});
+            App.toast(list.length+' 个附件已上传并归档至取证模块'+(rejected?('，'+rejected+' 个被拦截'):''), rejected?'warn':'ok');
+          }).catch(function(err){ App.toast((err&&err.message)||'上传失败','err'); });
+        }
+        if(!canScreen){
+          shotTip.style.display = 'block';
+          shotTip.innerHTML = '当前通过 HTTP 地址访问（非安全上下文），浏览器已禁止网页直接抓屏。<br>请用系统截图（Win+Shift+S / 微信截图）后在本窗口按 <b>Ctrl+V</b> 粘贴，或点击「屏幕截图」选择本地图片。';
+        }
+        /* 粘贴截图：paste 事件在非安全上下文同样可用 */
+        var onPaste = function(e){
+          var fl = e.clipboardData && e.clipboardData.files;
+          var imgs = [];
+          if(fl) Array.prototype.forEach.call(fl, function(f){ if(/^image\//.test(f.type||'')) imgs.push(f); });
+          if(!imgs.length) return;
+          e.preventDefault();
+          var ts = p2(new Date().getHours())+p2(new Date().getMinutes())+p2(new Date().getSeconds());
+          imgs.forEach(function(f, i){
+            var nm = (f.name && f.name !== 'image.png') ? f.name : ('粘贴截图-'+t.id+'-'+ts+(imgs.length>1?('-'+i):'')+'.png');
+            try { picked.push(new File([f], nm, { type: f.type || 'image/png' })); }
+            catch(err){ picked.push(f); }
+          });
+          renderPicked();
+          App.toast('已粘贴 '+imgs.length+' 张截图，点击“上传归档”完成归档','ok');
+        };
+        document.addEventListener('paste', onPaste);
+        var origClose = ov.close;
+        ov.close = function(){ document.removeEventListener('paste', onPaste); origClose(); };
+        ov.querySelector('#attPick').onclick = function(){ fileIn.click(); };
+        fileIn.onchange = function(){ pushFiles(fileIn.files); fileIn.value = ''; };
+        shotFileIn.onchange = function(){ pushFiles(shotFileIn.files); shotFileIn.value = ''; };
+        ov.querySelector('#attShot').onclick = function(){
+          if(!canScreen){
+            App.toast('当前为 HTTP 内网访问，浏览器禁止网页直接抓屏，已切换为选择图片上传','warn');
+            shotFileIn.click();
+            return;
+          }
+          navigator.mediaDevices.getDisplayMedia({video:true}).then(function(stream){
+            var video = document.createElement('video');
+            video.muted = true; video.srcObject = stream;
+            video.onloadedmetadata = function(){
+              video.play();
+              setTimeout(function(){
+                var c = document.createElement('canvas');
+                c.width = video.videoWidth || 1280; c.height = video.videoHeight || 720;
+                c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+                stream.getTracks().forEach(function(tr){ tr.stop(); });
+                c.toBlob(function(blob){
+                  if(!blob){ App.toast('截图失败：无法生成图片','err'); return; }
+                  var nm = '屏幕截图-'+t.id+'-'+p2(new Date().getHours())+p2(new Date().getMinutes())+p2(new Date().getSeconds())+'.png';
+                  picked.push(new File([blob], nm, { type:'image/png' }));
+                  renderPicked();
+                  commitUpload();
+                }, 'image/png');
+              }, 350);
+            };
+            video.onerror = function(){
+              stream.getTracks().forEach(function(tr){ tr.stop(); });
+              App.toast('截图失败：无法读取屏幕画面','err');
+            };
+          }).catch(function(err){
+            var nm = (err && err.name) || '';
+            if(nm === 'NotAllowedError' || nm === 'AbortError') App.toast('已取消屏幕共享','warn');
+            else App.toast('屏幕共享失败：'+((err && err.message) || nm || '未知原因')+'，请改用“选择文件”上传截图','err');
+          });
+        };
+        ov.querySelector('#attNo').onclick = ov.close;
+        ov.querySelector('#attYes').onclick = commitUpload;
+      } });
+  }
+
+  /* ---------- 剧本故障通报：演练开始后弹窗 + 页面正上方固定告警 ---------- */
+  function renderFaultBanner(){
+    var box = document.getElementById('wbFault');
+    if(!box) return;
+    if(!started || !ALERT){ box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="fault-alert">'
+      + '<span class="fa-ic">'+App.icon('alert')+'</span>'
+      + '<div class="fa-main"><span class="fa-tag">● 演练故障通报 · '+(isPractical?'实战版':'基础版')+'</span>'
+      + '<div class="fa-title">'+App.esc(SCEN?SCEN.type:'系统')+'异常事件（'+(SCEN?App.esc(SCEN.level):'—')+'级 · 演练模拟）</div>'
+      + '<div class="fa-text">'+App.esc(ALERT)+'</div></div>'
+      + '<button class="btn sm" id="faMore">查看完整通报</button></div>';
+    var more = document.getElementById('faMore');
+    if(more) more.onclick = function(){ faultModal(true); };
+  }
+
+  function faultModal(force){
+    if(!started){
+      if(force) App.toast('当前演练项目为「'+(proj.status||'未开始')+'」，故障通报将在演练开始后展示','warn');
+      return;
+    }
+    var key = 'pzy_fault_notice_'+proj.id;
+    if(!force && sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key,'1');
+
+    function show(extra){
+      App.modal({
+        title:'演练系统异常 · 剧本故障通报',
+        wide:true,
+        body:'<div class="fm-hero">'
+          +   '<div class="fm-kicker">⚠ 演练已开始 · 初始故障通报</div>'
+          +   '<div class="fm-title">'+App.esc(SCEN?SCEN.type:'系统')+'异常 · '+(SCEN?App.esc(SCEN.level):'—')+'级事件</div>'
+          +   '<div class="fm-text">'+App.esc(ALERT||FACTS.fault)+'</div>'
+          + '</div>'
+          + '<div class="kv">'
+          +   '<span class="k">涉及系统</span><span class="small mono">'+App.esc(FACTS.sys||'—')+'</span>'
+          +   '<span class="k">影响范围</span><span class="small">'+App.esc(FACTS.scope||'—')+'</span>'
+          +   '<span class="k">关联线索</span><span class="small">'+App.esc(FACTS.ip||'—')+'</span>'
+          +   '<span class="k">演练模式</span><span class="small">'+App.esc(proj.mode||'基础版')+'</span>'
+          +   extra
+          + '</div>'
+          + '<div class="sim-banner mt3">'+App.icon('alert')+'<span>本通报为演练模拟数据，不含真实患者信息。关闭后将在页面<b>正上方持续显示醒目告警条</b>，可随时点「查看完整通报」重新打开。</span></div>',
+        foot:'<button class="btn" id="fmClose">关闭</button><button class="btn primary" id="fmGo">进入角色待办任务</button>',
+        onOpen:function(ov){
+          ov.querySelector('#fmClose').onclick = ov.close;
+          ov.querySelector('#fmGo').onclick = function(){
+            ov.close();
+            var el = document.getElementById('wbTasks');
+            if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+          };
+        }
+      });
+    }
+
+    if(isPractical){
+      API.getDrillFaults(proj.id).then(function(d){
+        var fs = d.faults || [];
+        show('<span class="k">已发现故障</span><span class="small">共 <b style="color:var(--err)">'+fs.length+'</b> 个（待处置 '+fs.filter(function(x){ return x.status==='待处置'; }).length+' 个）</span>');
+      }).catch(function(){ show(''); });
+    } else {
+      show('');
+    }
+  }
+
+  /* ---------- 实战版：本角色全部候选处置流程（正确流程与混淆流程外观一致） ---------- */
+  function flowRow(d){
+    var sub = d.submitted;
+    var locked = !sub && !!d.locked;
+    var skipped = !!(sub && sub.skipped);
+    var statusTag = skipped
+      ? '<span class="tag gray">已跳过</span>'
+      : (sub
+        ? '<span class="tag '+(sub.correct?'green':'red')+'">已提交</span>'
+        : (locked ? '<span class="tag gray">前置未完成</span>' : '<span class="tag red">待处置</span>'));
+    var meta = '<span>标准处置时长 '+(d.timeout?d.timeout+' 分钟':'—')+'</span>'
+      + (d.action?'<span>'+App.esc(d.action)+'</span>':'')
+      + (d.formName?'<span>表单：'+App.esc(App.formDisplayName({name:d.formName, mode:d.formMode}))+'</span>':'')
+      + (locked && (d.blockedBy||[]).length ? '<span style="color:var(--warn)">待完成：'+App.esc(d.blockedBy.map(function(x){ return x.title||x.id; }).join('、'))+'</span>' : '');
+    return '<div class="tn-row '+(sub?'done':'cur')+'" '+(locked?'style="opacity:.55;cursor:not-allowed" ':'')
+      + 'data-flow="'+App.esc(d.nodeId)+'" data-locked="'+(locked?1:0)+'" role="button" tabindex="0">'
+      + '<span class="tn-ic">'+(sub?App.icon('check'):(locked?App.icon('lock'):App.icon('alert')))+'</span>'
+      + '<div class="tn-main"><div class="tn-title">'+App.esc(d.title||d.action||'处置流程')+'</div>'
+      + '<div class="tn-meta">'+meta+'</div></div>'
+      + statusTag
+      + (!sub && !locked && !isExternal ? '<button class="btn sm outline" data-skip="'+App.esc(d.nodeId)+'" title="判定该流程不属于本岗处置动作，不执行">跳过（不执行）</button>' : '')
+      + '<span class="tn-go">'+(skipped?'查看跳过记录 ›':(sub?'查看处置记录 ›':(locked?'前置流程完成后开放':(isExternal?'查看流程详情 ›':'填写处置表单 ›'))))+'</span></div>';
+  }
+
+  function flowForm(d){
+    var fields = wizFields(d.fields);
+    if(isExternal){
+      var roList = fields.length
+        ? '<div class="kv">'+fields.map(function(f){
+            return '<span class="k">'+App.esc(f.label)+(f.required?' <span class="req">*</span>':'')+'</span><span class="small">'+App.esc(f.hint||'—')+'</span>';
+          }).join('')+'</div>'
+        : '<div class="tiny dim">该流程未关联表单模板。</div>';
+      return '<div class="fm-strip">'+App.icon('lock')+'<span>外部单位只读视图：可查看本节点内容与表单字段，不可提交；处置记录仍由院应急指挥部代执行。</span></div>'
+        + '<div class="section-title">'+App.icon('edit')+'处置表单 · '+App.esc(App.formDisplayName({name:d.formName||'实战处置表单', mode:d.formMode}))+'</div>'+roList;
+    }
+    var wkey = 'p-'+proj.id+'-'+d.nodeId;
+    var recv = '<div class="form-row span2" style="margin-bottom:10px"><label class="f-label">下一节点接收人 <span class="req">*</span> <span class="tiny dim">（可多选）</span></label>'
+      + '<div class="flex gap3 wrap" id="flReceiverBox">'
+      + RECEIVERS.map(function(x, i){ return '<label class="check"><input type="checkbox" value="'+App.esc(x)+'" data-recv="'+i+'">'+App.esc(x)+'</label>'; }).join('')
+      + '</div><div class="tiny dim" style="margin-top:4px">实战版需由参演人员自行研判流转对象，可多选；所选接收人与剧本预设完全一致才正确，多选、漏选均扣本流程 30% 分值。</div></div>';
+    if(!fields.length){
+      return '<div class="section-title">'+App.icon('edit')+'流程流转 <span class="tiny dim" style="font-weight:400">由参演人员选择下一节点接收人</span></div>'
+        + '<div class="form-grid">'+recv+'</div>'
+        + '<div class="tiny dim mb3">该流程未关联表单模板，请直接填写下方实际处置信息。</div>';
+    }
+    return '<div class="section-title">'+App.icon('edit')+'处置表单 · '+App.esc(d.formName||'实战处置表单')+' <span class="tiny dim" style="font-weight:400">空表手填，逐字段提示说明</span></div>'
+      + '<div class="form-grid">'+recv+'</div>'
+      + '<div class="wz-host" id="pfWiz" data-wzkey="'+App.esc(wkey)+'"></div>';
+  }
+
+  function flowDoneBody(d){
+    var sub = d.submitted;
+    if(sub.skipped){
+      return '<div class="kv">'
+        + '<span class="k">处置时刻</span><span class="mono">'+App.esc(sub.stepTime||'—')+'</span>'
+        + '<span class="k">处置人</span><span>'+App.esc(sub.user||'—')+'</span>'
+        + '<span class="k">判定结果</span><span><span class="tag gray">已跳过（不执行）</span></span>'
+        + '</div><div class="tiny dim mt2">该流程由参演人员判定不属于本岗处置动作并跳过，不可重复执行。</div>';
+    }
+    var forms = sub.forms || {};
+    var rows = Object.keys(forms).map(function(k){
+      return '<span class="k">'+App.esc(k)+'</span><span class="small">'+App.esc(forms[k]||'—')+'</span>';
+    }).join('');
+    return '<div class="kv">'
+      + '<span class="k">处置时刻</span><span class="mono">'+App.esc(sub.stepTime||'—')+'</span>'
+      + '<span class="k">处置人</span><span>'+App.esc(sub.user||'—')+'</span>'
+      + '<span class="k">判定结果</span><span>'+(sub.correct
+          ? '<span class="tag green">正确流程 · 得分 +'+sub.delta+'</span>'+(sub.ontime?'':' <span class="tag yellow">超出标准处置时长</span>')
+          : '<span class="tag red">混淆流程 · 扣分 '+Math.abs(sub.delta)+'</span>')+'</span>'
+      + '<span class="k">下一节点接收人</span><span>'+(sub.receiver?App.esc(sub.receiver):'—')
+        +(sub.correct?((sub.receiverOk===0||sub.receiverOk===false)?' <span class="tag red">接收人不完整 · 扣本流程10%–30%</span>':''):'')+'</span>'
+      + rows
+      + '<span class="k">处置措施</span><span class="small">'+App.esc(sub.measure||'—')+'</span>'
+      + '<span class="k">处置结果</span><span class="small">'+App.esc(sub.result||'—')+'</span>'
+      + (sub.found?'<span class="k">发现情况</span><span class="small">'+App.esc(sub.found)+'</span>':'')
+      + (sub.evidence?'<span class="k">证据说明</span><span class="small">'+App.esc(sub.evidence)+'</span>':'')
+      + '</div>'
+      + '<div class="tiny dim mt2">该流程已锁定，不可重复提交；处置记录已归档至取证模块。</div>';
+  }
+
+  /* 关闭处置弹窗前的轻提示：已有未提交内容时防手滑（文案不含“错误/失败”） */
+  function confirmDiscard(onOk){
+    App.modal({
+      title:'关闭处置流程',
+      body:'<div class="fm-strip">'+App.icon('alert')+'<span>当前内容尚未提交，确定关闭？</span></div>'
+        + '<div class="tiny dim mt2">关闭后，本次填写的内容不会计入处置记录。</div>',
+      foot:'<button class="btn" id="wbDiscardNo">继续填写</button><button class="btn danger" id="wbDiscardYes">确定关闭</button>',
+      onOpen:function(m){
+        m.querySelector('#wbDiscardNo').onclick = m.close;
+        m.querySelector('#wbDiscardYes').onclick = function(){ m.close(); onOk(); };
+      }
+    });
+  }
+
+  /* 判定处置弹窗内是否已有未提交内容（含分步向导各字段） */
+  function flowHasInput(ov, nodeId){
+    var box = ov.querySelector('#wbFlowBody');
+    if(!box) return false;
+    var texts = box.querySelectorAll('#flFound,#flMeasure,#flResult,#flEvidence');
+    for(var i=0;i<texts.length;i++){ if(String(texts[i].value||'').trim()) return true; }
+    var rc = box.querySelector('#flReceiverBox');
+    if(rc && rc.querySelector('input:checked')) return true;
+    var s = WIZ['p-'+proj.id+'-'+nodeId];
+    if(s && s.values){
+      for(var k in s.values){ if(String(s.values[k]||'').trim()) return true; }
+    }
+    return false;
+  }
+
+  function openFlow(d){
+    var sub = d.submitted;
+    var predWrapId = 'wbPred-'+d.nodeId;
+    var submitting = false; /* 提交请求未返回期间禁止关闭，避免出现半提交状态 */
+    App.modal({
+      title:'处置流程 · '+App.esc(d.title||d.action||'系统故障'),
+      wide:true,
+      /* 关闭方式收敛为两条：右上角 ×（含未提交内容确认）与提交成功后的自动关闭。
+       * persist 关闭遮罩点击关闭；全站无 Esc 关闭监听，故 Esc 不会关闭本弹窗。 */
+      persist:true,
+      body: '<div class="wb-split">'
+        /* 左：研判参考区（当前节点处置内容 + 上一节点处置情况）；实战版不展示剧本引导信息 */
+        + '<div class="wb-split-left">'
+        +   '<div class="section-title" style="margin-top:0">'+App.icon('alert')+'当前节点处置内容</div>'
+        +   '<div class="fm-strip">'+App.icon('alert')+'<span><b>'+App.esc(d.title||'')+'</b><br>'+App.esc(d.desc||'请结合故障通报研判本流程是否属于本岗正确处置动作')+'</span></div>'
+        +   '<div class="kv mb3"><span class="k">标准处置时长</span><span>'+(d.timeout?d.timeout+' 分钟':'未设置')+'</span>'
+        +   '<span class="k">责任角色</span><span>'+App.esc(roleDisplayName(d.role||d.roleId||d.target)||'—')+'</span></div>'
+        +   predecessorSectionSkel(predWrapId)
+        + '</div>'
+        /* 右：处置表单与提交区 */
+        + '<div class="wb-split-right">'
+        +   '<div id="wbFlowBody">'+(sub?flowDoneBody(d):flowForm(d))+'</div>'
+        + '</div>'
+        + '</div>',
+      foot: (sub || isExternal) ? '' : '<button class="btn primary" id="wbFlowSubmit">'+App.icon('check')+'提交处置记录</button>',
+      onOpen:function(ov){
+        /* 处置弹窗改为左右分栏（左研判参考 / 右表单） */
+        var mEl = ov.querySelector('.modal');
+        if(mEl) mEl.classList.add('wb-split-modal');
+        /* 唯一手工关闭入口：右上角 ×（底部「关闭」已移除，避免出现第三条关闭路径） */
+        ov.querySelector('.x').onclick = function(){
+          if(submitting) return; /* 请求未返回：不允许关闭，避免半提交状态 */
+          if(!sub && flowHasInput(ov, d.nodeId)){ confirmDiscard(ov.close); return; }
+          ov.close();
+        };
+        /* 无论已提交/未提交，都异步加载前置节点处置情况供研判参考 */
+        if(d.nodeId && proj.id) API.getPredecessor(d.nodeId, proj.id).then(function(data){
+          fillPredecessorSection(predWrapId, data);
+        }).catch(function(){
+          var st = ov.querySelector('[data-pred-state]');
+          if(st){ st.textContent = '加载失败'; st.className = 'tag gray'; }
+          var bd = ov.querySelector('[data-pred-body="'+predWrapId+'"]');
+          if(bd) bd.innerHTML = '<div class="tiny dim">前置节点处置情况加载失败，请刷新后重试。</div>';
+        });
+        if(sub) return;
+        /* 外部单位只读：不标记处置中、不挂载可编辑表单、不绑定提交 */
+        if(isExternal) return;
+        /* 打开处置表单即标记为处置中（导调中心同步展示） */
+        if(d.nodeId) API.startNode(d.nodeId).catch(function(){});
+        var box = ov.querySelector('#wbFlowBody');
+        /* 模板字段改为分步向导：实战版初始为空表，字段说明引导填写，可一键生成模拟数据 */
+        var wizHost = box.querySelector('#pfWiz');
+        var wkey = 'p-'+proj.id+'-'+d.nodeId;
+        if(wizHost) mountWizard(wizHost, wkey, {
+          name: App.formDisplayName({name:d.formName||'实战处置表单', mode:d.formMode}), fields: d.fields,
+          t: { id: d.nodeId, deadline: '', level: '' }, node: { time: '' }, prefill: false
+        });
+        box.insertAdjacentHTML('beforeend','<div class="divider"></div>'
+          + '<div class="form-grid">'
+          + '<div class="form-row span2"><label class="f-label">发现情况 <span class="tiny dim">（可选）</span></label><textarea class="textarea" id="flFound" rows="2" placeholder="记录观察到的异常现象、涉及主机/IP、影响范围等"></textarea></div>'
+          + '<div class="form-row span2"><label class="f-label">实际处置措施 <span class="req">*</span> <span class="tiny dim">不少于6字</span></label><textarea class="textarea" id="flMeasure" rows="2" placeholder="如实记录本流程实际执行的动作"></textarea></div>'
+          + '<div class="form-row span2"><label class="f-label">处置结果 <span class="req">*</span></label><input class="input" id="flResult" placeholder="如：已隔离2台主机，业务验证恢复正常"></div>'
+          + '<div class="form-row span2"><label class="f-label">证据材料说明 <span class="tiny dim">（可选）</span></label><input class="input" id="flEvidence" placeholder="如：已截图并归档至取证模块"></div>'
+          + '</div>'
+          + '<div class="tiny dim mt2">实战版不提供预填数据与正确流程提示：请自行研判该流程是否属于本岗正确处置动作。误选混淆流程按该流程分值直接扣分；正确流程超时完成扣本节点分值的 20%，接收人选择错误扣 30%，处置文本命中本节点关键词少于 2 个扣 30%，证据要求未提交或未命中扣 20%（单节点合计不超过 80%）。表单可按字段说明逐项填写，也可一键生成模拟数据后核对修改。</div>');
+        var btn = ov.querySelector('#wbFlowSubmit');
+        btn.onclick = function(){
+          if(submitting) return; /* 防重复提交 */
+          var forms = {}, missing = [];
+          var wst = wizFields(d.fields).length ? WIZ[wkey] : null;
+          if(wst){
+            if(!wst.done){
+              var missNow = wst.fields.filter(function(f){
+                return f.required && !String(wst.values[f.label]||'').trim();
+              }).map(function(f){ return f.label; });
+              App.toast(missNow.length ? '请完整填写表单：'+missNow.slice(0,3).join('、') : '请先按「下一步」逐字段完成表单填写','err');
+              return;
+            }
+            wst.fields.forEach(function(f){
+              var v = String(wst.values[f.label]||'').trim();
+              if(wizType(f) === 'datetime') v = v.replace('T',' ');
+              if(f.required && !v) missing.push(f.label);
+              else if(v) forms[f.label] = v;
+            });
+          }
+          var measure = box.querySelector('#flMeasure').value.trim();
+          var result = box.querySelector('#flResult').value.trim();
+          var evidence = box.querySelector('#flEvidence').value.trim();
+          var found = box.querySelector('#flFound').value.trim();
+          var receiverBox = box.querySelector('#flReceiverBox');
+          var receivers = receiverBox
+            ? Array.prototype.slice.call(receiverBox.querySelectorAll('input:checked')).map(function(c){ return c.value; })
+            : [];
+          if(!receivers.length){ App.toast('请选择下一节点接收人（可多选）','err'); return; }
+          if(missing.length){ App.toast('请完整填写表单：'+missing.slice(0,3).join('、'),'err'); return; }
+          if(measure.length<6){ App.toast('实际处置措施不少于6字','err'); return; }
+          if(!result){ App.toast('请填写处置结果','err'); return; }
+          btn.disabled = true; btn.textContent = '提交中…';
+          submitting = true;
+          API.submitDrillFlow({
+            projectId: proj.id, nodeId: d.nodeId, forms: forms, receiver: receivers,
+            measure: measure, result: result, evidence: evidence, found: found
+          }).then(function(r){
+            var recvBad = r.receiverOk===0 || r.receiverOk===false;
+            var recvTip = r.correct && recvBad ? '（接收人选择错误，扣本流程30%）' : '';
+            App.toast(r.correct
+              ? '处置记录已提交：正确流程，得分 +'+r.delta+(r.ontime?'':';超出标准处置时长')+recvTip
+              : '处置记录已提交：混淆流程，扣分 '+Math.abs(r.delta),
+              r.correct && !recvBad ? 'ok':'warn');
+            ov.close();
+            App.refreshShell();
+            renderPractical(); renderScore();
+          }).catch(function(err){
+            submitting = false;
+            btn.disabled = false; btn.innerHTML = App.icon('check')+'提交处置记录';
+            App.toast((err&&err.message)||'提交失败','err');
+          });
+        };
+      }
+    });
+  }
+
+  /* 跳过流程：判定该流程不属于本岗处置动作，不执行且无需填写表单
+   * 混淆节点跳过时后端强制要求填写原因；正确流程跳过原因可选 */
+  function skipFlow(d){
+    App.modal({
+      title:'跳过处置流程',
+      body:'<div class="fm-strip">'+App.icon('alert')+'<span>请确认流程 <b>'+App.esc(d.title||'')+'</b> 不属于本岗应执行的处置动作，将标记为「已跳过（不执行）」，不可撤销。</span></div>'
+        + '<div class="tiny dim mt2">跳过混淆流程无扣分无奖励；跳过正确流程将在结束演练时按该流程分值扣分。</div>'
+        + '<div style="margin-top:12px"><label class="small bold">跳过原因 <span style="color:var(--warn)">(混淆节点必填)</span></label>'
+        + '<textarea id="wbSkipReason" rows="3" maxlength="500" placeholder="请简要说明为何判定该流程为干扰项或不属于本岗职责范围…" style="width:100%;margin-top:4px;padding:8px;border-radius:6px;border:1px solid rgba(47,129,247,.35);background:rgba(15,23,42,.5);color:#e2e8f0;font-family:inherit;font-size:13px;resize:vertical;outline:none"></textarea>'
+        + '<div id="wbSkipErr" class="tiny" style="color:var(--err);display:none;margin-top:4px"></div></div>',
+      foot:'<button class="btn" id="wbSkipCancel">取消</button><button class="btn danger" id="wbSkipOk">'+App.icon('check')+'确认跳过</button>',
+      onOpen:function(ov){
+        ov.querySelector('#wbSkipCancel').onclick = ov.close;
+        var btn = ov.querySelector('#wbSkipOk');
+        var ta = ov.querySelector('#wbSkipReason');
+        var errBox = ov.querySelector('#wbSkipErr');
+        ta.focus();
+        btn.onclick = function(){
+          var reason = String(ta.value || '').trim();
+          btn.disabled = true; btn.textContent = '提交中…';
+          errBox.style.display = 'none'; errBox.textContent = '';
+          API.skipDrillFlow(proj.id, d.nodeId, reason).then(function(r){
+            App.toast('已跳过该流程','ok');
+            ov.close();
+            App.refreshShell();
+            renderPractical(); renderScore();
+          }).catch(function(err){
+            btn.disabled = false; btn.innerHTML = App.icon('check')+'确认跳过';
+            if(err && err.needReason){
+              errBox.textContent = err.error || '跳过混淆节点必须填写原因';
+              errBox.style.display = 'block';
+              ta.focus();
+            } else {
+              App.toast((err&&err.message)||'跳过失败','err');
+            }
+          });
+        };
+      }
+    });
+  }
+
+  /* 完成演练按钮：核心证据未齐仍可点击（走缺项说明流程），非核心缺失只扣分不阻断 */
+  function updateFinishBtn(){
+    var b = document.getElementById('btnFinish');
+    if(!b) return;
+    b.disabled = false;
+    if(EV.corePending > 0){
+      b.innerHTML = App.icon('alert')+'完成演练（核心证据 '+EV.coreDone+'/'+EV.core+'）';
+      b.title = '核心证据尚有 '+EV.corePending+' 项未归档，需补齐或填写缺项说明（原因/责任人/补录时限/批准人）后结束';
+    } else if(EV.supportPending > 0){
+      b.innerHTML = App.icon('check')+'完成演练';
+      b.title = '核心证据已全部归档（'+EV.coreDone+'/'+EV.core+'）；另有 '+EV.supportPending+' 项非核心证据未归档，仅扣分不阻断';
+    } else {
+      b.innerHTML = App.icon('check')+'完成演练';
+      b.title = '取证材料已全部归档（'+EV.done+'/'+EV.total+'），可结束演练';
+    }
+  }
+
+  /* 结束核对清单 + 有缺项结束登记 */
+  function openFinishChecklist(){
+    var bfin = document.getElementById('btnFinish');
+    if(bfin){ bfin.disabled = true; }
+    DRILL.post('/drill/finish', { projectId: proj.id, dryRun: true }).then(function(r){
+      if(bfin){ bfin.disabled = false; }
+      showFinishModal(r && r.checklist);
+    }).catch(function(err){
+      if(bfin){ bfin.disabled = false; }
+      App.toast((err && err.message) || '结束核对失败', 'err');
+      updateFinishBtn();
+    });
+  }
+
+  function showFinishModal(ck){
+    ck = ck || {};
+    var coreMissing = ck.coreMissing || [];
+    var reqMissing = ck.requiredMissing || [];
+    var html = '<div class="tiny dim">结束前一次性核对：必做节点完成 <b>'+ck.requiredDone+'/'+ck.requiredTotal+'</b>；'
+      + '取证归档 <b>'+ck.evidenceDone+'/'+ck.evidenceTotal+'</b>（'+ck.evidenceRate+'%）；'
+      + '核心证据 <b style="color:'+(ck.corePending>0?'var(--err)':'var(--ok)')+'">'+ck.coreDone+'/'+ck.coreTotal+'</b>'
+      + (ck.supportPending>0 ? ('；非核心缺失 <b>'+ck.supportPending+'</b> 项（仅扣分）') : '') + '</div>';
+    html += '<div class="sim-banner mt2">'+App.icon('alert')+'<span>'+App.esc(ck.hint || '')+'</span></div>';
+    if(reqMissing.length){
+      html += '<div class="section-title mt4">必做节点缺项</div><div class="tiny dim">'
+        + reqMissing.map(function(n){ return App.esc(n.title)+'（'+App.esc(n.target||'—')+'）'; }).join('、') + '</div>';
+    }
+    if(coreMissing.length){
+      html += '<div class="section-title mt4">核心证据缺项</div><div class="tiny dim">'
+        + coreMissing.map(function(x){ return App.esc(x.name)+'（'+App.esc(x.nodeTitle)+' · '+App.esc(x.target||'—')+'）'; }).join('<br>') + '</div>';
+    }
+    if(ck.supportPending > 0){
+      html += '<div class="section-title mt4">非核心证据</div><div class="tiny dim">'+ck.supportPending+' 项未归档，仅扣分、不阻断结束。</div>';
+    }
+    if(ck.needsException){
+      html += '<div class="section-title mt4">有缺项结束登记（必填）</div>'
+        + '<div class="form-row"><label>缺项原因</label><textarea id="exReason" class="input" rows="2" placeholder="说明核心证据缺失原因及处置安排"></textarea></div>'
+        + '<div class="form-row"><label>补录责任人</label><input id="exOwner" class="input" placeholder="姓名/岗位"></div>'
+        + '<div class="form-row"><label>补录时限</label><input id="exDeadline" class="input" value="'+App.esc(ck.suggestedDeadline||'')+'" placeholder="YYYY-MM-DD HH:mm"></div>'
+        + '<div class="form-row"><label>批准人</label><input id="exApprover" class="input" placeholder="批准人姓名/岗位"></div>';
+    }
+    var ov = App.modal({
+      title: '结束演练核对' + (ck.needsException ? ' · 有缺项' : ''),
+      wide: true, persist: true,
+      body: html,
+      foot: '<button class="btn" id="finCancel">取消（继续演练）</button>'
+        + '<button class="btn '+(ck.needsException?'':'primary')+'" id="finOk">'+(ck.needsException?'确认有缺项结束':'确认结束演练')+'</button>',
+      onOpen: function(ovEl){
+        ovEl.querySelector('#finCancel').onclick = ovEl.close;
+        ovEl.querySelector('#finOk').onclick = function(){
+          var ex = null;
+          if(ck.needsException){
+            ex = {
+              reason: (ovEl.querySelector('#exReason').value || '').trim(),
+              owner: (ovEl.querySelector('#exOwner').value || '').trim(),
+              deadline: (ovEl.querySelector('#exDeadline').value || '').trim(),
+              approver: (ovEl.querySelector('#exApprover').value || '').trim()
+            };
+            if(ex.reason.length < 5 || !ex.owner || !ex.deadline || !ex.approver){
+              App.toast('请完整填写缺项原因（≥5字）、责任人、补录时限、批准人', 'err');
+              return;
+            }
+          }
+          ovEl.close();
+          doFinish(ex);
+        };
+      }
+    });
+    return ov;
+  }
+
+  function doFinish(exception){
+    var bfin = document.getElementById('btnFinish');
+    if(bfin){ bfin.disabled = true; bfin.textContent = '提交中…'; }
+    var payload = { projectId: proj.id };
+    if(exception) payload.exception = exception;
+    DRILL.post('/drill/finish', payload).then(function(r){
+      var s = (r && r.sealed) ? r.sealed : null;
+      App.toast('演练已结束' + (s ? ('，评级 '+(s.grade||'—')+'（快照 v'+s.version+'）') : ''), 'ok');
+      if(bfin){ bfin.remove(); }
+      App.refreshShell();
+      renderPractical(); renderScore();
+    }).catch(function(err){
+      if(bfin){ bfin.disabled = false; bfin.innerHTML = App.icon('check')+'完成演练'; }
+      App.toast((err && err.message) || '结束演练失败', 'err');
+      renderPractical();
+      updateFinishBtn();
+    });
+  }
+
+  function renderPractical(){
+    var host = document.getElementById('wbTasks');
+    host.innerHTML = '<div class="small dim">正在加载本角色处置流程…</div>';
+    API.getDrillFlows(proj.id).then(function(data){
+      var flows = data.flows || [];
+      RECEIVERS = data.receivers || [];
+      EV = data.evidence || EV;
+      updateFinishBtn();
+      /* 处置流程随演练启动下发：未开始时只展示等待启动空态，不渲染流程、不提供可点击入口
+       * 状态以项目真实状态字段为准（优先取接口回显 projectStatus） */
+      var pstatus = data.projectStatus || proj.status;
+      if(pstatus === '未开始'){
+        host.innerHTML = '<div class="empty">'+App.icon('clock')+'<div>演练尚未开始，请等待平台管理员启动</div>'
+          + '<div class="tiny dim mt2">启动后本角色候选处置流程将自动下发至此</div></div>';
+        return;
+      }
+      var lockedCount = flows.filter(function(d){ return !d.submitted && d.locked; }).length;
+      var pending = flows.filter(function(d){ return !d.submitted && !d.locked; }).length;
+      announceNewTasks(flows.filter(function(d){ return !d.submitted && !d.locked; }).map(function(d){ return d.nodeId; }), '处置流程');
+      if(!flows.length){
+        host.innerHTML = '<div class="empty">'+App.icon('lock')+'<div>本角色暂无可处置流程</div>'
+          + '<div class="tiny dim mt2">剧本基线中未分配本角色处置节点</div></div>';
+        return;
+      }
+      host.innerHTML = '<div class="tiny dim" style="margin-bottom:10px">本角色候选处置流程 <b>'+flows.length+'</b> 个（待处置 <b style="color:var(--err)">'+pending+'</b> 个'
+        + (lockedCount?'，前置未完成 <b>'+lockedCount+'</b> 个':'')+'）· 点击列表行填写完整处置表单，判定不属于本岗动作可点「跳过（不执行）」</div>'
+        + '<div class="task-nav">'+flows.map(flowRow).join('')+'</div>'
+        + '<div class="tiny dim mt2">列表同时包含正确处置流程与混淆流程，外观一致、不提示属性：误选混淆流程按该流程分值直接扣分；正确流程超时完成扣本节点分值的 20%；跳过混淆流程无扣分无奖励，跳过正确流程则在结束演练时按该流程分值扣分。未满足前置条件的流程会置灰锁定，前置完成后自动开放。</div>';
+      host.querySelectorAll('[data-flow]').forEach(function(row){
+        row.onclick = function(){
+          var d = flows.filter(function(x){ return String(x.nodeId)===String(row.dataset.flow); })[0];
+          if(!d) return;
+          if(!d.submitted && d.locked){
+            App.toast('前置流程未完成'+(d.blockedBy&&d.blockedBy.length?'：'+d.blockedBy.map(function(x){ return x.title||x.id; }).join('、'):'')+'，完成后自动开放','warn');
+            return;
+          }
+          openFlow(d);
+        };
+      });
+      host.querySelectorAll('[data-skip]').forEach(function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var d = flows.filter(function(x){ return String(x.nodeId)===String(b.dataset.skip); })[0];
+          if(d) skipFlow(d);
+        };
+      });
+    }).catch(function(err){
+      host.innerHTML = '<div class="tiny dim">'+App.esc((err&&err.message)||'处置流程加载失败，请稍后刷新')+'</div>';
+    });
+  }
+
+  /* ---------- 评分卡 ---------- */
+  function renderScore(){
+    var el = document.getElementById('wbScore');
+    API.getDrillWorkbench(proj.id).then(function(wb){
+      var s = wb.score || {};
+      var ded = s.deductions || [];
+      if(!isPractical){
+        el.innerHTML = '<div class="kpi info" style="margin-bottom:10px"><div class="k-label">剧本流程得分</div><div class="k-value">'+s.score+'<span class="small dim">分</span></div><div class="k-foot">'+App.esc(s.grade||'—')+' · 正确流程满分 '+s.maxScore+'</div></div>'
+          + '<div class="tiny">正确流程 <b>'+s.hit+'</b>/'+s.total+' · 超时完成 <b style="color:var(--err)">'+(s.late||0)+'</b>'+(s.missed?(' · 未完成 <b style="color:var(--err)">'+s.missed+'</b>'):'')+'</div>'
+          + '<div class="tiny dim mt2">扣分制：起始 100 分。超时完成扣本节点分值的 20%；演练结束时未完成的正确流程扣该流程全部分值。</div>'
+          + (ded.length?'<div class="tiny dim mt2">'+ded.slice(0,4).map(function(x){ return App.esc(x.title)+' '+x.point+'分（'+App.esc(x.type)+'）'; }).join('；')+(ded.length>4?' 等':'')+'</div>':'');
+        return;
+      }
+      var items = ded.concat(s.bonuses||[]);
+      el.innerHTML = '<div class="kpi info" style="margin-bottom:10px"><div class="k-label">即时评分</div><div class="k-value">'+s.score+'<span class="small dim">分</span></div><div class="k-foot">'+App.esc(s.grade||'—')+' · 正确流程满分 '+s.maxScore+'</div></div>'
+        + '<div class="tiny">正确流程 <b>'+s.hit+'</b>/'+s.total+' · 待处置 <b>'+(s.pending||0)+'</b> · 已跳过 <b>'+(s.skipped||0)+'</b> · 混淆流程误选 <b style="color:var(--err)">'+(s.wrong||0)+'</b> · 超时完成 <b style="color:var(--err)">'+(s.late||0)+'</b>'+(s.missed?(' · 未完成 <b style="color:var(--err)">'+s.missed+'</b>'):'')+'</div>'
+        + '<div class="tiny dim mt2">扣分制：起始 100 分。超时完成扣本节点分值的 20%；接收人与剧本预设不一致扣本节点分值的 30%；处置文本命中本节点关键词少于 2 个扣 30%；证据要求未提交或未命中扣 20%；演练结束时未完成的正确流程扣该流程全部分值。</div>'
+        + (items.length?'<div class="tiny dim mt2">'+items.slice(0,4).map(function(x){ return App.esc(x.title)+' '+(x.point>0?'+':'')+x.point+'分（'+App.esc(x.type)+'）'; }).join('；')+(items.length>4?' 等':'')+'</div>':'<div class="tiny dim mt2">尚无扣分项</div>');
+    }).catch(function(){ el.innerHTML = '<div class="tiny dim">评分加载失败</div>'; });
+  }
+
+  /* ---------- 本角色关注态势 ---------- */
+  function docList(){
+    return MOCK.EVIDENCE.filter(function(x){ return x.type==='表单文书' || x.type==='处置记录'; });
+  }
+  /* 关注态势统一时间格式：YYYY-MM-DD HH:mm */
+  function fmtTime(t){
+    var s = String(t||'');
+    if(!s) return '';
+    if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,16);
+    var p = API.activeProject();
+    var d = new Date();
+    var day = (p && /^\d{4}-\d{2}-\d{2}/.test(String(p.date||''))) ? String(p.date).slice(0,10)
+      : (d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()));
+    return day + ' ' + s.slice(0,5);
+  }
+
+  function renderFeed(){
+    var box = document.getElementById('wbFeed');
+    if(feed==='docs' || feed==='docs'){
+      var docs = docList();
+      box.innerHTML = '<div class="small muted mb3">医院已上报文书/公告材料（外部单位可见范围）</div>'
+        + docs.map(function(d){
+            return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('file')+'<span class="grow ellip">'+App.esc(d.name)+'</span><span class="fc-size">'+fmtTime(d.time)+' · '+App.esc(d.uploader)+'</span></div>';
+          }).join('')
+        + (feed==='docs'
+            ? '<div class="section-title mt3">'+App.icon('bell')+'院方公告文稿</div>'
+              + [].filter(function(o){ return o.source==='院办提交'; }).map(function(o){
+                  return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon('bell')+'<span class="grow ellip">'+App.esc(o.title)+'</span><span class="fc-size">'+fmtTime(o.time)+' · '+App.esc(o.status)+'</span></div>';
+                }).join('')
+            : '')
+        + '<div class="tiny dim mt2">内网原始告警、操作日志、会商内部讨论不在外部单位权限范围内（演练模拟权限隔离）</div>';
+    } else if(feed==='impact'){
+      API.getImpact().then(function(imp){
+        box.innerHTML = '<div class="small muted mb3">业务系统影响态势（演练模拟）</div>'
+          + imp.map(function(i){
+              var c = i.pct>=100?'ok':i.pct>=60?'warn':'err';
+              return '<div style="margin-bottom:10px"><div class="flex small" style="justify-content:space-between"><span>'+App.esc(i.sys)+'</span><span class="tag '+c+'">'+App.esc(i.state)+'</span></div><div class="progress mt2"><div class="bar '+c+'" style="width:'+i.pct+'%"></div></div></div>';
+            }).join('');
+      });
+    } else if(feed==='evidence'){
+      API.getEvidence().then(function(ev){
+        var mine = ev.filter(function(x){ return x.role===role.id || x.type==='操作日志' || x.type==='附件截图'; });
+        box.innerHTML = '<div class="small muted mb3">取证留痕（技术类，本角色可见）</div>'
+          + mine.map(function(d){
+              var open = d.url ? '<a href="'+App.esc(d.url)+'" target="_blank" rel="noopener" style="color:var(--accent2);margin-left:6px">查看</a>' : '';
+              return '<div class="file-chip" style="display:flex;margin-bottom:8px;width:100%">'+App.icon(d.type==='操作日志'?'db':'file')+'<span class="grow ellip">'+App.esc(d.name)+'</span><span class="fc-size">'+fmtTime(d.time)+' · '+App.esc(d.type)+open+'</span><button data-ev-del="'+App.esc(String(d.id))+'" title="删除取证材料" style="border:0;background:transparent;color:var(--err,#f85149);cursor:pointer;padding:0 0 0 8px;font-size:15px;line-height:1">×</button></div>';
+            }).join('');
+        box.querySelectorAll('[data-ev-del]').forEach(function(b){
+          b.onclick = function(){
+            var d = mine.filter(function(x){ return String(x.id)===String(b.dataset.evDel); })[0];
+            confirmRemove('确认删除取证材料「'+((d&&d.name)||'')+'」？删除后文件与记录一并清理，不可恢复。', function(){
+              API.deleteEvidence(b.dataset.evDel).then(function(){
+                App.toast('取证材料已删除','ok');
+                renderFeed();
+              }).catch(function(err){ App.toast((err&&err.message)||'删除失败','err'); });
+            });
+          };
+        });
+      });
+    } else if(feed==='audit'){
+      API.getAuditLogs().then(function(logs){
+        box.innerHTML = '<div class="small muted mb3">平台审计日志（仅查看，不可删改）</div>'
+          + '<div class="timeline">'+logs.slice(-6).reverse().map(function(l){
+              return '<div class="tl-item gray"><span class="tl-dot"></span><div class="tl-time">'+fmtTime(l.time)+'</div>'
+                + '<div class="tl-title">'+App.esc(l.user)+' · '+App.esc(l.action)+'</div>'
+                + '<div class="tl-desc mono tiny">IP '+App.esc(l.ip)+'</div></div>';
+            }).join('')+'</div>';
+      });
+    } else {
+      API.getMessages().then(function(ms){
+        var mine = ms.filter(function(m){ return (m.targets||[]).indexOf(role.id)>=0 || (m.targets||[]).indexOf('*')>=0; }).slice(-6).reverse();
+        box.innerHTML = '<div class="small muted mb3">与本角色相关的消息流（演练模拟）</div>'
+          + '<div class="timeline">'+ (mine.length ? mine.map(function(m){
+              return '<div class="tl-item '+(m.level==='P0'?'err':m.level==='P1'?'warn':'gray')+'"><span class="tl-dot"></span>'
+                + '<div class="tl-time">'+fmtTime(m.time)+' · '+App.esc(m.source)+'</div>'
+                + '<div class="tl-desc">'+App.levelTag(m.level)+' '+App.esc(m.text)+'</div></div>';
+            }).join('') : '<div class="small dim">暂无定向消息</div>') + '</div>';
+      });
+    }
+  }
+
+  var bf = document.getElementById('btnFault');
+  if(bf) bf.onclick = function(){ faultModal(true); };
+  var bs = document.getElementById('btnScript');
+  if(bs) bs.onclick = function(){ App.openScript(proj, {canExport:false}); };
+  var bfin = document.getElementById('btnFinish');
+  if(bfin) bfin.onclick = function(){ openFinishChecklist(); };
+  renderFaultBanner();
+  if(isPractical){ renderPractical(); renderScore(); }
+  else { renderBasic(); renderScore(); }
+  if(canProxy) renderProxy();
+  faultModal(false);
+  renderFeed();
+});
+App.boot('workbench');
+</script>
+</body>
+</html>
