@@ -23,10 +23,13 @@ deploy/install/install.sh
 ## 在线安装
 
 ```bash
-git clone https://github.com/chenjinxiang1980/cyber-drill.git
+# 国内推荐：Gitee
+git clone https://gitee.com/habeas/cyber-drill.git
 cd cyber-drill
 sudo bash deploy/install/install.sh
 ```
+
+GitHub 备选：`git clone https://github.com/chenjinxiang1980/cyber-drill.git`，后续步骤相同。
 
 安装器会依次完成：
 

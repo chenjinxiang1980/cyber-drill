@@ -1,7 +1,7 @@
 ﻿# 应急演练指挥系统（Cyber-Drill-System）
 
-> **使用中遇到问题，请优先查阅 Wiki：**
-> GitHub <https://github.com/chenjinxiang1980/cyber-drill/wiki> ｜ Gitee <https://gitee.com/habeas/cyber-drill/wiki>
+> **使用中遇到问题，请优先查阅 Wiki（国内推荐 Gitee）：**
+> Gitee <https://gitee.com/habeas/cyber-drill/wiki> ｜ GitHub <https://github.com/chenjinxiang1980/cyber-drill/wiki>
 > 安装、升级、配置、常见问题、评分口径、备份恢复都在 Wiki 里持续维护。
 
 面向医院、政府与企事业单位**内网**的桌面推演 + 实战演练指挥调度平台：内置勒索病毒、横向渗透、DDoS、钓鱼邮件、存储故障等高频安全事件剧本，覆盖演练编排、多角色协同、时序控制、处置记录、监视大屏、自动考评与复盘报告全流程。
@@ -52,10 +52,13 @@
 但安装器在线安装的 Docker 引擎（`moby-engine` + `container-selinux`）取自 openEuler 源，UOS 上需按现场仓库或离线 RPM 提供。
 
 ```bash
-git clone https://github.com/chenjinxiang1980/cyber-drill.git
+# 国内推荐：Gitee
+git clone https://gitee.com/habeas/cyber-drill.git
 cd cyber-drill
 sudo bash deploy/install/install.sh
 ```
+
+GitHub 备选：`git clone https://github.com/chenjinxiang1980/cyber-drill.git`，后续步骤相同。
 
 安装器会自动完成：安装/检查 Docker 与 Compose → 选择镜像源并拉取镜像 → 生成随机强口令 `.env`（权限 600）→ 启动 MySQL → 恢复 1.0.1 基线快照 → 启动应用 → 健康检查 → **在终端打印 `admin` 与 `platformadmin` 初始口令**。
 
