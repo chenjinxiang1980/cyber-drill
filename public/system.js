@@ -119,16 +119,31 @@ window.DRILL = (function () {
 
   /* ---------- 系统品牌设置（登录页/大屏页免登录同步） ---------- */
   var BRAND_KEY = 'pzy_brand';
+  var RUNTIME_VER_KEY = 'pzy_runtime_version';
   function brand() {
     try { return JSON.parse(localStorage.getItem(BRAND_KEY) || 'null'); } catch (e) { return null; }
   }
+  /* 运行版本以 /api/health 为准（补丁版不再靠数据库迁移推进 brand_version），取不到再回退品牌设置里的版本 */
+  function runtimeVersion() {
+    try { return localStorage.getItem(RUNTIME_VER_KEY) || ''; } catch (e) { return ''; }
+  }
   function loadBrand() {
-    return fetch('/api/system/brand', { credentials: 'same-origin' })
+    var pBrand = fetch('/api/system/brand', { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (b) {
         if (b) { try { localStorage.setItem(BRAND_KEY, JSON.stringify(b)); } catch (e) {} }
         return b || brand();
+      });
+    var pVersion = fetch('/api/health', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (h) {
+        var v = (h && h.version) ? 'v' + String(h.version).replace(/^v/i, '') : '';
+        if (v) { try { localStorage.setItem(RUNTIME_VER_KEY, v); } catch (e) {} }
+        return v;
       })
+      .catch(function () { return ''; });
+    return Promise.all([pBrand, pVersion])
+      .then(function (x) { return x[0]; })
       .catch(function () { return brand(); });
   }
   /* 统一把品牌信息刷到当前页面：标题、Logo、单位/系统名称、版本、项目地址 */
@@ -149,7 +164,8 @@ window.DRILL = (function () {
     if (t1) t1.textContent = b.systemName || '';
     var t2 = document.querySelector('.sidebar .brand .t2');
     if (t2) t2.textContent = (b.unitName || '') + ' · DRILL';
-    document.querySelectorAll('[data-brand="version"]').forEach(function (el) { el.textContent = b.version || ''; });
+    var ver = runtimeVersion() || b.version || '';
+    document.querySelectorAll('[data-brand="version"]').forEach(function (el) { el.textContent = ver; });
     document.querySelectorAll('[data-brand="github"]').forEach(function (el) { if (b.github) el.href = b.github; });
     document.querySelectorAll('[data-brand="gitee"]').forEach(function (el) { if (b.gitee) el.href = b.gitee; });
   }
@@ -157,7 +173,7 @@ window.DRILL = (function () {
   return {
     api: api, token: token, setToken: setToken,
     bootstrap: bootstrap, fill: fill,
-    brand: brand, loadBrand: loadBrand, applyBrand: applyBrand,
+    brand: brand, loadBrand: loadBrand, applyBrand: applyBrand, runtimeVersion: runtimeVersion,
     get: function (p) { return api(p); },
     post: function (p, b) { return api(p, { method: 'POST', body: b === undefined ? {} : b }); },
     patch: function (p, b) { return api(p, { method: 'PATCH', body: b || {} }); },
