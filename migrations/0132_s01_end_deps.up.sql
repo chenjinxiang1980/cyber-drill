@@ -18,8 +18,8 @@ SET SESSION group_concat_max_len = 10485760;
 
 SET @p_ledger := (SELECT COUNT(*) FROM schema_migrations WHERE version='0131_merge_s20_into_s01');
 SET @p_self := (SELECT COUNT(*) FROM schema_migrations WHERE version='0132_s01_end_deps');
-SET @p_17 := (SELECT COUNT(*) FROM script_nodes WHERE id='S01-17' AND deleted_at IS NULL AND deps='["S01-8","S01-19","S01-9","S01-11","S01-14"]');
-SET @p_21 := (SELECT COUNT(*) FROM script_nodes WHERE id='S01-21' AND deleted_at IS NULL AND deps='["S01-10","S01-12","S01-16","S01-18","S01-13","S01-20"]');
+SET @p_17 := (SELECT COUNT(*) FROM script_nodes WHERE id='S01-17' AND deleted_at IS NULL AND REPLACE(deps,' ','')='["S01-8","S01-19","S01-9","S01-11","S01-14"]');
+SET @p_21 := (SELECT COUNT(*) FROM script_nodes WHERE id='S01-21' AND deleted_at IS NULL AND REPLACE(deps,' ','')='["S01-10","S01-12","S01-16","S01-18","S01-13","S01-20"]');
 SET @p_new := (SELECT COUNT(*) FROM script_nodes WHERE id IN ('S01-22','S01-23','S01-24','S01-25') AND deleted_at IS NULL);
 SET @p_correct := (SELECT COUNT(*) FROM script_nodes WHERE scenario_id='S01' AND deleted_at IS NULL AND flow_type='correct');
 SET @p_dist := (SELECT COUNT(*) FROM script_nodes WHERE scenario_id='S01' AND deleted_at IS NULL AND flow_type='distractor');
@@ -42,8 +42,8 @@ UPDATE script_nodes SET deps='["S01-8","S01-19","S01-9","S01-11","S01-14","S01-2
 UPDATE script_nodes SET deps='["S01-10","S01-12","S01-16","S01-18","S01-13","S01-20","S01-22","S01-23","S01-24","S01-25"]'
  WHERE id='S01-21' AND scenario_id='S01' AND deleted_at IS NULL;
 
-SET @q_17 := (SELECT COUNT(*) FROM script_nodes WHERE id='S01-17' AND deleted_at IS NULL AND deps='["S01-8","S01-19","S01-9","S01-11","S01-14","S01-23","S01-25"]');
-SET @q_21 := (SELECT COUNT(*) FROM script_nodes WHERE id='S01-21' AND deleted_at IS NULL AND deps='["S01-10","S01-12","S01-16","S01-18","S01-13","S01-20","S01-22","S01-23","S01-24","S01-25"]');
+SET @q_17 := (SELECT COUNT(*) FROM script_nodes WHERE id='S01-17' AND deleted_at IS NULL AND REPLACE(deps,' ','')='["S01-8","S01-19","S01-9","S01-11","S01-14","S01-23","S01-25"]');
+SET @q_21 := (SELECT COUNT(*) FROM script_nodes WHERE id='S01-21' AND deleted_at IS NULL AND REPLACE(deps,' ','')='["S01-10","S01-12","S01-16","S01-18","S01-13","S01-20","S01-22","S01-23","S01-24","S01-25"]');
 SET @q_correct := (SELECT COUNT(*) FROM script_nodes WHERE scenario_id='S01' AND deleted_at IS NULL AND flow_type='correct');
 SET @q_dist := (SELECT COUNT(*) FROM script_nodes WHERE scenario_id='S01' AND deleted_at IS NULL AND flow_type='distractor');
 SET @q_score := (SELECT COALESCE(SUM(score),0) FROM script_nodes WHERE scenario_id='S01' AND deleted_at IS NULL AND flow_type='correct');
