@@ -1133,13 +1133,13 @@ func PatchProjectStatus(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "非法的项目状态"})
 			return
 		}
-		var prev, name, level, mode string
+		var prev, name, level, mode, membersJSON string
 		var startedAt, pausedAt, endedAt sql.NullString
 		var pausedSec sql.NullInt64
 		if err := database.QueryRow(
-			`SELECT COALESCE(status,''),COALESCE(name,''),COALESCE(level,''),COALESCE(mode,'基础版'),
+			`SELECT COALESCE(status,''),COALESCE(name,''),COALESCE(level,''),COALESCE(mode,'基础版'),COALESCE(members,'[]'),
 			 started_at,paused_at,paused_sec,ended_at FROM projects WHERE id=?`, id,
-		).Scan(&prev, &name, &level, &mode, &startedAt, &pausedAt, &pausedSec, &endedAt); err != nil {
+		).Scan(&prev, &name, &level, &mode, &membersJSON, &startedAt, &pausedAt, &pausedSec, &endedAt); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
 			return
 		}
@@ -1216,9 +1216,28 @@ func PatchProjectStatus(database *db.DB) gin.HandlerFunc {
 				ended = ts
 			}
 		}
-		if _, err := database.Exec(`UPDATE projects SET status=?, started_at=?, paused_at=?, paused_sec=?, ended_at=? WHERE id=?`,
+		// 开始/恢复演练与“未参演角色代填下发”放在同一事务：状态已变但任务未下发的情况不允许出现。
+		proxyTaskCount, proxyRoleNames := 0, []string(nil)
+		tx, err := database.Begin()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "开启事务失败"})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err := tx.Exec(`UPDATE projects SET status=?, started_at=?, paused_at=?, paused_sec=?, ended_at=? WHERE id=?`,
 			body.Status, nullIfEmpty(started), nullIfEmpty(paused), ps, nullIfEmpty(ended), id); err != nil {
 			slog.Error("更新演练项目状态失败", "project_id", id, "status", body.Status, "err", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新演练状态失败"})
+			return
+		}
+		if body.Status == "演练中" && prev != "演练中" {
+			proxyTaskCount, proxyRoleNames, err = dispatchProxyTasksTx(tx, id, membersJSON)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "下发代填任务失败：" + err.Error()})
+				return
+			}
+		}
+		if err := tx.Commit(); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新演练状态失败"})
 			return
 		}
@@ -1228,6 +1247,14 @@ func PatchProjectStatus(database *db.DB) gin.HandlerFunc {
 				SET t.deadline=DATE_FORMAT(DATE_ADD(?, INTERVAL n.timeout MINUTE),'%Y-%m-%d %H:%i')
 				WHERE t.project_id=? AND COALESCE(t.deadline,'')='' AND n.timeout>0`, started, id); err != nil {
 				slog.Warn("回填任务截止时间失败", "project_id", id, "err", err)
+			}
+		}
+		if proxyTaskCount > 0 {
+			if _, err := database.Exec(`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
+				id, time.Now().Format("15:04"), u.Name, u.Role.ID, "代填下发",
+				fmt.Sprintf("%d 条任务因责任角色未参演，已自动转交信息科负责人代填（%s）",
+					proxyTaskCount, strings.Join(proxyRoleNames, "、")), "", nil); err != nil {
+				logSideEffectErr("timeline", id, "代填下发", err)
 			}
 		}
 		// 站内消息：演练启动/继续、演练结束（Node bootstrap.js:331-351）
@@ -1256,7 +1283,7 @@ func PatchProjectStatus(database *db.DB) gin.HandlerFunc {
 		/* 与 Node bootstrap.js:352 一致：回传最新项目对象（含 startedAt/pausedAt/pausedSec/endedAt），
 		 * 前端 API.updateProjectStatus 用它刷新本地缓存，避免"开始演练"后计时仍停留在旧值 */
 		writeAudit(database, u, c, fmt.Sprintf("项目状态变更：%s %s→%s", name, prev, body.Status))
-		c.JSON(http.StatusOK, gin.H{"ok": true, "project": projectJSONByID(database, id)})
+		c.JSON(http.StatusOK, gin.H{"ok": true, "project": projectJSONByID(database, id), "proxyTaskCount": proxyTaskCount})
 	}
 }
 
@@ -1348,12 +1375,15 @@ func ensureBoardWrite(c *gin.Context, u *auth.User) bool {
 }
 
 type taskWriteTarget struct {
-	User          *auth.User
-	Title         string
-	ProjectID     string
-	ProjectStatus string
-	RoleID        string
-	Status        string
+	User             *auth.User
+	Title            string
+	ProjectID        string
+	ProjectStatus    string
+	RoleID           string
+	Status           string
+	IsProxy          bool
+	ProxyForRoleID   string
+	ProxyForRoleName string
 }
 
 // guardTaskWrite 任务写操作统一守门：登录、非外部、任务存在、项目未归档、
@@ -1370,13 +1400,17 @@ func guardTaskWrite(database *db.DB, c *gin.Context) (*taskWriteTarget, bool) {
 	}
 	taskID := c.Param("id")
 	t := &taskWriteTarget{User: u}
+	var isProxy int
 	if err := database.QueryRow(
-		`SELECT COALESCE(t.title,''),COALESCE(t.project_id,''),COALESCE(p.status,''),COALESCE(t.role_id,''),COALESCE(t.status,'')
+		`SELECT COALESCE(t.title,''),COALESCE(t.project_id,''),COALESCE(p.status,''),COALESCE(t.role_id,''),COALESCE(t.status,''),
+		        COALESCE(t.is_proxy,0),COALESCE(t.proxy_for_role_id,''),COALESCE(t.proxy_for_role_name,'')
 		 FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?`, taskID,
-	).Scan(&t.Title, &t.ProjectID, &t.ProjectStatus, &t.RoleID, &t.Status); err != nil {
+	).Scan(&t.Title, &t.ProjectID, &t.ProjectStatus, &t.RoleID, &t.Status,
+		&isProxy, &t.ProxyForRoleID, &t.ProxyForRoleName); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
 		return nil, false
 	}
+	t.IsProxy = isProxy == 1
 	if t.ProjectStatus == "已归档" {
 		c.JSON(http.StatusConflict, gin.H{"error": "已归档项目的任务不可再修改"})
 		return nil, false
@@ -1405,13 +1439,25 @@ func requestProxyFor(c *gin.Context, bodyProxy string) string {
 
 // validateProxyFill 校验代填是否被允许：
 //  1. 只有信息科负责人（itlead）和平台管理员（platformadmin）可代填；
-//  2. 被代填对象必须是 roles.external=1 的外部单位；
-//  3. 被代填对象必须就是该任务的负责角色（不能借代填改别的内部角色）；
+//  2. 未参演角色代填任务（tasks.is_proxy=1）：proxyFor 必须等于任务记录的被代填角色；
+//     调用方未显式传 proxyFor 时自动按任务记录补全，确保不会被当作普通任务悄悄完成；
+//  3. 外部单位代填（历史能力）：被代填对象必须是 roles.external=1，且是该任务的负责角色；
 //  4. 只能代填当前演练项目下的任务。
 //
-// proxyFor 为空时返回 (nil, true)，表示普通提交。
+// proxyFor 为空且不是代填任务时返回 (nil, true)，表示普通提交。
 func validateProxyFill(database *db.DB, c *gin.Context, u *auth.User, t *taskWriteTarget, proxyFor string) (*proxyFillTarget, bool) {
 	proxyFor = strings.TrimSpace(proxyFor)
+
+	implicitTaskProxy := false
+	if t != nil && t.IsProxy && t.ProxyForRoleID != "" {
+		if proxyFor != "" && proxyFor != t.ProxyForRoleID {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "该任务为「" + t.ProxyForRoleName + "」的代填任务，不能改由其他角色代填"})
+			return nil, false
+		}
+		proxyFor = t.ProxyForRoleID
+		implicitTaskProxy = true
+	}
+
 	if proxyFor == "" {
 		return nil, true
 	}
@@ -1420,9 +1466,20 @@ func validateProxyFill(database *db.DB, c *gin.Context, u *auth.User, t *taskWri
 		return nil, false
 	}
 	if u.Role.ID != "itlead" && u.Role.ID != "platformadmin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "仅信息科负责人/平台管理员可代填外部单位表单"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "仅信息科负责人/平台管理员可代填"})
 		return nil, false
 	}
+	if implicitTaskProxy {
+		name := strings.TrimSpace(t.ProxyForRoleName)
+		if name == "" {
+			_ = database.QueryRow("SELECT COALESCE(name,'') FROM roles WHERE id=?", proxyFor).Scan(&name)
+			if name = strings.TrimSpace(name); name == "" {
+				name = proxyFor
+			}
+		}
+		return &proxyFillTarget{RoleID: proxyFor, RoleName: name}, true
+	}
+
 	var roleName string
 	var ext int
 	if err := database.QueryRow("SELECT name,COALESCE(`external`,0) FROM roles WHERE id=?", proxyFor).Scan(&roleName, &ext); err != nil {
@@ -1511,7 +1568,7 @@ func PostTaskAccept(database *db.DB) gin.HandlerFunc {
 		}
 		if pt != nil {
 			recordProxyTrace(database, t.User, c, t.ProjectID,
-				"代填外部单位：接单",
+				"代填处置：接单",
 				fmt.Sprintf("%s 代 %s 接收任务「%s」", t.User.Name, pt.RoleName, t.Title))
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "status": "处理中", "isProxy": pt != nil})
@@ -1547,7 +1604,7 @@ func PostTaskSubmit(database *db.DB) gin.HandlerFunc {
 		}
 		if pt != nil {
 			recordProxyTrace(database, u, c, t.ProjectID,
-				"代填外部单位：提交处置记录",
+				"代填处置：提交处置记录",
 				fmt.Sprintf("%s 代 %s 提交任务「%s」处置记录", u.Name, pt.RoleName, t.Title))
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "evidenceId": eid, "isProxy": pt != nil})
@@ -1582,7 +1639,7 @@ func PostTaskComplete(database *db.DB) gin.HandlerFunc {
 		}
 		if pt != nil {
 			recordProxyTrace(database, u, c, projectID,
-				"代填外部单位：完成任务",
+				"代填处置：完成任务",
 				fmt.Sprintf("%s 代 %s 完成任务「%s」", u.Name, pt.RoleName, title))
 		}
 		// 站内消息：节点完成（Node tasks.js:134-148；已完成的任务不再重复推送）
@@ -1602,7 +1659,7 @@ func PostTaskComplete(database *db.DB) gin.HandlerFunc {
 				"user": userName, "role": roleName, "done": done, "total": total,
 			}, projectID, "", "", "internal")
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "status": "已完成"})
+		c.JSON(http.StatusOK, gin.H{"ok": true, "status": "已完成", "isProxy": pt != nil})
 	}
 }
 
@@ -2176,7 +2233,7 @@ func PostTaskForms(database *db.DB) gin.HandlerFunc {
 		}
 		if pt != nil {
 			recordProxyTrace(database, u, c, pid,
-				"代填外部单位：提交表单",
+				"代填处置：提交表单",
 				fmt.Sprintf("%s 代 %s 填写「%s」（任务 %s）", u.Name, pt.RoleName, formName, id))
 		}
 		if warnings == nil {
@@ -2520,7 +2577,7 @@ func resolveEvidenceBinding(database *db.DB, u *auth.User, taskID, projectID, no
 			return b, "剧本节点不存在"
 		}
 		// 仅绑定节点时按节点归属角色校验；任务绑定已在上面的 canManageTask 覆盖
-		if b.TaskID == "" && !canHandleRole(database, u.Role.ID, nodeTarget) {
+		if b.TaskID == "" && !canHandleRole(database, u.Role.ID, nodeTarget) && !canProxyNode(database, u.Role.ID, b.ProjectID, nodeTarget) {
 			return b, "该剧本节点由其他角色负责，当前角色不可上传"
 		}
 		if b.ProjectID != "" {
@@ -2885,7 +2942,7 @@ func PostEvidencePrefill(database *db.DB) gin.HandlerFunc {
 				continue
 			}
 			seen[key] = true
-			if !canHandleRole(database, u.Role.ID, target) {
+			if !canHandleRole(database, u.Role.ID, target) && !canProxyNode(database, u.Role.ID, pid, target) {
 				skipped = append(skipped, key+"：非本角色负责")
 				continue
 			}
@@ -2982,7 +3039,7 @@ func PostEvidenceMock(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "该节点没有对应的取证要求"})
 			return
 		}
-		if !canHandleRole(database, u.Role.ID, target) {
+		if !canHandleRole(database, u.Role.ID, target) && !canProxyNode(database, u.Role.ID, pid, target) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "该取证要求不属于当前角色"})
 			return
 		}
@@ -3105,7 +3162,7 @@ func GetEvidenceRequirements(database *db.DB) gin.HandlerFunc {
 				}
 				mine := false
 				if u != nil && !u.Role.External {
-					mine = canHandleRole(database, u.Role.ID, target)
+					mine = canHandleRole(database, u.Role.ID, target) || canProxyNode(database, u.Role.ID, pid, target)
 				}
 				hit, isDone := doneMap[key]
 				total++
@@ -4288,8 +4345,18 @@ func GetDrillFlows(database *db.DB) gin.HandlerFunc {
 		}
 
 		flows := make([]gin.H, 0)
+		members, hasMembers := projectMemberRoles(database, p.ID)
 		for _, n := range flowNodes {
-			if !canHandleRole(database, u.Role.ID, n.Target) {
+			// 代填：代填人对“未参演角色”的节点可见并以代填身份处置；
+			// 其他不匹配角色的节点仍按原权限隐藏。
+			proxyForRoleID, proxyForRoleName := "", ""
+			if canProxyForRole(u.Role.ID) && hasMembers {
+				tr := targetToRoleID(database, n.Target)
+				if tr != proxyHandlerRoleID && !members[tr] {
+					proxyForRoleID, proxyForRoleName = tr, strings.TrimSpace(n.Target)
+				}
+			}
+			if proxyForRoleID == "" && !canHandleRole(database, u.Role.ID, n.Target) {
 				continue
 			}
 			if !drillV1DistractorReleased(n, byID, done) {
@@ -4301,12 +4368,18 @@ func GetDrillFlows(database *db.DB) gin.HandlerFunc {
 			if st, ok := stepByNode[n.ID]; ok {
 				submitted = st
 			}
-			flows = append(flows, gin.H{
+			item := gin.H{
 				"nodeId": n.ID, "timeout": n.Timeout, "type": n.Type, "action": n.Action,
 				"target": n.Target, "title": n.Title, "desc": n.Desc, "formId": n.Form,
 				"formName": formName, "fields": fields, "formMode": formModeOf(database, n.Form),
 				"locked": lock.Locked, "blockedBy": lock.BlockedBy, "submitted": submitted,
-			})
+			}
+			if proxyForRoleID != "" {
+				item["isProxy"] = true
+				item["proxyForRoleId"] = proxyForRoleID
+				item["proxyForRoleName"] = proxyForRoleName
+			}
+			flows = append(flows, item)
 		}
 		// 与 Node 一致的稳定哈希排序，避免混淆流程集中在一处
 		sort.SliceStable(flows, func(i, j int) bool {

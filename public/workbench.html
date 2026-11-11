@@ -140,12 +140,16 @@ document.addEventListener('app:ready', function(e){
   function liveTxt(p){ var sec = API.elapsedOf(p); return (sec === null) ? '计时未启动' : ('T+' + API.fmtElapsed(sec)); }
   function fmtSize(b){ return b<1024 ? b+' B' : b<1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
 
-  /* 代填：仅信息科负责人/平台管理员，且当前登录人不是外部单位时可对外部单位任务代填 */
+  /* 代填：仅信息科负责人/平台管理员；可代填“未参演角色”的任务，以及历史的外部单位任务 */
   var canProxy = !isExternal && (role.id === 'itlead' || role.id === 'platformadmin');
   function extRoleMap(){
     var m = {};
     (MOCK.ROLES || []).forEach(function(r){ if(r && r.external) m[r.id] = r.name; });
     return m;
+  }
+  function proxyRoleName(t){
+    if(!t) return '';
+    return t.proxyForRoleName || extRoleMap()[t.role] || t.role || '';
   }
 
   page.innerHTML =
@@ -172,9 +176,9 @@ document.addEventListener('app:ready', function(e){
     +   '</div>'
     +   '<div class="card"><div class="card-title">'+App.icon('tasks')+'角色待办任务<span class="more">'+(isPractical?'已发现故障 · 自主处置':'按剧本流程逐步执行')+'</span></div>'
     +     '<div id="wbTasks"><div class="small dim">加载中…</div></div></div>'
-    +   (canProxy ? '<div class="card"><div class="card-title">'+App.icon('shield')+'外部单位代填<span class="more">信息科负责人代填 · 全程留痕</span></div>'
-    +     '<div class="tiny dim" style="line-height:1.75;margin-bottom:8px">外部单位（公安、运营商、市卫生健康局、市网信办等）不登录系统时，由信息科负责人代填其任务与表单。提交将记录填写人、被代填单位、代填时间，并写入审计日志与演练报告。</div>'
-    +     '<select class="select" id="wbProxySel"><option value="">全部外部单位</option></select>'
+    +   (canProxy ? '<div class="card"><div class="card-title">'+App.icon('shield')+'未参演角色代填<span class="more">信息科负责人代填 · 全程留痕</span></div>'
+    +     '<div class="tiny dim" style="line-height:1.75;margin-bottom:8px">流程目标角色未参演（未在项目成员中勾选）时，任务自动转交信息科负责人代填；外部单位（公安、运营商、市卫生健康局、市网信办等）不登录系统时也由信息科负责人代填。提交将记录填写人、被代填角色、代填时间，并写入审计日志与演练报告。</div>'
+    +     '<select class="select" id="wbProxySel"><option value="">全部代填角色</option></select>'
     +     '<div id="wbProxyList" class="small dim" style="margin-top:8px">加载中…</div></div>' : '')
     +   '<div class="card"><div class="card-title">'+App.icon('score')+'演练评分<span class="more">'+(isPractical?'偏离/超时扣分':'标准处置时长达成率')+'</span></div><div id="wbScore" class="small dim">正在汇总…</div></div>'
     +   '<div class="card"><div class="card-title">'+App.icon('eye')+'本角色关注态势</div><div id="wbFeed"><div class="small dim">加载中…</div></div></div>'
@@ -978,10 +982,12 @@ document.addEventListener('app:ready', function(e){
     if(locked && blocked.length) meta += '<span style="color:var(--warn)">待完成：'+App.esc(blocked.join('、'))+'</span>';
     var tag = done ? '<span class="tag green">已完成</span>'
       : (locked ? '<span class="tag gray">前置未完成</span>' : '<span class="tag red">可处置（并行）</span>');
+    var proxyTag = t.isProxy ? '<span class="tag yellow" title="该任务的目标角色未参演，由信息科负责人代填">代填·'+App.esc(proxyRoleName(t))+'</span>' : '';
     return '<div class="tn-row '+(done?'done':'cur')+'" '+(locked?'style="opacity:.55;cursor:not-allowed" ':'')
       + 'data-'+(done?'view':(locked?'lock':'open'))+'="'+App.esc(t.id)+'" role="button" tabindex="0">'
       + '<span class="tn-ic">'+(done?App.icon('check'):(locked?App.icon('lock'):App.icon('alert')))+'</span>'
       + '<div class="tn-main"><div class="tn-title">'+App.esc(t.title)+'</div><div class="tn-meta">'+meta+'</div></div>'
+      + proxyTag
       + tag
       + '<span class="tn-go">'+(done?'查看归档记录 ›':(locked?'请先完成前置流程':'打开处置表单 ›'))+'</span></div>';
   }
@@ -1031,26 +1037,33 @@ document.addEventListener('app:ready', function(e){
     });
   }
 
-  /* ---------- 外部单位代填（信息科负责人 / 平台管理员） ---------- */
+  /* ---------- 未参演角色 / 外部单位代填（信息科负责人 / 平台管理员） ---------- */
   function renderProxy(){
     if(!canProxy) return;
     var sel = document.getElementById('wbProxySel');
     var host = document.getElementById('wbProxyList');
     if(!host) return;
     var rm = extRoleMap();
-    if(sel && sel.options.length <= 1){
-      Object.keys(rm).forEach(function(id){
-        var o = document.createElement('option'); o.value = id; o.textContent = rm[id]; sel.appendChild(o);
-      });
-    }
     if(sel && !sel.dataset.bound){ sel.dataset.bound = '1'; sel.onchange = renderProxy; }
     var chosen = sel ? sel.value : '';
     API.getTasks().then(function(ts){
-      var list = (ts||[]).filter(function(t){
-        return t.projectId === proj.id && rm[t.role] && (!chosen || t.role === chosen);
+      // 代填范围：下发时被标记 is_proxy 的未参演角色任务 + 历史的外部单位任务
+      var all = (ts||[]).filter(function(t){
+        return t.projectId === proj.id && (t.isProxy || rm[t.role]);
       });
+      if(sel){
+        var opts = {};
+        all.forEach(function(t){ opts[t.proxyForRoleId || t.role] = proxyRoleName(t); });
+        sel.innerHTML = '<option value="">全部代填角色</option>';
+        Object.keys(opts).forEach(function(id){
+          var o = document.createElement('option'); o.value = id; o.textContent = opts[id]; sel.appendChild(o);
+        });
+        if(Object.prototype.hasOwnProperty.call(opts, chosen)) sel.value = chosen;
+        chosen = sel.value;
+      }
+      var list = all.filter(function(t){ return !chosen || (t.proxyForRoleId || t.role) === chosen; });
       if(!list.length){
-        host.innerHTML = '<div class="tiny dim">当前演练项目暂无可代填的外部单位任务。</div>';
+        host.innerHTML = '<div class="tiny dim">当前演练项目暂无可代填任务。</div>';
         return;
       }
       host.innerHTML = list.map(function(t){
@@ -1058,7 +1071,7 @@ document.addEventListener('app:ready', function(e){
         var cls = st==='已完成' ? 'green' : (st==='处理中' ? 'blue' : 'gray');
         return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px dashed var(--line)">'
           + '<div style="flex:1;min-width:0"><div class="small bold">'+App.esc(t.title||'')+'</div>'
-          + '<div class="tiny dim">'+App.esc(rm[t.role])+' · '+App.esc(t.id||'')+'</div></div>'
+          + '<div class="tiny dim">代填角色：'+App.esc(proxyRoleName(t))+' · '+App.esc(t.id||'')+'</div></div>'
           + '<span class="tag '+cls+'">'+App.esc(st)+'</span>'
           + (st==='已完成' ? '<span class="tag yellow">已代填</span>'
               : '<button class="btn sm primary" data-proxy="'+App.esc(t.id||'')+'">代填</button>')
@@ -1067,7 +1080,7 @@ document.addEventListener('app:ready', function(e){
       host.querySelectorAll('[data-proxy]').forEach(function(btn){
         btn.onclick = function(){
           var t = list.filter(function(x){ return String(x.id)===String(btn.dataset.proxy); })[0];
-          if(t) openBasicTask(t, 0, list.length, {roleId:t.role, roleName:rm[t.role]});
+          if(t) openBasicTask(t, 0, list.length, {roleId:t.proxyForRoleId || t.role, roleName:proxyRoleName(t)});
         };
       });
     }).catch(function(err){
@@ -1077,6 +1090,10 @@ document.addEventListener('app:ready', function(e){
 
   /* 完整处置表单以弹窗方式打开 */
   function openBasicTask(t, idx, total, proxy){
+    // 未参演角色代填任务：无论从哪个入口打开，都自动带上代填身份，避免被当作普通任务提交
+    if(!proxy && t && t.isProxy){
+      proxy = {roleId:t.proxyForRoleId, roleName:proxyRoleName(t)};
+    }
     proxy = proxy || null;
     var node = nodeForTask(t);
     App.modal({

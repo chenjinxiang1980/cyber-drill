@@ -333,8 +333,17 @@ func PostDrillSkip(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
-		// canHandle
-		if !canHandleRole(database, u.Role.ID, node.Target) {
+		// canHandle（未参演角色允许代填人代填跳过）
+		proxyForRoleID := ""
+		if canProxyForRole(u.Role.ID) {
+			if members, ok := projectMemberRoles(database, p.ID); ok {
+				tr := targetToRoleID(database, node.Target)
+				if tr != proxyHandlerRoleID && !members[tr] {
+					proxyForRoleID = tr
+				}
+			}
+		}
+		if !canHandleRole(database, u.Role.ID, node.Target) && proxyForRoleID == "" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "该流程责任角色为「" + node.Target + "」，当前角色无权处置"})
 			return
 		}
@@ -384,7 +393,12 @@ func PostDrillSkip(database *db.DB) gin.HandlerFunc {
 			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			 ON DUPLICATE KEY UPDATE id=id`,
 			p.ID, p.ScenarioID, u.Role.ID, u.Name, node.Action, node.Title,
-			"参演人员判定该流程不执行（跳过）", stepTime, node.ID, 1, 0, node.Title,
+			func() string {
+				if proxyForRoleID != "" {
+					return "信息科负责人代填未参演角色「" + node.Target + "」，判定该流程不执行（跳过）"
+				}
+				return "参演人员判定该流程不执行（跳过）"
+			}(), stepTime, node.ID, 1, 0, node.Title,
 			func() int {
 				if isCorrect {
 					return 1
@@ -403,10 +417,15 @@ func PostDrillSkip(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
+		skipAction, skipDetail := "跳过处置流程", "流程「"+node.Title+"」由参演人员判定不执行（跳过）"
+		if proxyForRoleID != "" {
+			skipAction = "代填处置：跳过流程"
+			skipDetail = "流程「" + node.Title + "」由" + u.Name + "代填未参演角色「" + node.Target + "」判定不执行（跳过）"
+		}
 		if _, err := database.Exec(
 			`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
-			p.ID, stepTime, u.Name, u.Role.ID, "跳过处置流程",
-			"流程「"+node.Title+"」由参演人员判定不执行（跳过）", "", nil,
+			p.ID, stepTime, u.Name, u.Role.ID, skipAction,
+			skipDetail, "", nil,
 		); err != nil {
 			logSideEffectErr("timeline", p.ID, "跳过处置流程", err)
 		}
@@ -494,7 +513,17 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
-		if !canHandleRole(database, u.Role.ID, node.Target) {
+		// 代填：目标角色未参演时，信息科负责人/平台管理员可代填处置。
+		proxyForRoleID := ""
+		if canProxyForRole(u.Role.ID) {
+			if members, ok := projectMemberRoles(database, p.ID); ok {
+				tr := targetToRoleID(database, node.Target)
+				if tr != proxyHandlerRoleID && !members[tr] {
+					proxyForRoleID = tr
+				}
+			}
+		}
+		if !canHandleRole(database, u.Role.ID, node.Target) && proxyForRoleID == "" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "该流程责任角色为「" + node.Target + "」，当前角色无权处置"})
 			return
 		}
@@ -623,6 +652,9 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 		if found != "" {
 			descr += "；发现：" + found
 		}
+		if proxyForRoleID != "" {
+			descr += "；代填未参演角色：" + node.Target
+		}
 		if len([]rune(descr)) > 2000 {
 			descr = string([]rune(descr)[:2000])
 		}
@@ -686,6 +718,9 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 			level = "P1"
 		}
 		detail := "流程「" + node.Title + "」"
+		if proxyForRoleID != "" {
+			detail += "；由" + u.Name + "代填未参演角色「" + node.Target + "」"
+		}
 		if !isCorrect {
 			detail += "；执行混淆流程，扣分 " + fmt.Sprintf("%.1f", math.Abs(delta)) + " 分"
 		} else {
@@ -696,15 +731,20 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 				detail += "；" + p.Type + "，扣 " + fmt.Sprintf("%.1f", p.Point) + " 分"
 			}
 		}
+		timelineAction := func() string {
+			a := "执行正确处置流程"
+			if !isCorrect {
+				a = "执行混淆处置流程"
+			}
+			if proxyForRoleID != "" {
+				a = "代填处置：" + a
+			}
+			return a
+		}()
 		if _, err := database.Exec(
 			`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
 			p.ID, stepTime, u.Name, u.Role.ID,
-			func() string {
-				if isCorrect {
-					return "执行正确处置流程"
-				}
-				return "执行混淆处置流程"
-			}(),
+			timelineAction,
 			detail, level, nil,
 		); err != nil {
 			logSideEffectErr("timeline", p.ID, "处置流程时间线", err)
@@ -748,7 +788,7 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 			}(),
 			"ontime": ontime, "delta": delta,
 			"receiver": receiver, "receiverOk": receiverOk,
-			"score": sc,
+			"score": sc, "isProxy": proxyForRoleID != "",
 		})
 	}
 }

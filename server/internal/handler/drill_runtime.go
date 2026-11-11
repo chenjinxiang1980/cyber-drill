@@ -75,8 +75,8 @@ func elapsedSecLite(startedAt, pausedAt string, pausedSec int, endedAt string, s
 func StartProject(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		var status, name, level, mode string
-		err := database.QueryRow(`SELECT COALESCE(status,''),COALESCE(name,''),COALESCE(level,''),COALESCE(mode,'基础版') FROM projects WHERE id=?`, id).Scan(&status, &name, &level, &mode)
+		var status, name, level, mode, membersJSON string
+		err := database.QueryRow(`SELECT COALESCE(status,''),COALESCE(name,''),COALESCE(level,''),COALESCE(mode,'基础版'),COALESCE(members,'[]') FROM projects WHERE id=?`, id).Scan(&status, &name, &level, &mode, &membersJSON)
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "演练项目不存在"})
 			return
@@ -91,15 +91,31 @@ func StartProject(database *db.DB) gin.HandlerFunc {
 		}
 
 		now := nowSec()
-		_, err = database.Exec(`UPDATE projects SET status='演练中', started_at=? WHERE id=?`, now, id)
+		// 开始演练 = 正式下发任务：同一事务内重置任务状态，并把未参演角色的任务
+		// 转交信息科负责人代填，避免出现“无人承接”的任务卡住流程与结束校验。
+		tx, err := database.Begin()
 		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "开启事务失败"})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		if _, err = tx.Exec(`UPDATE projects SET status='演练中', started_at=? WHERE id=?`, now, id); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "开始演练失败：" + err.Error()})
 			return
 		}
-
-		if err := taskStatusUpdate(database, id, "待处理", ""); err != nil {
+		if _, err = tx.Exec(`UPDATE tasks SET status='' WHERE project_id=? AND status='待处理'`, id); err != nil {
 			slog.Error("演练启动时重置任务状态失败", "project_id", id, "err", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "重置任务状态失败"})
+			return
+		}
+		proxyTaskCount, proxyRoleNames, err := dispatchProxyTasksTx(tx, id, membersJSON)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "下发代填任务失败：" + err.Error()})
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "开始演练失败：" + err.Error()})
 			return
 		}
 
@@ -120,14 +136,79 @@ func StartProject(database *db.DB) gin.HandlerFunc {
 			id, hhmm(), userNameFromContext(c), roleIDFromContext(c), "开始演练", "演练项目已启动", "", nil); err != nil {
 			logSideEffectErr("timeline", id, "开始演练", err)
 		}
+		if proxyTaskCount > 0 {
+			if _, err := database.Exec(`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
+				id, hhmm(), userNameFromContext(c), roleIDFromContext(c), "代填下发",
+				fmt.Sprintf("%d 条任务因责任角色未参演，已自动转交信息科负责人代填（%s）",
+					proxyTaskCount, strings.Join(proxyRoleNames, "、")), "", nil); err != nil {
+				logSideEffectErr("timeline", id, "代填下发", err)
+			}
+		}
 
-		c.JSON(http.StatusOK, gin.H{"ok": true, "projectId": id, "startedAt": now})
+		c.JSON(http.StatusOK, gin.H{"ok": true, "projectId": id, "startedAt": now, "proxyTaskCount": proxyTaskCount})
 	}
 }
 
-func taskStatusUpdate(database *db.DB, projectID, from, to string) error {
-	_, err := database.Exec(`UPDATE tasks SET status=? WHERE project_id=? AND status=?`, to, projectID, from)
-	return err
+// dispatchProxyTasksTx 将项目中“目标角色未参演”的未完成任务转交信息科负责人代填（幂等）。
+// 仅在 members 可解析且非空时生效；返回本次转交任务数与涉及角色名（去重、按任务顺序）。
+func dispatchProxyTasksTx(tx *sql.Tx, projectID, membersJSON string) (int, []string, error) {
+	members, ok := parseMemberRoles(membersJSON)
+	if !ok {
+		return 0, nil, nil
+	}
+
+	roleNames := make(map[string]string)
+	roleRows, err := tx.Query(`SELECT id,COALESCE(name,'') FROM roles`)
+	if err != nil {
+		return 0, nil, err
+	}
+	for roleRows.Next() {
+		var id, name string
+		if roleRows.Scan(&id, &name) == nil {
+			roleNames[id] = strings.TrimSpace(name)
+		}
+	}
+	roleRows.Close()
+
+	type pendingTask struct{ id, roleID string }
+	var pending []pendingTask
+	rows, err := tx.Query(`SELECT id,COALESCE(role_id,'') FROM tasks
+		WHERE project_id=? AND is_proxy=0 AND COALESCE(status,'') NOT IN ('已完成','已跳过')
+		ORDER BY seq,id`, projectID)
+	if err != nil {
+		return 0, nil, err
+	}
+	for rows.Next() {
+		var t pendingTask
+		if rows.Scan(&t.id, &t.roleID) == nil {
+			pending = append(pending, t)
+		}
+	}
+	rows.Close()
+
+	count := 0
+	names := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, t := range pending {
+		rid := strings.TrimSpace(t.roleID)
+		if rid == "" || rid == proxyHandlerRoleID || members[rid] {
+			continue
+		}
+		name := roleNames[rid]
+		if name == "" {
+			name = rid
+		}
+		if _, err := tx.Exec(`UPDATE tasks SET role_id=?,is_proxy=1,proxy_for_role_id=?,proxy_for_role_name=?,proxy_reason='unparticipating' WHERE id=?`,
+			proxyHandlerRoleID, rid, name, t.id); err != nil {
+			return count, names, err
+		}
+		count++
+		if !seen[rid] {
+			seen[rid] = true
+			names = append(names, name)
+		}
+	}
+	return count, names, nil
 }
 
 func roleIDFromContext(c *gin.Context) string {
@@ -297,7 +378,7 @@ func GetProjectTasks(database *db.DB) gin.HandlerFunc {
 		database.QueryRow(`SELECT COALESCE(scenario_id,''),COALESCE(mode,'基础版') FROM projects WHERE id=?`, id).Scan(&scenarioID, &mode)
 
 		rows, err := database.Query(`SELECT t.id,COALESCE(t.role_id,''),COALESCE(t.title,''),COALESCE(t.`+"`descr`"+`,''),COALESCE(t.deadline,''),COALESCE(t.status,''),COALESCE(t.level,''),COALESCE(t.forms,'[]'),COALESCE(t.node_id,''),t.seq,
-			COALESCE(t.completed_at,''),COALESCE(t.accepted_at,'')
+			COALESCE(t.completed_at,''),COALESCE(t.accepted_at,''),COALESCE(t.is_proxy,0),COALESCE(t.proxy_for_role_id,''),COALESCE(t.proxy_for_role_name,'')
 			FROM tasks t
 			WHERE t.project_id=?
 			  AND NOT EXISTS (SELECT 1 FROM script_nodes n WHERE n.id=t.node_id AND n.deleted_at IS NOT NULL)
@@ -311,23 +392,28 @@ func GetProjectTasks(database *db.DB) gin.HandlerFunc {
 		var tasks []gin.H
 		for rows.Next() {
 			var tid, roleID, title, descr, deadline, status, level, forms, nodeID, completedAt, acceptedAt string
-			var seq int
-			rows.Scan(&tid, &roleID, &title, &descr, &deadline, &status, &level, &forms, &nodeID, &seq, &completedAt, &acceptedAt)
+			var seq, isProxy int
+			var proxyForRoleID, proxyForRoleName string
+			rows.Scan(&tid, &roleID, &title, &descr, &deadline, &status, &level, &forms, &nodeID, &seq, &completedAt, &acceptedAt,
+				&isProxy, &proxyForRoleID, &proxyForRoleName)
 			var formsArr []string
 			json.Unmarshal([]byte(forms), &formsArr)
 			tasks = append(tasks, gin.H{
-				"id":          tid,
-				"roleId":      roleID,
-				"title":       title,
-				"descr":       descr,
-				"deadline":    deadline,
-				"status":      status,
-				"level":       level,
-				"forms":       formsArr,
-				"nodeId":      nodeID,
-				"seq":         seq,
-				"completedAt": completedAt,
-				"acceptedAt":  acceptedAt,
+				"id":               tid,
+				"roleId":           roleID,
+				"title":            title,
+				"descr":            descr,
+				"deadline":         deadline,
+				"status":           status,
+				"level":            level,
+				"forms":            formsArr,
+				"nodeId":           nodeID,
+				"seq":              seq,
+				"completedAt":      completedAt,
+				"acceptedAt":       acceptedAt,
+				"isProxy":          isProxy == 1,
+				"proxyForRoleId":   proxyForRoleID,
+				"proxyForRoleName": proxyForRoleName,
 			})
 		}
 

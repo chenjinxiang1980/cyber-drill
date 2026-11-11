@@ -172,9 +172,10 @@ func PostProject(database *db.DB) gin.HandlerFunc {
 		}
 
 		// 2. ensureBasicTasks（基础版 + 有剧本才生成）
-		var taskCount int
+		var taskCount, proxyTaskCount int
+		var proxyRoleNames []string
 		if mode == "基础版" && scenarioID != "" {
-			taskCount, err = ensureBasicTasksTx(tx, id, scenarioID)
+			taskCount, proxyTaskCount, proxyRoleNames, err = ensureBasicTasksTx(tx, id, scenarioID, string(membersJSON))
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "自动生成任务失败：" + err.Error()})
 				return
@@ -195,9 +196,14 @@ func PostProject(database *db.DB) gin.HandlerFunc {
 
 		// 4. timeline 审计
 		now := time.Now().Format("15:04")
+		timelineDetail := "项目「" + name + "」（" + mode + "，关联剧本 " + scenarioName(database, scenarioID) + "，计划日期 " + date + "）已创建"
+		if proxyTaskCount > 0 {
+			timelineDetail += fmt.Sprintf("；%d 条任务因责任角色未参演，已自动转交信息科负责人代填（%s）",
+				proxyTaskCount, strings.Join(proxyRoleNames, "、"))
+		}
 		if _, err := tx.Exec(`INSERT INTO timeline (project_id,t,actor,role_id,action,detail,level,seq) VALUES (?,?,?,?,?,?,?,?)`,
 			id, now, userNameFromContext(c), roleID, "创建演练项目",
-			"项目「"+name+"」（"+mode+"，关联剧本 "+scenarioName(database, scenarioID)+"，计划日期 "+date+"）已创建",
+			timelineDetail,
 			"", nil); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "写入审计日志失败：" + err.Error()})
 			return
@@ -238,9 +244,10 @@ func PostProject(database *db.DB) gin.HandlerFunc {
 			Scan(&pname, &pscenario, &plevel, &pdate, &ptarget, &pmode, &pstatus, &punits, &pmembers, &pobservers)
 
 		c.JSON(http.StatusOK, gin.H{
-			"ok":        true,
-			"id":        id,
-			"taskCount": taskCount,
+			"ok":             true,
+			"id":             id,
+			"taskCount":      taskCount,
+			"proxyTaskCount": proxyTaskCount,
 			"project": gin.H{
 				"id":         id,
 				"name":       pname,
@@ -305,28 +312,84 @@ func parseJSONStr(s string) any {
 	return v
 }
 
+// proxyHandlerRoleID 系统固定的代填人：信息科负责人。
+const proxyHandlerRoleID = "itlead"
+
+// parseMemberRoles 解析 projects.members（形如 [{"role":"duty"}]，兼容 roleId），
+// 返回参演角色集合。members 为空或非法时 ok=false，表示无法判定参演范围，此时不做代填。
+func parseMemberRoles(membersJSON string) (map[string]bool, bool) {
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(membersJSON)), &arr); err != nil {
+		return nil, false
+	}
+	set := make(map[string]bool, len(arr))
+	for _, m := range arr {
+		rid, _ := m["role"].(string)
+		if strings.TrimSpace(rid) == "" {
+			rid, _ = m["roleId"].(string)
+		}
+		if rid = strings.TrimSpace(rid); rid != "" {
+			set[rid] = true
+		}
+	}
+	return set, len(set) > 0
+}
+
+// canProxyForRole 代填权限：仅信息科负责人与平台管理员。
+func canProxyForRole(roleID string) bool {
+	return roleID == proxyHandlerRoleID || roleID == auth.RolePlatformAdmin
+}
+
+// projectMemberRoles 读取项目参演角色集合；ok=false 表示无法判定（members 为空/非法）。
+func projectMemberRoles(database *db.DB, projectID string) (map[string]bool, bool) {
+	var members string
+	if err := database.QueryRow(`SELECT COALESCE(members,'[]') FROM projects WHERE id=?`, projectID).Scan(&members); err != nil {
+		return nil, false
+	}
+	return parseMemberRoles(members)
+}
+
+// canProxyNode 判断当前角色能否以代填身份处置该项目下目标角色的节点：
+// 当前角色必须是代填人，且目标角色确实不在项目参演角色中。
+func canProxyNode(database *db.DB, roleID, projectID, target string) bool {
+	if !canProxyForRole(roleID) || strings.TrimSpace(projectID) == "" {
+		return false
+	}
+	members, ok := projectMemberRoles(database, projectID)
+	if !ok {
+		return false
+	}
+	return !members[targetToRoleID(database, target)]
+}
+
 // ensureBasicTasksTx 基础版演练自动为每个主流节点生成一条任务（事务内版本）。
+// 目标角色不在项目参演角色中时，任务直接归属信息科负责人并标记代填。
+// 返回：任务总数、代填任务数、被代填角色名（去重）、error。
 // 任何一条 INSERT 失败 → 返回 error → 上层事务回滚。
 // 注意：事务内禁止在 rows.Next() 循环中再开 tx.Query —— 会触发
 // MySQL "commands out of sync"。所有 role 查找预先加载到 map。
-func ensureBasicTasksTx(tx *sql.Tx, projectID, scenarioID string) (int, error) {
+func ensureBasicTasksTx(tx *sql.Tx, projectID, scenarioID, membersJSON string) (int, int, []string, error) {
 	// 已有任务则跳过
 	var exists int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM tasks WHERE project_id=?`, projectID).Scan(&exists); err != nil {
-		return 0, fmt.Errorf("查询已有任务失败: %w", err)
+		return 0, 0, nil, fmt.Errorf("查询已有任务失败: %w", err)
 	}
 	if exists > 0 {
-		return 0, nil
+		return 0, 0, nil, nil
 	}
+
+	members, hasMembers := parseMemberRoles(membersJSON)
 
 	// 预加载 roles 映射 —— 避免 rows.Next() 内嵌套 Query
 	roleByKey := make(map[string]string)
+	roleNames := make(map[string]string)
 	roleRows, _ := tx.Query(`SELECT id,COALESCE(name,''),COALESCE(short,'') FROM roles`)
 	for roleRows.Next() {
 		var id, name, short string
 		roleRows.Scan(&id, &name, &short)
 		roleByKey[strings.TrimSpace(name)] = id
 		roleByKey[strings.TrimSpace(short)] = id
+		roleNames[id] = strings.TrimSpace(name)
 	}
 	roleRows.Close()
 
@@ -337,20 +400,22 @@ func ensureBasicTasksTx(tx *sql.Tx, projectID, scenarioID string) (int, error) {
 	var nodes []node
 	rows, err := tx.Query(`SELECT id,type,title,COALESCE(`+"`descr`"+`,''),COALESCE(form,''),COALESCE(target,'') FROM script_nodes WHERE scenario_id=? AND deleted_at IS NULL AND type!='end' AND COALESCE(flow_type,'correct')!='distractor' ORDER BY seq`, scenarioID)
 	if err != nil {
-		return 0, fmt.Errorf("查询剧本节点失败: %w", err)
+		return 0, 0, nil, fmt.Errorf("查询剧本节点失败: %w", err)
 	}
 	for rows.Next() {
 		var n node
 		if err := rows.Scan(&n.id, &n.typ, &n.title, &n.descr, &n.form, &n.target); err != nil {
 			rows.Close()
-			return 0, fmt.Errorf("读取节点行失败: %w", err)
+			return 0, 0, nil, fmt.Errorf("读取节点行失败: %w", err)
 		}
 		nodes = append(nodes, n)
 	}
 	rows.Close()
 
 	prefix := "T" + strings.ReplaceAll(projectID, "P", "") + "-"
-	count := 0
+	count, proxyCount := 0, 0
+	proxyNames := make([]string, 0)
+	proxySeen := make(map[string]bool)
 
 	level := "P2"
 	var scLevel string
@@ -363,20 +428,47 @@ func ensureBasicTasksTx(tx *sql.Tx, projectID, scenarioID string) (int, error) {
 
 	for _, n := range nodes {
 		roleID := resolveRoleFromMap(roleByKey, n.target)
+		// 目标角色未参演 → 任务归属信息科负责人，保留被代填角色用于追溯。
+		var proxyForID, proxyForName any
+		proxyRoleKey := ""
+		if hasMembers && roleID != proxyHandlerRoleID && !members[roleID] {
+			proxyRoleKey = roleID
+			name := roleNames[roleID]
+			if name == "" {
+				name = strings.TrimSpace(n.target)
+			}
+			if name == "" {
+				name = roleID
+			}
+			proxyForID, proxyForName = roleID, name
+			roleID = proxyHandlerRoleID
+			proxyCount++
+			if !proxySeen[proxyRoleKey] {
+				proxySeen[proxyRoleKey] = true
+				proxyNames = append(proxyNames, name)
+			}
+		}
+		isProxy := 0
+		proxyReason := any(nil)
+		if proxyForID != nil {
+			isProxy = 1
+			proxyReason = "unparticipating"
+		}
 		forms := []string{}
 		if strings.TrimSpace(n.form) != "" {
 			forms = append(forms, strings.TrimSpace(n.form))
 		}
 		formsJSON, _ := json.Marshal(forms)
 		taskID := prefix + pad2(count+1)
-		if _, err := tx.Exec(`INSERT INTO tasks (id,project_id,role_id,title,descr,deadline,status,level,forms,node_id,seq) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		if _, err := tx.Exec(`INSERT INTO tasks (id,project_id,role_id,title,descr,deadline,status,level,forms,node_id,seq,is_proxy,proxy_for_role_id,proxy_for_role_name,proxy_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			taskID, projectID, roleID, n.title, strings.TrimSpace(n.descr),
-			"", "待处理", level, string(formsJSON), n.id, count+1); err != nil {
-			return count, fmt.Errorf("插入任务 %s 失败: %w", taskID, err)
+			"", "待处理", level, string(formsJSON), n.id, count+1,
+			isProxy, proxyForID, proxyForName, proxyReason); err != nil {
+			return count, proxyCount, proxyNames, fmt.Errorf("插入任务 %s 失败: %w", taskID, err)
 		}
 		count++
 	}
-	return count, nil
+	return count, proxyCount, proxyNames, nil
 }
 
 // resolveRoleFromMap — 在预加载的 role map 中查 role_id。

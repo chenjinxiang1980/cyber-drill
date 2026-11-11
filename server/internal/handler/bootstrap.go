@@ -712,7 +712,8 @@ func queryTasks(database *db.DB, u *auth.User) []gin.H {
 	}
 
 	rows, err := database.Query(
-		`SELECT t.id,t.project_id,t.role_id,t.title,t.descr,t.deadline,t.status,t.level,t.forms,t.node_id,t.seq,t.completed_at,t.accepted_at
+		`SELECT t.id,t.project_id,t.role_id,t.title,t.descr,t.deadline,t.status,t.level,t.forms,t.node_id,t.seq,t.completed_at,t.accepted_at,
+		        COALESCE(t.is_proxy,0),COALESCE(t.proxy_for_role_id,''),COALESCE(t.proxy_for_role_name,'')
 		 FROM tasks t
 		 WHERE NOT EXISTS (SELECT 1 FROM script_nodes n WHERE n.id=t.node_id AND n.deleted_at IS NOT NULL)
 		 ORDER BY t.seq`,
@@ -734,7 +735,10 @@ func queryTasks(database *db.DB, u *auth.User) []gin.H {
 		var formsStr, nodeID sql.NullString
 		var seq sql.NullInt64
 		var completedAt, acceptedAt sql.NullString
-		if err := rows.Scan(&id, &projectID, &roleID, &title, &descr, &deadline, &status, &level, &formsStr, &nodeID, &seq, &completedAt, &acceptedAt); err != nil {
+		var isProxy int
+		var proxyForRoleID, proxyForRoleName string
+		if err := rows.Scan(&id, &projectID, &roleID, &title, &descr, &deadline, &status, &level, &formsStr, &nodeID, &seq, &completedAt, &acceptedAt,
+			&isProxy, &proxyForRoleID, &proxyForRoleName); err != nil {
 			continue
 		}
 		pid := util.ScanNullableString(projectID)
@@ -760,23 +764,26 @@ func queryTasks(database *db.DB, u *auth.User) []gin.H {
 			}
 		}
 		allTasks = append(allTasks, gin.H{
-			"id":            util.ScanNullableString(id),
-			"projectId":     pid,
-			"role":          taskRole,
-			"title":         util.ScanNullableString(title),
-			"desc":          util.ScanNullableString(descr),
-			"deadline":      util.ScanNullableString(deadline),
-			"status":        util.ScanNullableString(status),
-			"level":         util.ScanNullableString(level),
-			"nodeId":        nid,
-			"available":     av.Available,
-			"blockedBy":     av.BlockedBy,
-			"completedAt":   util.ScanNullableString(completedAt),
-			"projectStatus": pst,
-			"forms":         util.ParseJSONArr(util.ScanNullableString(formsStr)),
-			"atts":          attsByTask[util.ScanNullableString(id)],
-			"externalRole":  externalRoles[taskRole],
-			"_taskRole":     taskRole, // 内部字段，用于过滤后删除
+			"id":               util.ScanNullableString(id),
+			"projectId":        pid,
+			"role":             taskRole,
+			"title":            util.ScanNullableString(title),
+			"desc":             util.ScanNullableString(descr),
+			"deadline":         util.ScanNullableString(deadline),
+			"status":           util.ScanNullableString(status),
+			"level":            util.ScanNullableString(level),
+			"nodeId":           nid,
+			"available":        av.Available,
+			"blockedBy":        av.BlockedBy,
+			"completedAt":      util.ScanNullableString(completedAt),
+			"projectStatus":    pst,
+			"forms":            util.ParseJSONArr(util.ScanNullableString(formsStr)),
+			"atts":             attsByTask[util.ScanNullableString(id)],
+			"externalRole":     externalRoles[taskRole],
+			"isProxy":          isProxy == 1,
+			"proxyForRoleId":   proxyForRoleID,
+			"proxyForRoleName": proxyForRoleName,
+			"_taskRole":        taskRole, // 内部字段，用于过滤后删除
 		})
 	}
 
