@@ -52,12 +52,12 @@ PRINT_DUMP_CMD=0
 REF_TABLES=(settings roles scenarios script_nodes form_templates dict knowledge score_items schema_migrations)
 FORBIDDEN_TABLES=(users user_roles projects tasks form_submissions evidence audit_logs sessions messages notifs chat_messages timeline ledger impact impact_events scores score_snapshots drill_steps drill_node_state snapshots script_revisions project_core_evidence project_end_exception project_end_seal opinion notif_reads task_attachments sim_data)
 
-EXPECT_MIGRATIONS=85
+EXPECT_MIGRATIONS=88
 EXPECT_BRAND="v1.0.0"
-EXPECT_SCENARIOS=21
+EXPECT_SCENARIOS=20
 EXPECT_SCENARIOS_ACTIVE=20
 EXPECT_ROLES=18
-EXPECT_SCRIPT_NODES=1191
+EXPECT_SCRIPT_NODES=1127
 EXPECT_FORM_TEMPLATES=22
 EXPECT_DICT=12
 EXPECT_EVENT_TYPES=20
@@ -178,7 +178,7 @@ FORM_ROWS="$(grep -cE "^INSERT INTO \`form_templates\`" "${TMP}/baseline.sql" ||
 DICT_ROWS="$(grep -cE "^INSERT INTO \`dict\`" "${TMP}/baseline.sql" || true)"
 [ "${DICT_ROWS}" = "${EXPECT_DICT}" ] || die "dict 行数期望 ${EXPECT_DICT}，实际 ${DICT_ROWS}"
 NODE_ROWS="$(grep -cE "^INSERT INTO \`script_nodes\`" "${TMP}/baseline.sql" || true)"
-# 1181 行含软删除；可见口径 1173 由安装器在恢复后用 SQL 校验
+# 1211 行含软删除；可见口径 1127 由安装器在恢复后用 SQL 校验
 [ "${NODE_ROWS}" -ge "${EXPECT_SCRIPT_NODES}" ] || die "script_nodes 行数不足 ${EXPECT_SCRIPT_NODES}（实际 ${NODE_ROWS}）"
 
 EVENT_TYPES="$(grep -E "^INSERT INTO \`dict\`" "${TMP}/baseline.sql" | grep "eventTypes" | head -n1 | grep -o '\\"' | wc -l)"

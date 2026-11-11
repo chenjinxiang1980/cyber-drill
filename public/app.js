@@ -121,7 +121,7 @@ function mountShell(pageKey){
   var brandLogo = (window.API && API.mediaUrl) ? API.mediaUrl(B.logo || 'img/logo.png') : (B.logo || 'img/logo.png');
   var brandSystem = B.systemName || '网络安全应急演练';
   var brandUnit = B.unitName || '示例医院';
-  var brandVer = (window.DRILL && DRILL.runtimeVersion && DRILL.runtimeVersion()) || B.version || 'v1.0.4';
+  var brandVer = (window.DRILL && DRILL.runtimeVersion && DRILL.runtimeVersion()) || B.version || 'v1.0.5';
   var brandGh = B.github || 'https://github.com/chenjinxiang1980/cyber-drill';
   var brandGe = B.gitee || 'https://gitee.com/habeas/cyber-drill';
   var html = '<aside class="sidebar"><div class="brand"><span class="logo brand-logo"><img src="'+brandLogo+'" alt="'+App.esc(brandUnit)+'院徽"></span><span class="bt"><div class="t1">'+App.esc(brandSystem)+'</div><div class="t2">'+App.esc(brandUnit)+' · DRILL</div></span></div><nav class="nav">';
