@@ -1,10 +1,10 @@
 # drill-server Linux/amd64 构建签名
-# 构建时间: 2026-11-11 21:07:00 (+08:00)
+# 构建时间: 2026-11-11 22:07:17 (+08:00)
 # 构建方式: 容器内多阶段构建（deploy/docker-dist/Dockerfile）GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w"
 # 部署形态: 静态链接，容器基础镜像 Alpine（musl），无动态库依赖
-# 校验: 本文件末行哈希 = 二进制实测（从 cyber-drill:1.0.4 镜像 /opt/drill/bin/drill-server 提取）一致（12,218,528 字节）
-# 上一线上版本: 1.0.3（sha256 d9418f8a…，2026-11-11 部署）
-# 字节数: 12218528
-# 部署记录: 1.0.4 本地镜像（未推 registry，无 digest），含 0128–0132 数据迁移（角色 20→18、S20 并入 S01 后停用）、静态资源 Cache-Control: no-cache、新建项目按剧本自动勾选参演角色
-# 镜像记录: cyber-drill:1.0.4 = sha256:7dac065e2edd1c4cfacc60d59c851957ec0ddca427475b91fa02a5f49d0426bd，152,579,204 字节，10 层（2026-11-11 21:06 于 133 构建，未推送任何 registry）
-426f38146ff5da99fa1ff1dc5d79f899f5c166d965366e25fccb00eae42e18ed  drill-server
+# 校验: 本文件末行哈希 = 二进制实测（从 cyber-drill:1.0.5 镜像 /opt/drill/bin/drill-server 提取）一致（12,239,008 字节）
+# 上一线上版本: 1.0.4（sha256 426f3814…，2026-11-11 部署）
+# 字节数: 12239008
+# 部署记录: 1.0.5 本地镜像（未推 registry，无 digest），含 0133 删除 S20、0134 S21→S20、0136 未参演角色任务代填（tasks 代填字段 + 存量回填）、工作台「代填·」标记、根路径 / Cache-Control: no-cache
+# 镜像记录: cyber-drill:1.0.5 = sha256:0dc5445644050c4ef8435766d66475e1ec94f22c0744b4c303e6a5c4b71545d3，152,681,840 字节，10 层（2026-11-11 22:07 于 133 构建，未推送任何 registry）
+76f33c751328f2f48c45d29d311cbef636816602551a809da420547d15bcb882  drill-server
