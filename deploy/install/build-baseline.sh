@@ -52,10 +52,12 @@ PRINT_DUMP_CMD=0
 REF_TABLES=(settings roles scenarios script_nodes form_templates dict knowledge score_items schema_migrations)
 FORBIDDEN_TABLES=(users user_roles projects tasks form_submissions evidence audit_logs sessions messages notifs chat_messages timeline ledger impact impact_events scores score_snapshots drill_steps drill_node_state snapshots script_revisions project_core_evidence project_end_exception project_end_seal opinion notif_reads task_attachments sim_data)
 
-EXPECT_MIGRATIONS=80
+EXPECT_MIGRATIONS=85
 EXPECT_BRAND="v1.0.0"
 EXPECT_SCENARIOS=21
-EXPECT_SCRIPT_NODES=1173
+EXPECT_SCENARIOS_ACTIVE=20
+EXPECT_ROLES=18
+EXPECT_SCRIPT_NODES=1191
 EXPECT_FORM_TEMPLATES=22
 EXPECT_DICT=12
 EXPECT_EVENT_TYPES=20
@@ -166,6 +168,11 @@ grep -q "'brand_version','${EXPECT_BRAND}'" "${TMP}/baseline.sql" \
 
 SCEN_ROWS="$(grep -cE "^INSERT INTO \`scenarios\`" "${TMP}/baseline.sql" || true)"
 [ "${SCEN_ROWS}" = "${EXPECT_SCENARIOS}" ] || die "scenarios 行数期望 ${EXPECT_SCENARIOS}，实际 ${SCEN_ROWS}"
+# 停用剧本仍保留行（S20 并入 S01 后 status=停用），安装器只校验「在用」数量
+SCEN_ACTIVE_ROWS=$((SCEN_ROWS - $(grep -E "^INSERT INTO \`scenarios\`" "${TMP}/baseline.sql" | grep -c "'停用'" || true)))
+[ "${SCEN_ACTIVE_ROWS}" = "${EXPECT_SCENARIOS_ACTIVE}" ] || die "在用剧本数期望 ${EXPECT_SCENARIOS_ACTIVE}，实际 ${SCEN_ACTIVE_ROWS}"
+ROLE_ROWS="$(grep -cE "^INSERT INTO \`roles\`" "${TMP}/baseline.sql" || true)"
+[ "${ROLE_ROWS}" = "${EXPECT_ROLES}" ] || die "roles 行数期望 ${EXPECT_ROLES}，实际 ${ROLE_ROWS}"
 FORM_ROWS="$(grep -cE "^INSERT INTO \`form_templates\`" "${TMP}/baseline.sql" || true)"
 [ "${FORM_ROWS}" = "${EXPECT_FORM_TEMPLATES}" ] || die "form_templates 行数期望 ${EXPECT_FORM_TEMPLATES}，实际 ${FORM_ROWS}"
 DICT_ROWS="$(grep -cE "^INSERT INTO \`dict\`" "${TMP}/baseline.sql" || true)"
@@ -193,7 +200,9 @@ BASELINE_FILE=${GZ_NAME}
 BASELINE_SHA256=${SHA}
 BASELINE_MIGRATIONS=${MIG_ROWS}
 BASELINE_BRAND_VERSION=${EXPECT_BRAND}
-BASELINE_SCENARIOS=${SCEN_ROWS}
+BASELINE_SCENARIOS=${SCEN_ACTIVE_ROWS}
+BASELINE_SCENARIOS_ROWS=${SCEN_ROWS}
+BASELINE_ROLES=${ROLE_ROWS}
 BASELINE_SCRIPT_NODES=${EXPECT_SCRIPT_NODES}
 BASELINE_FORM_TEMPLATES=${FORM_ROWS}
 BASELINE_DICT=${DICT_ROWS}
