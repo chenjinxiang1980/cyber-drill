@@ -175,12 +175,12 @@
       "image": {
         "tags": ["1.0.2", "latest"],
         "digest": {
-          "ghcr": null,
-          "swr": null
+          "ghcr": "sha256:0d97564d033e0b9278a5a359a4efaece4e5c30125cf86c8eb4f85fd82f0f7fca",
+          "swr": "sha256:0d97564d033e0b9278a5a359a4efaece4e5c30125cf86c8eb4f85fd82f0f7fca"
         },
-        "digest_unknown": true,
-        "size_bytes": 0,
-        "layers": 0
+        "digest_unknown": false,
+        "size_bytes": 152386996,
+        "layers": 10
       },
       "migrations": { "from_exclusive": "0123_brand_version_100", "through": "0127_script_target_roles", "count": 4, "contains_ddl": false, "backward_compatible": true },
       "schema_migrations_total": 80,
