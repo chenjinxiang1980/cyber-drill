@@ -193,9 +193,9 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ```bash
 # 先在华为云控制台创建组织，然后用临时登录命令
-docker login swr.cn-north-4.myhuaweicloud.com
+docker login swr.cn-east-3.myhuaweicloud.com
 docker buildx build --platform linux/amd64,linux/arm64 \
-    -t swr.cn-north-4.myhuaweicloud.com/YOUR_ORG/drill-server:1.0.0 \
+    -t swr.cn-east-3.myhuaweicloud.com/YOUR_ORG/drill-server:1.0.0 \
     -f deploy/docker-dist/Dockerfile --push .
 ```
 
