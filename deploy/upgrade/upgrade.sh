@@ -460,9 +460,19 @@ precheck() {
         "数据库落后于当前版本（$FROM_VER 应为 $f_total 条），说明上次启动迁移没跑完" \
         "先用当前版本镜像跑一次迁移（docker compose up -d app 会自动补），确认 $f_total 条后再升级"
     else
-      fail "$E_CHAIN" "P0-precheck" "schema_migrations=$cnt" \
-        "数据库超前于当前版本（$FROM_VER 应为 $f_total 条），不支持降级" \
-        "如需回退请恢复升级前的整库备份；不要直接降级镜像"
+      # 允许「迁移已提前应用」：DBA/运维用目标版本镜像单独跑过迁移，账本已到目标口径，
+      # 此时只需切换镜像。要求行数等于目标版本累计数且末条迁移已在账本中，才算安全。
+      local to_total through
+      to_total="$(mf_get "$TO_VER" schema_migrations_total)"
+      through="$(mf_get "$TO_VER" migrations.through)"
+      if [ -n "$to_total" ] && [ "$cnt" = "$to_total" ] && [ -n "$through" ] && \
+         [ "$(sql_scalar "SELECT COUNT(*) FROM schema_migrations WHERE version='$through'")" = "1" ]; then
+        warn "数据库已提前应用到 $TO_VER 的迁移（$cnt 条，含 $through），按「迁移已执行」继续，仅切换镜像"
+      else
+        fail "$E_CHAIN" "P0-precheck" "schema_migrations=$cnt" \
+          "数据库超前于当前版本（$FROM_VER 应为 $f_total 条），不支持降级" \
+          "如需回退请恢复升级前的整库备份；不要直接降级镜像"
+      fi
     fi
   fi
   info "数据库迁移记录：$cnt 条（末条 $(schema_last)）"
