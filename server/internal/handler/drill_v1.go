@@ -161,7 +161,7 @@ func drillV1NodeLock(node drillV1Node, byId map[string]*drillV1Node, done map[st
 
 // canHandleRole 角色 roleID 是否能处理 target 角色名的节点
 // 复刻 Node drill_plan.js canHandle：指挥部/平台管理员全量，
-// 信息科负责人仅统筹 itlead/duty/netsec/sysadmin，其余角色仅本角色。
+// 信息科负责人仅统筹 itlead/duty/netsec/sysadmin（含 0127 新增的 opslead/algoengineer），其余角色仅本角色。
 func canHandleRole(database *db.DB, roleID, target string) bool {
 	if roleID == "commander" || roleID == "platformadmin" {
 		return true
@@ -169,7 +169,7 @@ func canHandleRole(database *db.DB, roleID, target string) bool {
 	mapped := targetToRoleID(database, target)
 	if roleID == "itlead" {
 		switch mapped {
-		case "itlead", "duty", "netsec", "sysadmin":
+		case "itlead", "duty", "netsec", "sysadmin", "opslead", "algoengineer":
 			return true
 		}
 		return false
@@ -507,6 +507,12 @@ func PostDrillDecide(database *db.DB) gin.HandlerFunc {
 				titles = append(titles, strOr(b["title"], ""))
 			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": "前置流程未完成：" + strings.Join(titles, "、"), "blockedBy": lock.BlockedBy})
+			return
+		}
+
+		// 混淆流程必须在其锚点释放后才可提交，避免绕过实战版的时机设计提前执行。
+		if node.FlowType == "distractor" && !drillV1DistractorReleased(*node, byId, done) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "该混淆流程尚未到释放时机（需先完成锚点节点）"})
 			return
 		}
 

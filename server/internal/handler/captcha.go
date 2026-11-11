@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"drill-system/internal/config"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -277,13 +279,19 @@ func verifyCaptcha(c *gin.Context, captchaID, captchaCode string) bool {
 }
 
 // ---- GET /api/auth/captcha ----
-func Captcha(ttlSec int) gin.HandlerFunc {
+// 仅在 cfg.CaptchaTestMode（APP_ENV=test + CAPTCHA_TEST_MODE=true）时额外返回 testCode，
+// 供自动化用例走「验证码正确则放行」；生产环境该字段不会出现。
+func Captcha(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id, _, img := newCaptcha(ttlSec, c.ClientIP())
-		c.JSON(http.StatusOK, gin.H{
+		id, code, img := newCaptcha(cfg.CaptchaTTLSeconds, c.ClientIP())
+		resp := gin.H{
 			"id":    id,
 			"image": img,
-			"ttl":   ttlSec,
-		})
+			"ttl":   cfg.CaptchaTTLSeconds,
+		}
+		if cfg.CaptchaTestMode {
+			resp["testCode"] = code
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }

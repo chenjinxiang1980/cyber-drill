@@ -121,6 +121,19 @@ func loginGuardSuccess(key string) {
 	loginGuardStore.Unlock()
 }
 
+// loginGuardClearUsername 清除某账号在所有 IP 下的失败计数与锁定。
+// 管理员重置口令或重新启用账号后应立即恢复登录，避免用户换机/等待 15 分钟。
+func loginGuardClearUsername(username string) {
+	prefix := strings.ToLower(strings.TrimSpace(username)) + "|"
+	loginGuardStore.Lock()
+	for k := range loginGuardStore.m {
+		if strings.HasPrefix(k, prefix) {
+			delete(loginGuardStore.m, k)
+		}
+	}
+	loginGuardStore.Unlock()
+}
+
 // loginGuardSweepLocked 清理已过期条目并在超上限时淘汰最旧条目；调用方必须持锁。
 func loginGuardSweepLocked(now time.Time) {
 	if len(loginGuardStore.m) < loginGuardMaxEntries {

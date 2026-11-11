@@ -452,6 +452,10 @@ func AdminPatchUsers(database *db.DB) gin.HandlerFunc {
 		if body.Status == "停用" {
 			database.Exec(`DELETE FROM sessions WHERE user_id=?`, id)
 		}
+		// status=启用 → 同时清除登录失败锁定，恢复后可立即登录
+		if body.Status == "启用" {
+			loginGuardClearUsername(curUsername)
+		}
 		writeAudit(database, u, c, "修改用户："+curUsername)
 		util.OK(c, gin.H{"ok": true, "id": id})
 	}
@@ -533,6 +537,8 @@ func AdminResetPassword(database *db.DB) gin.HandlerFunc {
 		database.Exec(`DELETE FROM sessions WHERE user_id=?`, id)
 		var uname string
 		_ = database.QueryRow(`SELECT username FROM users WHERE id=?`, id).Scan(&uname)
+		// 重置口令同时解除该账号在所有 IP 上的连续失败锁定，避免管理员重置后仍被拦在门外
+		loginGuardClearUsername(uname)
 		writeAudit(database, auth.CurrentUser(c), c, "重置用户口令："+uname)
 		util.OK(c, gin.H{"ok": true, "mustChange": true, "initialPassword": pwd})
 	}

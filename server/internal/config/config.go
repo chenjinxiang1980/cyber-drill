@@ -81,6 +81,11 @@ type Config struct {
 	// 验证码
 	CaptchaEnabled    bool
 	CaptchaTTLSeconds int
+	// CaptchaTestMode 验证码联调开关：仅 APP_ENV=test 时生效。
+	// 生效时 /api/auth/captcha 额外返回 testCode（答案明文），供自动化用例走「验证码正确」路径。
+	// 非 test 环境（含 production）即使显式配置 CAPTCHA_TEST_MODE=true 也会被强制忽略并告警，
+	// 生产默认行为（不返回 testCode、校验照常生效）不受影响。
+	CaptchaTestMode bool
 
 	// CORS
 	AllowOrigins []string
@@ -153,6 +158,7 @@ func Load(projectRoot string) *Config {
 		LoginLockMinutes:    getEnvInt("LOGIN_LOCK_MINUTES", 15),
 		CaptchaEnabled:      getEnvBool("CAPTCHA_ENABLED", true),
 		CaptchaTTLSeconds:   getEnvInt("CAPTCHA_TTL_SECONDS", 120),
+		CaptchaTestMode:     false, // 见下方：仅 APP_ENV=test 时开启
 		// 默认不允许跨域：前后端同源部署；确需跨域时显式配置 ALLOW_ORIGINS。
 		AllowOrigins:   splitCSV(getEnv("ALLOW_ORIGINS", "")),
 		TrustedProxies: splitCSV(getEnv("TRUSTED_PROXIES", "")),
@@ -160,6 +166,17 @@ func Load(projectRoot string) *Config {
 
 	if c.AuditRetentionDays < 0 {
 		c.AuditRetentionDays = 0
+	}
+
+	// 验证码联调开关：只有 APP_ENV=test 才生效。
+	// 生产/开发环境即使配置 CAPTCHA_TEST_MODE=true 也强制关闭，避免明文验证码答案外泄。
+	if getEnvBool("CAPTCHA_TEST_MODE", false) {
+		if strings.EqualFold(strings.TrimSpace(c.AppEnv), "test") {
+			c.CaptchaTestMode = true
+			slog.Warn("验证码联调模式已开启（仅限测试环境）：验证码接口会返回 testCode")
+		} else {
+			slog.Warn("CAPTCHA_TEST_MODE 已配置但被忽略：仅 APP_ENV=test 时生效", "app_env", c.AppEnv)
+		}
 	}
 
 	// 2. 校验必填项

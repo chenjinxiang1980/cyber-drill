@@ -966,6 +966,14 @@ document.addEventListener('app:ready', function(e){
     var meta = '<span class="mono">'+App.esc(t.id)+'</span>'
       + '<span>标准处置时长 '+limit+'</span>'
       + (node&&node.action?'<span>'+App.esc(node.action)+'</span>':'');
+    var dlTxt = String(t.deadline||'').trim();
+    if(dlTxt && !done){
+      var left = new Date(dlTxt.replace(/-/g,'/')).getTime() - Date.now();
+      var mins = Math.round(left/60000);
+      meta += left >= 0
+        ? '<span style="color:var(--accent2)">剩余 '+mins+' 分钟</span><span class="dim">截止 '+App.esc(dlTxt)+'</span>'
+        : '<span style="color:var(--warn)">已超时 '+Math.abs(mins)+' 分钟</span><span class="dim">截止 '+App.esc(dlTxt)+'</span>';
+    }
     var blocked = (t.blockedBy||[]).map(function(x){ return x.title||x.id; });
     if(locked && blocked.length) meta += '<span style="color:var(--warn)">待完成：'+App.esc(blocked.join('、'))+'</span>';
     var tag = done ? '<span class="tag green">已完成</span>'

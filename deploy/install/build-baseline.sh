@@ -5,6 +5,14 @@
 # 作用：从指定 1.0.0 库导出“结构 + 参照数据”，脱敏后打包成可恢复的快照，
 #       并生成固定哈希与 manifest；不含任何运营数据和现网账号口令。
 #
+# 迁移与安装口径（定稿）：
+#   全新安装只恢复本脚本产出的基线快照，不重放 migrations/ 迁移链；
+#   迁移链只服务 deploy/upgrade 的升级路径。
+#   → 新增迁移不会自动进入全新安装：必须重跑本脚本生成新基线，
+#     并同步 manifest.env（BASELINE_MIGRATIONS / BASELINE_SCRIPT_NODES 等）、
+#     SHA256SUMS 与本脚本内的 EXPECT_* 常量，新装库才会包含该迁移的结果。
+#   → 不得为了通过历史迁移守卫在空库/快照里补造假数据。
+#
 # 快照内容：
 #   结构      : 全部表（CREATE TABLE，去掉 AUTO_INCREMENT 计数器）
 #   参照数据  : settings / roles / scenarios / script_nodes / form_templates /

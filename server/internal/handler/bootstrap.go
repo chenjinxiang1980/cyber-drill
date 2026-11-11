@@ -556,11 +556,15 @@ func queryScriptNodes(database *db.DB) []gin.H {
 // --- tasks ---
 
 // MANAGED_ROLES 信息科负责人可统筹的角色
+// opslead / algoengineer 为 0127 新增的正式角色（原由 sysadmin / netsec 承接），
+// 纳入统筹范围以保持信息科负责人原有的任务可见性与处置权限不变。
 var managedRoles = map[string]bool{
-	"itlead":   true,
-	"duty":     true,
-	"netsec":   true,
-	"sysadmin": true,
+	"itlead":       true,
+	"duty":         true,
+	"netsec":       true,
+	"sysadmin":     true,
+	"opslead":      true,
+	"algoengineer": true,
 }
 
 // nodeAvailability 单节点前置可用性（Node: {available, blockedBy:[{id,title}]}）

@@ -2,8 +2,12 @@
 # =============================================================================
 # Cyber-Drill（应急演练系统）一键安装脚本 —— Linux / Docker
 #
-# 全新安装 = 恢复基线快照（结构 + 参照数据 + 76 条 schema_migrations），
+# 全新安装 = 恢复基线快照（结构 + 参照数据 + 快照内的 schema_migrations），
 #            不在空库逐条重放迁移链；迁移链只服务 upgrade.sh 的升级路径。
+#
+# 口径（定稿）：不得为通过历史迁移守卫在空库伪造数据；新增迁移在基线快照
+#            同步前不会进入全新安装（需重跑 build-baseline.sh 并更新
+#            manifest.env / SHA256SUMS / EXPECT_* 后才会生效）。
 #
 # 一条命令完成：
 #   Docker 引擎与 compose → 导入镜像 → 建目录 → 生成随机强口令 .env(600)
@@ -69,6 +73,14 @@ COMPOSE_FILE=""
 ENV_FILE=""
 RESTORE_LOG=""
 CURRENT_STEP="初始化"
+
+# 包管理器：openEuler / UOS Server 20 用 dnf，老版本 RHEL 系可能只有 yum
+PKG_MGR=""
+if command -v dnf >/dev/null 2>&1; then
+    PKG_MGR="dnf"
+elif command -v yum >/dev/null 2>&1; then
+    PKG_MGR="yum"
+fi
 
 GHCR_HOST="ghcr.io"
 GHCR_REPO="chenjinxiang1980/cyber-drill"
@@ -508,13 +520,22 @@ fi
 step "2/9 安装 Docker 引擎与 Compose"
 # =============================================================================
 if ! command -v docker >/dev/null 2>&1; then
+    [ -n "${PKG_MGR}" ] || die 20 "未找到 dnf/yum，无法自动安装 Docker；请先手工安装 Docker 后重试"
     if [ "${MODE}" = "offline" ]; then
         [ -d "${OFFLINE_DIR}/rpms" ] || die 20 "离线目录缺少 rpms/"
         info "离线安装 Docker RPM（$(ls -1 "${OFFLINE_DIR}"/rpms/*.rpm 2>/dev/null | wc -l) 个包）"
-        dnf install -y --disablerepo='*' "${OFFLINE_DIR}"/rpms/*.rpm || die 20 "离线 RPM 安装失败"
+        "${PKG_MGR}" install -y --disablerepo='*' "${OFFLINE_DIR}"/rpms/*.rpm || die 20 "离线 RPM 安装失败"
     else
-        info "在线安装 openEuler 源内的 moby-engine"
-        dnf install -y moby-engine moby-client || die 20 "Docker 引擎安装失败"
+        # openEuler 源内是 moby-engine；UOS / RHEL 等发行版的源包名不同，按可用性回退
+        if "${PKG_MGR}" -q list --available moby-engine >/dev/null 2>&1; then
+            info "在线安装 moby-engine（openEuler 源）"
+            "${PKG_MGR}" install -y moby-engine moby-client || die 20 "Docker 引擎安装失败"
+        elif "${PKG_MGR}" -q list --available docker-ce >/dev/null 2>&1; then
+            info "在线安装 docker-ce（发行版自带/自备源）"
+            "${PKG_MGR}" install -y docker-ce docker-ce-cli containerd.io || die 20 "docker-ce 安装失败"
+        else
+            die 20 "当前软件源内未找到 moby-engine 或 docker-ce。请先按发行版文档安装 Docker，或用 --offline-dir 提供 RPM 离线包后重试。"
+        fi
     fi
 else
     info "Docker 已安装：$(docker --version 2>/dev/null | head -n1)"
@@ -535,7 +556,7 @@ install_compose() {
     tmp="$(mktemp)"
     for url in "${COMPOSE_URLS[@]}"; do
         info "下载 compose：${url%%/https*}"
-        if curl -fL --connect-timeout 10 -m 600 -o "${tmp}" "${url}"; then
+        if curl -fL --connect-timeout 10 --speed-limit 102400 --speed-time 60 -m 600 -o "${tmp}" "${url}"; then
             install -m 0755 "${tmp}" "${plugin_dir}/docker-compose"
             rm -f "${tmp}"
             return 0
@@ -591,13 +612,20 @@ info "基线快照：${SNAPSHOT}（$(du -h "${SNAPSHOT}" | awk '{print $1}')）"
 SNAPSHOT_SHA="$(sha256sum "${SNAPSHOT}" | awk '{print $1}')"
 info "快照 SHA256：${SNAPSHOT_SHA}"
 if [ -f "$(dirname "${SNAPSHOT}")/SHA256SUMS" ]; then
-    (cd "$(dirname "${SNAPSHOT}")" && sha256sum -c SHA256SUMS --ignore-missing >/dev/null 2>&1) \
-        || die 27 "快照校验失败（SHA256SUMS 不匹配）"
+    # 基线产物可能在 Windows 环境生成，带 UTF-8 BOM 时 sha256sum 会拒绝解析；
+    # 这里先清洗到临时文件再校验，兼容 BOM 与 CRLF。
+    SUMS_CLEAN="$(mktemp)"
+    sed '1s/^\xEF\xBB\xBF//' "$(dirname "${SNAPSHOT}")/SHA256SUMS" | tr -d '\r' > "${SUMS_CLEAN}"
+    (cd "$(dirname "${SNAPSHOT}")" && sha256sum -c "${SUMS_CLEAN}" --ignore-missing >/dev/null 2>&1) \
+        || { rm -f "${SUMS_CLEAN}"; die 27 "快照校验失败（SHA256SUMS 不匹配）"; }
+    rm -f "${SUMS_CLEAN}"
     ok "SHA256SUMS 校验通过"
 fi
 BASELINE_MANIFEST="$(dirname "${SNAPSHOT}")/manifest.env"
 if [ -f "${BASELINE_MANIFEST}" ]; then
-    manifest_get() { sed -n "s/^$1=//p" "${BASELINE_MANIFEST}" | head -n1 | tr -d '"'; }
+    MANIFEST_CLEAN="$(mktemp)"
+    sed '1s/^\xEF\xBB\xBF//' "${BASELINE_MANIFEST}" | tr -d '\r' > "${MANIFEST_CLEAN}"
+    manifest_get() { sed -n "s/^$1=//p" "${MANIFEST_CLEAN}" | head -n1 | tr -d '"'; }
     BASELINE_MIGRATIONS="$(manifest_get BASELINE_MIGRATIONS)"
     BASELINE_BRAND_VERSION="$(manifest_get BASELINE_BRAND_VERSION)"
     BASELINE_SCENARIOS="$(manifest_get BASELINE_SCENARIOS)"

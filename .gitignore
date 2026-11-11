@@ -89,6 +89,8 @@ data/server.err.log
 uploads/
 
 # ---- 本机发布备份 / 临时验证留存（不入库）----
+# 软著材料目录（本地归档，不入库）
+/2026-11-10/
 .backup*/
 .backups/
 backups/

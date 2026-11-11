@@ -1,5 +1,9 @@
 # 升级指南（容器部署）
 
+> **迁移链的适用范围**：迁移链只服务本指南描述的“已部署实例升级”路径。
+> 全新安装恢复基线快照，不重放迁移链；新增迁移在基线快照同步前**不会**进入全新安装。
+> 口径与发布检查见 [install-docker-openeuler.md 第 0.1 节](install-docker-openeuler.md#01-迁移与安装的正式口径定稿)。
+
 > 适用范围：用 `docker compose` 部署 Drill 的用户。
 > 源码自行编译、只想升级数据库的用户看 [从源码构建与升级数据库](build-from-source.md)。
 > 全新服务器从零安装（Docker / openEuler / 离线包）见 [一键安装（Docker / openEuler）](install-docker-openeuler.md)。

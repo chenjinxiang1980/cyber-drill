@@ -379,13 +379,18 @@ func ensureBasicTasksTx(tx *sql.Tx, projectID, scenarioID string) (int, error) {
 	return count, nil
 }
 
-// resolveRoleFromMap — 在预加载的 role map 中查 role_id
+// resolveRoleFromMap — 在预加载的 role map 中查 role_id。
+// 顺序：精确 name/short → 别名（向后兼容）→ 模糊匹配。
+// 正式角色行存在时精确匹配优先，别名只在旧库/旧数据缺角色行时兜底。
 func resolveRoleFromMap(roleByKey map[string]string, target string) string {
 	t := strings.TrimSpace(target)
 	if t == "" {
 		return "duty"
 	}
 	if id, ok := roleByKey[t]; ok {
+		return id
+	}
+	if id, ok := targetRoleAliases[t]; ok {
 		return id
 	}
 	// 模糊匹配
@@ -397,7 +402,8 @@ func resolveRoleFromMap(roleByKey map[string]string, target string) string {
 	return t
 }
 
-// targetToRoleIDTx — 事务内版本，直接查 roles 表（等价于原 targetToRoleID 的逻辑）
+// targetToRoleIDTx — 事务内版本，直接查 roles 表（等价于原 targetToRoleID 的逻辑）。
+// 顺序：精确 name/short → 别名（向后兼容）→ 模糊匹配。
 func targetToRoleIDTx(tx *sql.Tx, target string) string {
 	t := strings.TrimSpace(target)
 	if t == "" {
@@ -406,6 +412,9 @@ func targetToRoleIDTx(tx *sql.Tx, target string) string {
 	var id string
 	_ = tx.QueryRow(`SELECT id FROM roles WHERE name=? OR short=? LIMIT 1`, t, t).Scan(&id)
 	if id != "" {
+		return id
+	}
+	if id, ok := targetRoleAliases[t]; ok {
 		return id
 	}
 	// 模糊匹配
@@ -423,6 +432,18 @@ func targetToRoleIDTx(tx *sql.Tx, target string) string {
 	return t
 }
 
+// targetRoleAliases 剧本里按科室/岗位书写的责任对象 → 角色的向后兼容别名。
+// 这些科室/岗位已在迁移 0127 中落为正式角色行（检验科主任/医保办/运维负责人/算法工程师/门诊部），
+// 正常解析走「精确 name/short 匹配」优先；别名仅用于旧库尚未执行 0127、
+// 或历史导入数据缺角色行时兜底，避免必做节点没有对口角色可接单。
+var targetRoleAliases = map[string]string{
+	"检验科主任":  "medlead",
+	"医保办":    "medlead",
+	"门诊部":    "medlead",
+	"运维负责人": "sysadmin",
+	"算法工程师":  "netsec",
+}
+
 func pad2(n int) string {
 	s := strconv.Itoa(n)
 	if len(s) == 1 {
@@ -432,7 +453,7 @@ func pad2(n int) string {
 }
 
 // targetToRoleID 复刻 Node drill_plan.js targetToRoleId：
-// 精确 name/short → 双向包含匹配（唯一命中）→ 兜底 duty
+// 精确 name/short → 别名（向后兼容）→ 双向包含匹配（唯一命中）→ 兜底 duty
 func targetToRoleID(database *db.DB, target string) string {
 	t := strings.TrimSpace(target)
 	if t == "" {
@@ -440,6 +461,9 @@ func targetToRoleID(database *db.DB, target string) string {
 	}
 	var id string
 	if err := database.QueryRow(`SELECT id FROM roles WHERE name=? OR short=? LIMIT 1`, t, t).Scan(&id); err == nil && id != "" {
+		return id
+	}
+	if id, ok := targetRoleAliases[t]; ok {
 		return id
 	}
 	rows, err := database.Query(

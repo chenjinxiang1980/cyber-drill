@@ -76,15 +76,28 @@ info "2/5 准备 compose v2 二进制"
 if [ -n "${COMPOSE_BIN}" ]; then
     install -m 0755 "${COMPOSE_BIN}" "${OUT}/bin/docker-compose"
 else
-    tmp="$(mktemp)"
-    ok=0
-    for url in "${COMPOSE_URLS[@]}"; do
-        if curl -fL --connect-timeout 10 -m 600 -o "${tmp}" "${url}"; then
-            install -m 0755 "${tmp}" "${OUT}/bin/docker-compose"; ok=1; break
-        fi
+    # 优先复用本机已装的 compose 二进制：ghproxy 等镜像可能只有几十 KB/s，
+    # 下载 60MB 会拖到数小时；本机版本与目标机无强绑定，直接打包即可。
+    local_compose=""
+    for p in /usr/local/lib/docker/cli-plugins/docker-compose \
+             /usr/libexec/docker/cli-plugins/docker-compose \
+             /usr/lib/docker/cli-plugins/docker-compose; do
+        if [ -x "${p}" ]; then local_compose="${p}"; break; fi
     done
-    rm -f "${tmp}"
-    [ "${ok}" -eq 1 ] || die "compose 下载失败，请用 --compose-bin 指定本地二进制"
+    if [ -n "${local_compose}" ]; then
+        install -m 0755 "${local_compose}" "${OUT}/bin/docker-compose"
+        info "复用本机 compose：${local_compose}（$("${OUT}/bin/docker-compose" version 2>/dev/null | head -n1)）"
+    else
+        tmp="$(mktemp)"
+        ok=0
+        for url in "${COMPOSE_URLS[@]}"; do
+            if curl -fL --connect-timeout 10 --speed-limit 102400 --speed-time 60 -m 600 -o "${tmp}" "${url}"; then
+                install -m 0755 "${tmp}" "${OUT}/bin/docker-compose"; ok=1; break
+            fi
+        done
+        rm -f "${tmp}"
+        [ "${ok}" -eq 1 ] || die "compose 下载失败，请用 --compose-bin 指定本地二进制"
+    fi
 fi
 
 info "3/5 导出应用镜像 ${VERSION}"
@@ -118,7 +131,11 @@ grep -q "^BASELINE_VERSION=${VERSION}$" "${BASELINE_DIR}/manifest.env" \
 grep -q '^BASELINE_MIGRATIONS=[0-9][0-9]*$' "${BASELINE_DIR}/manifest.env" \
     || die "manifest.env 缺少 BASELINE_MIGRATIONS（必须绑定该版本的迁移条数）"
 if [ -f "${BASELINE_DIR}/SHA256SUMS" ]; then
-    (cd "${BASELINE_DIR}" && sha256sum -c SHA256SUMS) || die "基线快照校验失败（SHA256SUMS 不匹配）"
+    # 容忍 Windows 侧产物携带 BOM/CRLF，否则 sha256sum -c 会解析失败
+    sums_clean="$(mktemp)"
+    sed '1s/^\xEF\xBB\xBF//' "${BASELINE_DIR}/SHA256SUMS" | tr -d '\r' > "${sums_clean}"
+    (cd "${BASELINE_DIR}" && sha256sum -c "${sums_clean}") || { rm -f "${sums_clean}"; die "基线快照校验失败（SHA256SUMS 不匹配）"; }
+    rm -f "${sums_clean}"
     info "基线校验通过：$(basename "${SNAP_FILE}")"
 else
     die "基线目录缺少 SHA256SUMS（发布产物必须固定哈希）：${BASELINE_DIR}"

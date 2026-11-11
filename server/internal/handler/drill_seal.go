@@ -101,8 +101,9 @@ func coreEvidencePriority(name string) int {
 }
 
 // defaultCoreEvidenceFrom 按剧本基线推导平台内置默认 core 清单（每剧本 10–12 项）。
-// 只取正确流程（flow_type=correct）节点的取证要求；同一剧本内按证据名称优先级、
-// 再按节点顺序稳定排序，保证多次计算结果一致。
+// 只取正确流程（flow_type=correct）节点的取证要求；evidence_req 中显式标记 "core":true
+// 的取证项（法定上报记录、结束记录单、受理回执等）优先纳入且不受 12 项上限挤压，
+// 其余按证据名称优先级、再按节点顺序稳定排序补足，保证多次计算结果一致。
 func defaultCoreEvidenceFrom(q rowQuerier, database *db.DB, scenarioID string) []coreEvidenceItem {
 	maxN := settingIntValue(database, "drill_core_evidence_max", 12)
 	if maxN < 3 {
@@ -126,6 +127,7 @@ func defaultCoreEvidenceFrom(q rowQuerier, database *db.DB, scenarioID string) [
 	}
 	var cands []candidate
 	order := 0
+	explicitCore := 0
 	for rows.Next() {
 		var nid, title, target, evReq, flowType string
 		var seq int
@@ -146,6 +148,12 @@ func defaultCoreEvidenceFrom(q rowQuerier, database *db.DB, scenarioID string) [
 				continue
 			}
 			typ, _ := it["type"].(string)
+			priority := coreEvidencePriority(name)
+			if isCore, _ := it["core"].(bool); isCore {
+				// 剧本显式声明的必备取证项：无条件纳入，不再按名称猜测。
+				priority = 0
+				explicitCore++
+			}
 			order++
 			cands = append(cands, candidate{
 				item: coreEvidenceItem{
@@ -157,7 +165,7 @@ func defaultCoreEvidenceFrom(q rowQuerier, database *db.DB, scenarioID string) [
 					Name:      name,
 					Seq:       seq,
 				},
-				priority: coreEvidencePriority(name),
+				priority: priority,
 				order:    order,
 			})
 		}
@@ -168,8 +176,12 @@ func defaultCoreEvidenceFrom(q rowQuerier, database *db.DB, scenarioID string) [
 		}
 		return cands[i].order < cands[j].order
 	})
-	if len(cands) > maxN {
-		cands = cands[:maxN]
+	keep := maxN
+	if explicitCore > keep {
+		keep = explicitCore
+	}
+	if len(cands) > keep {
+		cands = cands[:keep]
 	}
 	out := make([]coreEvidenceItem, 0, len(cands))
 	for _, c := range cands {
@@ -394,10 +406,15 @@ func buildEndChecklist(database *db.DB, p *drillV1Project) endChecklist {
 	ck.EvidenceRate = pctRate(ck.EvidenceDone, ck.EvidenceTotal)
 	ck.CoreRate = pctRate(ck.CoreDone, ck.CoreTotal)
 	ck.ZeroEvidence = ck.EvidenceTotal > 0 && ck.EvidenceDone == 0
-	ck.NeedsException = ck.CorePending > 0 || ck.ZeroEvidence
+	requiredPending := ck.RequiredTotal - ck.RequiredDone
+	// 必做节点未完成同样属于缺项：不得直接标记「完整结束」。
+	ck.NeedsException = requiredPending > 0 || ck.CorePending > 0 || ck.ZeroEvidence
 	ck.CanEndComplete = !ck.NeedsException
 
 	switch {
+	case requiredPending > 0:
+		ck.Hint = fmt.Sprintf("必做节点 %d/%d 未完成（缺 %d 项），不得直接结束；请补齐后结束，或填写缺项说明并降级封存",
+			ck.RequiredDone, ck.RequiredTotal, requiredPending)
 	case ck.ZeroEvidence:
 		ck.Hint = fmt.Sprintf("本项目尚未归档任何取证材料（0/%d），不得直接结束；请填写缺项说明并降级评级", ck.EvidenceTotal)
 	case ck.CorePending > 0:
@@ -482,24 +499,25 @@ func normalizeEndException(ex *drillEndException, ck endChecklist) string {
 	}
 	ex.Deadline = normalized
 
-	// 缺项 key 必须覆盖全部 core 缺项；未填写时按核对清单自动补齐。
+	// 缺项 key 覆盖「未完成的必做节点 + 未归档的核心证据」；未填写时按核对清单自动补齐。
 	provided := make(map[string]bool)
 	for _, k := range ex.MissingKeys {
 		provided[k] = true
 	}
-	merged := make([]string, 0, len(ck.CoreMissing))
-	for _, it := range ck.CoreMissing {
-		merged = append(merged, it.Key)
-	}
-	if len(ex.MissingKeys) == 0 {
-		ex.MissingKeys = merged
-		return ""
+	merged := make([]string, 0, len(ck.RequiredMissing)+len(ck.CoreMissing))
+	for _, it := range ck.RequiredMissing {
+		if !provided[it.NodeID] {
+			provided[it.NodeID] = true
+			merged = append(merged, it.NodeID)
+		}
 	}
 	for _, it := range ck.CoreMissing {
 		if !provided[it.Key] {
-			return "缺项 key 未覆盖核心缺项：" + it.Key
+			provided[it.Key] = true
+			merged = append(merged, it.Key)
 		}
 	}
+	ex.MissingKeys = append(ex.MissingKeys, merged...)
 	return ""
 }
 
@@ -931,6 +949,9 @@ func executeDrillFinish(database *db.DB, u *auth.User, p *drillV1Project, body m
 			ex.Reason = "【强制结束】" + ex.Reason
 		}
 		if len(ex.MissingKeys) == 0 {
+			for _, it := range ck.RequiredMissing {
+				ex.MissingKeys = append(ex.MissingKeys, it.NodeID)
+			}
 			for _, it := range ck.CoreMissing {
 				ex.MissingKeys = append(ex.MissingKeys, it.Key)
 			}
@@ -961,6 +982,8 @@ func executeDrillFinish(database *db.DB, u *auth.User, p *drillV1Project, body m
 		snapshotStatus = "异常封存"
 	} else if ck.NeedsException {
 		endMode = "有缺项"
+		// 未完成必做节点/核心证据即降级封存，避免与完整结束混淆。
+		snapshotStatus = "降级封存"
 	}
 
 	// 只计算一次评分：强制按「已结束」口径补扣未完成节点，快照/通知共用。
@@ -986,7 +1009,7 @@ func executeDrillFinish(database *db.DB, u *auth.User, p *drillV1Project, body m
 		res, err := tx.Exec(`INSERT INTO project_end_exception
 			(project_id,snapshot_id,reason,missing_keys,missing_count,owner,deadline,approver,created_by,created_at)
 			VALUES (?,?,?,?,?,?,?,?,?,?)`,
-			p.ID, sealed.ID, ex.Reason, string(missingJSON), len(ck.CoreMissing), ex.Owner, ex.Deadline,
+			p.ID, sealed.ID, ex.Reason, string(missingJSON), len(ex.MissingKeys), ex.Owner, ex.Deadline,
 			ex.Approver, actor, sealed.SealedAt)
 		if err != nil {
 			return 500, gin.H{"error": "写入缺项结束说明失败：" + err.Error()}

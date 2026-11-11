@@ -1222,6 +1222,14 @@ func PatchProjectStatus(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新演练状态失败"})
 			return
 		}
+		// 基础版任务截止时间：按节点标准处置时长从演练启动时刻推算，供工作台展示与超时判定对齐
+		if body.Status == "演练中" && started != "" {
+			if _, err := database.Exec(`UPDATE tasks t JOIN script_nodes n ON n.id=t.node_id
+				SET t.deadline=DATE_FORMAT(DATE_ADD(?, INTERVAL n.timeout MINUTE),'%Y-%m-%d %H:%i')
+				WHERE t.project_id=? AND COALESCE(t.deadline,'')='' AND n.timeout>0`, started, id); err != nil {
+				slog.Warn("回填任务截止时间失败", "project_id", id, "err", err)
+			}
+		}
 		// 站内消息：演练启动/继续、演练结束（Node bootstrap.js:331-351）
 		if body.Status == "演练中" && prev != "演练中" {
 			resume := prev == "暂停"

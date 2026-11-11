@@ -192,7 +192,7 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 		{
 			// 免登录（账号列表已关闭匿名访问，改为仅平台管理员维护时使用）
 			authg.GET("/roles", handler.GetRoles(database))
-			authg.GET("/captcha", middleware.RateLimit(cfg.RateLimitCaptcha), handler.Captcha(cfg.CaptchaTTLSeconds))
+			authg.GET("/captcha", middleware.RateLimit(cfg.RateLimitCaptcha), handler.Captcha(cfg))
 			authg.POST("/login",
 				middleware.RateLimitByGroup("/api/auth", cfg.RateLimitAuth),
 				handler.Login(authSvc, database, cfg))
