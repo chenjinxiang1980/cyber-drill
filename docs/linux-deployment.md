@@ -401,7 +401,7 @@ gunzip -c backup-xxx.sql.gz | mysql -u drill_app -p drill_system
 恢复是**高危操作**：需要二次确认词 `RESTORE` + 独立口令 `RESTORE_PASSWORD`（与登录口令分离），
 **会覆盖整库并清空全部登录会话**。恢复前应用会自动生成加密的 pre-restore 备份，失败自动回滚。
 `multiStatements=true` 使恢复等价于执行任意 SQL，因此**恢复仅限管理员本机操作**，
-不要把恢复接口暴露到公网。恢复后校验 `schema_migrations = 76`、`brand_version = v1.0.0`。
+不要把恢复接口暴露到公网。恢复后校验 `schema_migrations = 80`、`brand_version = v1.0.0`。
 
 ### 上传文件备份
 

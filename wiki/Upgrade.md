@@ -6,25 +6,27 @@
 
 ```bash
 sudo bash deploy/upgrade/upgrade.sh --status
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.1 --dry-run
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.2 --dry-run
 ```
 
 ## 执行升级
 
 ```bash
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.1
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.2
 ```
 
 可显式指定来源版本：
 
 ```bash
-sudo bash deploy/upgrade/upgrade.sh --from 1.0.0 --to 1.0.1
+sudo bash deploy/upgrade/upgrade.sh --from 1.0.1 --to 1.0.2
 ```
 
 ## 升级矩阵（摘要）
 
 | 路径 | 迁移条数 | 含 DDL | 说明 |
 |---|---|---|---|
+| 1.0.1 → 1.0.2 | 4 | 否 | 仅数据修正（剧本节点/目标角色），工具自动备份后迁移，失败回滚 |
+| 1.0.0 → 1.0.2 | 5 | 否 | 同上，含 1.0.1 的 0 迁移补丁 |
 | 1.0.0 → 1.0.1 | 0 | 否 | 无数据库迁移，停机窗口仅为重建容器的数秒 |
 | 0.9.0 → 1.0.0 | 1 | 否 | 停机窗口仅为重建容器的数秒 |
 | 0.8.6 → 1.0.0 | 16 | 是 | 需按备份 → 迁移 → 校验流程 |
@@ -33,7 +35,7 @@ sudo bash deploy/upgrade/upgrade.sh --from 1.0.0 --to 1.0.1
 
 完整版本链见 `deploy/upgrade/manifest.json` 与 `docs/upgrade.md`。
 
-> 1.0.1 不携带数据库迁移（累计仍 76 条），升级后 `settings.brand_version` 保持 `v1.0.0`；页面底部版本标签自 1.0.1 起改为读 `/api/health` 返回的 `version`（取不到才回退 `settings.brand_version`），因此显示 **v1.0.1**，与健康检查一致。升级工具也以 `/api/health` 的 `version` 判定成功。
+> 1.0.2 携带 4 条数据修正迁移（0124–0127，累计 80 条）：升级后 `schema_migrations` 末条为 `0127_script_target_roles`，角色总数由 15 增至 20，`settings.brand_version` 仍保持 `v1.0.0`（沿用 1.0.1 起读 `/api/health` 的 `version` 口径，页面显示 **v1.0.2**）。升级工具以 `/api/health` 的 `version` 判定成功。
 
 ## 回滚
 

@@ -68,8 +68,8 @@ services:
       context: ../..
       dockerfile: deploy/docker-dist/Dockerfile
       args:
-        VERSION: ${VERSION:-1.0.0}
-    image: drill-server:${VERSION:-1.0.0}
+        VERSION: ${VERSION:-1.0.2}
+    image: drill-server:${VERSION:-1.0.2}
     # 容器名可用 APP_CONTAINER_NAME 覆盖（同一宿主并行测试时避免冲突）
     container_name: ${APP_CONTAINER_NAME:-drill-app}
     restart: unless-stopped

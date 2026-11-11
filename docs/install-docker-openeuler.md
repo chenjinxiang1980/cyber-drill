@@ -43,7 +43,7 @@
 
 因此 0.9.0 起的发布口径是：
 
-- **全新安装 = 恢复基线快照**：一次导入结构 + 参照数据 + 76 条 `schema_migrations`，不做逐条重放。
+- **全新安装 = 恢复基线快照**：一次导入结构 + 参照数据 + 80 条 `schema_migrations`，不做逐条重放。
 - **迁移链只服务升级**：`upgrade.sh` 仍然按 `schema_migrations` 从旧版本往上走，行为不变。
 - 守卫断言、迁移文件、S01–S08 已封存内容**一律不改**；快照只是把“现网本来就有、迁移里没写”的数据补齐。
 
@@ -116,22 +116,22 @@ mysqldump -h<host> -u<user> -p --single-transaction --no-tablespaces \
   drill_system settings roles scenarios script_nodes form_templates dict knowledge score_items schema_migrations > data.sql
 
 # 2) 脱敏 + 校验 + 打包（-n 关闭 gzip 时间戳，保证同样输入得到同样哈希）
-sudo bash deploy/install/build-baseline.sh --raw-sql ./dump.sql --version 1.0.1 --out ./baseline
+sudo bash deploy/install/build-baseline.sh --raw-sql ./dump.sql --version 1.0.2 --out ./baseline
 ```
 
 `build-baseline.sh` 的固定动作：
 
 - 去 `DEFINER=`、去 `AUTO_INCREMENT=` 计数器、把 `schema_migrations.initialized_at` 固定为 `1970-01-01 00:00:00`；
 - 禁止出现运营表的 `INSERT`、禁止出现 bcrypt 散列（`$2a/$2b/$2y`）；
-- 校验：`schema_migrations=76`、`brand_version=v1.0.0`、`scenarios=21`、`form_templates=22`、`dict=12`、
-  `dict.eventTypes` 20 项、`script_nodes` 全量 1173 行（可见 1165，8 行软删）；
+- 校验：`schema_migrations=80`、`brand_version=v1.0.0`、`scenarios=21`、`form_templates=22`、`dict=12`、
+  `dict.eventTypes` 20 项、`script_nodes` 全量 1181 行（可见 1173，8 行软删）；
 - 产出 `drill-baseline-<版本>.sql.gz`、`SHA256SUMS`、`manifest.env`（含各项期望值与生成时间）。
 
-1.0.1 发布产物（快照内容与 1.0.0 相同，文件名与 `BASELINE_VERSION` 随版本号更新）：
+1.0.2 发布产物（快照内容较 1.0.1 确有变更：收录 0124–0127 的剧本节点与正式角色数据）：
 
 ```text
-baseline/drill-baseline-1.0.1.sql.gz   224K
-sha256  2bc77cfe0e45a4397bdf705ab1885a55c39e7b978cb0fd10c915646eb4d02a54
+baseline/drill-baseline-1.0.2.sql.gz   225K
+sha256  f2e934c7103b97ee8893a893c9c04d00e73ff0086d662d16a35114f494efc45f
 ```
 
 同一份 dump 重跑两次得到相同哈希（已验证）；安装器在恢复前会用 `baseline/SHA256SUMS` 校验，
@@ -139,7 +139,7 @@ sha256  2bc77cfe0e45a4397bdf705ab1885a55c39e7b978cb0fd10c915646eb4d02a54
 
 **基线快照的版本绑定规则（发布必做）**：
 
-- 仓库内的基线固定放在 `deploy/install/baseline/`，文件名带版本号，例如 `drill-baseline-1.0.1.sql.gz`。
+- 仓库内的基线固定放在 `deploy/install/baseline/`，文件名带版本号，例如 `drill-baseline-1.0.2.sql.gz`。
 - **每个版本发布时必须重新生成一份**，不能复用上一个版本的快照；三项必须同时相等：
   `manifest.env` 的 `BASELINE_VERSION` = 镜像版本 = `deploy/upgrade/manifest.json` 中该版本的 `version`；
   `BASELINE_MIGRATIONS` = 该版本的 `schema_migrations_total`；
@@ -165,8 +165,8 @@ sudo mkdir -p /opt/cyber-drill-installer/baseline
 cd /opt/cyber-drill-installer
 sudo curl -fsSL -o install.sh \
   https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/install.sh
-sudo curl -fsSL -o baseline/drill-baseline-1.0.1.sql.gz \
-  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/drill-baseline-1.0.1.sql.gz
+sudo curl -fsSL -o baseline/drill-baseline-1.0.2.sql.gz \
+  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/drill-baseline-1.0.2.sql.gz
 sudo curl -fsSL -o baseline/SHA256SUMS \
   https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/SHA256SUMS
 sudo curl -fsSL -o baseline/manifest.env \
@@ -184,37 +184,37 @@ sudo bash install.sh --image-source swr
 在可联网机器下载，把 tar 包拷到目标机：
 
 ```bash
-curl -fL -o cyber-drill-offline-1.0.1.tar.gz \
-  https://github.com/chenjinxiang1980/cyber-drill/releases/download/v1.0.1/cyber-drill-offline-1.0.1.tar.gz
-tar -xzf cyber-drill-offline-1.0.1.tar.gz
-cd cyber-drill-offline-1.0.1
+curl -fL -o cyber-drill-offline-1.0.2.tar.gz \
+  https://github.com/chenjinxiang1980/cyber-drill/releases/download/v1.0.2/cyber-drill-offline-1.0.2.tar.gz
+tar -xzf cyber-drill-offline-1.0.2.tar.gz
+cd cyber-drill-offline-1.0.2
 sudo bash deploy/install/install.sh --offline-dir "$PWD"
 ```
 
 - **体积**：472,867,328 字节（约 451 MiB / 473 MB）。
-- **内容**：Docker 引擎 RPM（`moby-engine` / `moby-client` 及依赖）、compose v2 二进制、应用镜像 `cyber-drill-1.0.1`、MySQL 8.0 镜像、基线快照与校验清单，以及 `install.sh`、`deploy/upgrade/` 升级工具。
+- **内容**：Docker 引擎 RPM（`moby-engine` / `moby-client` 及依赖）、compose v2 二进制、应用镜像 `cyber-drill-1.0.2`、MySQL 8.0 镜像、基线快照与校验清单，以及 `install.sh`、`deploy/upgrade/` 升级工具。
 - 解包后无需外网，也无需仓库源码；安装器按 `--offline-dir` 使用包内 RPM、镜像和基线。
 - Gitee 发行版页 <https://gitee.com/habeas/cyber-drill/releases> 提供同版本说明；离线包体积较大，附件托管在 GitHub Release，可在能出网的机器下载后经内网拷贝。
 
 离线包内与安装相关的目录：
 
 ```text
-cyber-drill-offline-1.0.1/
+cyber-drill-offline-1.0.2/
 ├── deploy/install/install.sh          # 一键安装器
 ├── deploy/install/baseline/           # 脚本同级的基线（安装器优先使用）
 ├── deploy/upgrade/                    # 升级/回滚工具与 manifest.json
 ├── rpms/                              # moby-engine、containerd、runc、container-selinux 等及依赖
 ├── bin/docker-compose                 # compose v2 独立二进制
-├── images/cyber-drill-1.0.1.tar.gz
+├── images/cyber-drill-1.0.2.tar.gz
 ├── images/mysql-8.0.tar.gz
-├── baseline/drill-baseline-1.0.1.sql.gz
+├── baseline/drill-baseline-1.0.2.sql.gz
 └── SHA256SUMS
 ```
 
 ### 3.3 安装后：访问、初始口令、健康检查
 
 - 浏览器访问 `http://<服务器IP>:8090`（登录页是 `/`，`/login` 返回 404）。
-- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，应返回 `"version":"1.0.1"`。
+- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，应返回 `"version":"1.0.2"`。
 - 初始账号：`admin`、`platformadmin`；口令在安装结束时**只打印一次**，同时写入 `/opt/cyber-drill/.env`（权限 600，属主 10001）。
 - 首次登录强制改密（`must_change=1`）；改密成功后应用会清空 `.env` 里对应的一次性口令。未改密前可用 `sudo bash install.sh --show-secrets` 再次打印。
 - 默认 compose 项目 `drill`，容器名为 `drill-app` / `drill-mysql`；多实例安装用 `--project` 区分。
@@ -224,7 +224,7 @@ cyber-drill-offline-1.0.1/
 安装目录已存在且非空时，安装器**直接停止**（退出码 28），不会覆盖 `.env`、不会覆盖数据库，并给出两条路径：
 
 - A（不保留数据）：`sudo bash install.sh --reinstall`，交互输入确认词 `DELETE` 后删除原目录/容器/数据卷再重装；非交互环境用 `--reinstall --confirm DELETE`。
-- B（保留数据）：用升级工具执行 `sudo bash deploy/upgrade/upgrade.sh --to 1.0.1 --dir /opt/cyber-drill`。
+- B（保留数据）：用升级工具执行 `sudo bash deploy/upgrade/upgrade.sh --to 1.0.2 --dir /opt/cyber-drill`。
 
 升级工具不在在线安装器内：
 
@@ -237,7 +237,7 @@ for f in upgrade.sh manifest.json lib/00-common.sh lib/10-manifest.sh \
          lib/20-backup.sh lib/30-migrate.sh lib/40-compose.sh lib/50-rollback.sh; do
   sudo curl -fsSL -o "$f" "https://gitee.com/habeas/cyber-drill/raw/main/deploy/upgrade/$f"
 done
-sudo bash upgrade.sh --to 1.0.1 --dir /opt/cyber-drill
+sudo bash upgrade.sh --to 1.0.2 --dir /opt/cyber-drill
 ```
 
 ### 3.5 破坏性操作纪律（测试必读）
@@ -270,7 +270,7 @@ sudo bash upgrade.sh --to 1.0.1 --dir /opt/cyber-drill
 
 ```bash
 sudo bash deploy/install/pack-offline.sh \
-  --out /opt/cyber-drill-offline --version 1.0.1 --baseline-dir ./baseline
+  --out /opt/cyber-drill-offline --version 1.0.2 --baseline-dir ./baseline
 ```
 
 产出 `rpms/`、`bin/docker-compose`、`images/`、`baseline/` 与 `SHA256SUMS`。正式 Release 离线包会在此基础上加入 `deploy/install/install.sh` 和 `deploy/upgrade/`，最终用户按 3.2 解包即装，**不需要执行本节**。
@@ -330,11 +330,11 @@ sudo bash deploy/install/pack-offline.sh \
 
 ---
 
-## 7. 验收口径（1.0.1）
+## 7. 验收口径（1.0.2）
 
 ```bash
 curl -fsS http://127.0.0.1:8090/api/health
-# {"ok":true,"service":"cyber-drill-system","version":"1.0.1",...}
+# {"ok":true,"service":"cyber-drill-system","version":"1.0.2",...}
 
 PW="$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' /opt/cyber-drill/.env)"
 # 容器名 = <项目名>-mysql；默认项目 drill 即 drill-mysql
@@ -347,7 +347,7 @@ docker exec drill-mysql mysql -uroot -p"$PW" -N -B drill_system -e "
         (SELECT COUNT(*) FROM form_templates),
         (SELECT COUNT(*) FROM dict),
         (SELECT JSON_LENGTH(value) FROM dict WHERE \`key\`='eventTypes');"
-# 76  v1.0.0  21  1165  750  22  12  20
+# 80  v1.0.0  21  1173  750  22  12  20
 ```
 
 应用层：

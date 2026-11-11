@@ -2,7 +2,7 @@
 # drill-server —— Docker 多阶段构建（**可替换国产基础镜像**）
 #
 # 用法：
-#   docker build -f deploy/linux/Dockerfile -t drill-server:1.0.0 .
+#   docker build -f deploy/linux/Dockerfile -t drill-server:1.0.2 .
 #   # 指定国产发行版：
 #   docker build -f deploy/linux/Dockerfile \
 #       --build-arg RUNTIME_BASE=openeuler/openeuler:22.03 \
@@ -90,7 +90,7 @@ COPY migrations/ ../migrations/
 
 # 编译两个二进制
 # -trimpath 剥离本地路径，-ldflags 可注入版本号
-ARG VERSION=1.0.0
+ARG VERSION=1.0.2
 ARG BUILD_TIME=unknown
 ARG GIT_COMMIT=unknown
 

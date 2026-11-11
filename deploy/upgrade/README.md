@@ -7,8 +7,8 @@
 
 ```bash
 sudo ./deploy/upgrade/upgrade.sh --status                 # 现在是什么版本、上一次升级结果
-sudo ./deploy/upgrade/upgrade.sh --to 1.0.0 --dry-run     # 只检查 + 打印计划，零变更
-sudo ./deploy/upgrade/upgrade.sh --to 1.0.0               # 备份 → 迁移 → 换镜像 → 校验；失败自动回滚
+sudo ./deploy/upgrade/upgrade.sh --to 1.0.2 --dry-run     # 只检查 + 打印计划，零变更
+sudo ./deploy/upgrade/upgrade.sh --to 1.0.2               # 备份 → 迁移 → 换镜像 → 校验；失败自动回滚
 ```
 
 常用变体：

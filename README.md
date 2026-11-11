@@ -6,7 +6,7 @@
 
 面向医院、政府与企事业单位**内网**的桌面推演 + 实战演练指挥调度平台：内置勒索病毒、横向渗透、DDoS、钓鱼邮件、存储故障等高频安全事件剧本，覆盖演练编排、多角色协同、时序控制、处置记录、监视大屏、自动考评与复盘报告全流程。
 
-> 当前版本：**1.0.1** · 许可证：MIT © 2026 陈金祥 · 软件著作权登记：**未登记**（截至 1.0.0）
+> 当前版本：**1.0.2** · 许可证：MIT © 2026 陈金祥 · 软件著作权登记：**未登记**（截至 1.0.2）
 
 ---
 
@@ -67,8 +67,8 @@ sudo mkdir -p /opt/cyber-drill-installer/baseline
 cd /opt/cyber-drill-installer
 sudo curl -fsSL -o install.sh \
   https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/install.sh
-sudo curl -fsSL -o baseline/drill-baseline-1.0.1.sql.gz \
-  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/drill-baseline-1.0.1.sql.gz
+sudo curl -fsSL -o baseline/drill-baseline-1.0.2.sql.gz \
+  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/drill-baseline-1.0.2.sql.gz
 sudo curl -fsSL -o baseline/SHA256SUMS \
   https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/SHA256SUMS
 sudo curl -fsSL -o baseline/manifest.env \
@@ -85,22 +85,22 @@ sudo bash install.sh --image-source swr
 在可联网机器下载，把 tar 包拷到目标机：
 
 ```bash
-curl -fL -o cyber-drill-offline-1.0.1.tar.gz \
-  https://github.com/chenjinxiang1980/cyber-drill/releases/download/v1.0.1/cyber-drill-offline-1.0.1.tar.gz
-tar -xzf cyber-drill-offline-1.0.1.tar.gz
-cd cyber-drill-offline-1.0.1
+curl -fL -o cyber-drill-offline-1.0.2.tar.gz \
+  https://github.com/chenjinxiang1980/cyber-drill/releases/download/v1.0.2/cyber-drill-offline-1.0.2.tar.gz
+tar -xzf cyber-drill-offline-1.0.2.tar.gz
+cd cyber-drill-offline-1.0.2
 sudo bash deploy/install/install.sh --offline-dir "$PWD"
 ```
 
 - 体积：**472,867,328 字节（约 451 MiB / 473 MB）**。
-- 内容：Docker 引擎 RPM（`moby-engine` / `moby-client` 及依赖）、compose v2 二进制、应用镜像 `cyber-drill-1.0.1`、MySQL 8.0 镜像、基线快照与校验清单，以及安装/升级脚本。
+- 内容：Docker 引擎 RPM（`moby-engine` / `moby-client` 及依赖）、compose v2 二进制、应用镜像 `cyber-drill-1.0.2`、MySQL 8.0 镜像、基线快照与校验清单，以及安装/升级脚本。
 - 目标机不需要外网、不需要源码；安装器优先使用包内 RPM、镜像和基线。
 - Gitee 发行版页 <https://gitee.com/habeas/cyber-drill/releases> 提供同版本说明；离线包体积较大，附件托管在 GitHub Release。
 
 ### 安装后：访问与初始口令
 
 - 浏览器访问 `http://<服务器IP>:8090`（登录页是 `/`）。
-- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，返回 `"version":"1.0.1"`。
+- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，返回 `"version":"1.0.2"`。
 - 初始账号：`admin` / `platformadmin`；口令在安装结束时**只打印一次**，同时写入 `/opt/cyber-drill/.env`（权限 600）。
 - **首次登录必须立即修改初始口令**；改密后 `.env` 中的初始口令失效。若已遗失，可在安装器所在目录执行 `sudo bash install.sh --show-secrets`（仅在尚未改密时有效），或直接查看 `.env`。
 - 常用参数：`--port 8090`、`--install-dir /opt/cyber-drill`、`--mysql-port 3306`、`--project drill`、`--tls-cert/--tls-key`；完整列表见 [安装文档](docs/install-docker-openeuler.md)。
@@ -117,7 +117,7 @@ sudo bash install.sh --reinstall
 sudo bash install.sh --reinstall --confirm DELETE
 
 # B. 保留数据：用升级工具（自动备份 → 迁移 → 重建 app → 校验，失败回滚）
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.1 --dir /opt/cyber-drill
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.2 --dir /opt/cyber-drill
 ```
 
 升级工具不在 `install.sh` 内。用离线包安装的用户直接使用包内 `deploy/upgrade/`；只下载了在线安装器的用户，可从 Gitee 取该目录（8 个文件）：
@@ -128,7 +128,7 @@ for f in upgrade.sh manifest.json lib/00-common.sh lib/10-manifest.sh \
          lib/20-backup.sh lib/30-migrate.sh lib/40-compose.sh lib/50-rollback.sh; do
   sudo curl -fsSL -o "$f" "https://gitee.com/habeas/cyber-drill/raw/main/deploy/upgrade/$f"
 done
-sudo bash upgrade.sh --to 1.0.1 --dir /opt/cyber-drill
+sudo bash upgrade.sh --to 1.0.2 --dir /opt/cyber-drill
 ```
 
 ### 镜像源选择
@@ -139,7 +139,7 @@ sudo bash upgrade.sh --to 1.0.1 --dir /opt/cyber-drill
 | `--image-source ghcr` | 使用 `ghcr.io/chenjinxiang1980/cyber-drill:<版本>`（国外网络） |
 | `--image-source swr` | 使用 `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:<版本>`（国内推荐） |
 
-镜像 tag 取仓库根目录 `VERSION`（当前 `1.0.1`），可用 `--version` 覆盖。
+镜像 tag 取仓库根目录 `VERSION`（当前 `1.0.2`），可用 `--version` 覆盖。
 
 ### Windows
 
@@ -153,8 +153,8 @@ Windows 不提供原生一键安装脚本。推荐使用 **Docker Desktop + WSL2
 
 ```bash
 sudo bash deploy/upgrade/upgrade.sh --status
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.1 --dry-run
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.1 --dir /opt/cyber-drill
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.2 --dry-run
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.2 --dir /opt/cyber-drill
 ```
 
 版本链与升级矩阵见 [`docs/upgrade.md`](docs/upgrade.md) 与 [`deploy/upgrade/manifest.json`](deploy/upgrade/manifest.json)。
@@ -186,7 +186,7 @@ go build -trimpath -ldflags "-s -w -X drill-system/internal/version.Version=${VE
 Emergency/
 ├── server/                  # Go 后端（Gin + MySQL）
 ├── public/                  # 前端静态页面（无构建步骤，由服务端托管）
-├── migrations/              # 0000_bootstrap … 0123_brand_version_100（1.0.1 共 76 条）
+├── migrations/              # 0000_bootstrap … 0127_script_target_roles（1.0.2 共 80 条）
 ├── deploy/
 │   ├── install/             # ★ 唯一一键安装入口（install.sh + 基线快照）
 │   ├── upgrade/             # 升级脚本与版本清单

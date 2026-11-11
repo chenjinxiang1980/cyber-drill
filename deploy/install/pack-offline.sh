@@ -24,7 +24,7 @@
 set -Eeuo pipefail
 
 OUT="./offline"
-VERSION="1.0.0"
+VERSION="1.0.2"
 COMPOSE_BIN=""
 BASELINE_DIR=""
 MYSQL_SOURCE="docker.m.daocloud.io/library/mysql:8.0"
