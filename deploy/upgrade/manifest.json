@@ -202,6 +202,19 @@
       "brand_version": "v1.0.0",
       "min_free_bytes": 2147483648,
       "health": { "path": "/api/health", "expect_version": "1.0.3", "timeout_seconds": 90 }
+    },
+    {
+      "version": "1.0.4",
+      "previous": "1.0.3",
+      "channel": "stable",
+      "best_effort": false,
+      "published_at": "2026-11-11",
+      "image": { "tags": ["1.0.4"], "digest": null, "digest_unknown": true, "size_bytes": 0, "layers": 0 },
+      "migrations": { "from_exclusive": "0127_script_target_roles", "through": "0132_s01_end_deps", "count": 5, "contains_ddl": false, "backward_compatible": true },
+      "schema_migrations_total": 85,
+      "brand_version": "v1.0.0",
+      "min_free_bytes": 2147483648,
+      "health": { "path": "/api/health", "expect_version": "1.0.4", "timeout_seconds": 90 }
     }
   ]
 }

@@ -18,13 +18,14 @@ sudo bash deploy/upgrade/upgrade.sh --to 1.0.3
 可显式指定来源版本：
 
 ```bash
-sudo bash deploy/upgrade/upgrade.sh --from 1.0.1 --to 1.0.3
+sudo bash deploy/upgrade/upgrade.sh --from 1.0.3 --to 1.0.4
 ```
 
 ## 升级矩阵（摘要）
 
 | 路径 | 迁移条数 | 含 DDL | 说明 |
 |---|---|---|---|
+| 1.0.3 → 1.0.4 | 5 | 否 | 五条纯 DML（0128–0132）：下线两个临时角色、补齐必需角色覆盖、S20 并入 S01 并补结束依赖 |
 | 1.0.2 → 1.0.3 | 0 | 否 | 无数据库迁移，仅重建应用容器（数秒停机） |
 | 1.0.1 → 1.0.2 | 4 | 否 | 仅数据修正（剧本节点/目标角色），工具自动备份后迁移，失败回滚 |
 | 1.0.0 → 1.0.2 | 5 | 否 | 同上，含 1.0.1 的 0 迁移补丁 |
@@ -35,6 +36,8 @@ sudo bash deploy/upgrade/upgrade.sh --from 1.0.1 --to 1.0.3
 | 0.5.0 → 1.0.0 | 76 | 是 | best effort，建议先整库备份 |
 
 完整版本链见 `deploy/upgrade/manifest.json` 与 `docs/upgrade.md`。
+
+> 1.0.4 携带 5 条数据迁移（0128–0132，累计 85 条，末条 `0132_s01_end_deps`）：删除「运维负责人 / 算法工程师」两个临时角色、补齐各剧本对六大必需角色的覆盖、把 S20「数据加密勒索」并入 S01 后停用、补齐 S01 结束节点依赖；`settings.brand_version` 仍保持 `v1.0.0`（版本以 `/api/health` 的 `version` 为准，页面显示 **v1.0.4**）。剧本表仍保留 21 行，其中在用 20 个（S20 停用）。
 
 > 1.0.3 无数据库迁移（累计仍为 80 条，末条 `0127_script_target_roles`），升级仅替换应用镜像并重建容器；`settings.brand_version` 仍保持 `v1.0.0`（版本以 `/api/health` 的 `version` 为准，页面显示 **v1.0.3**）。
 

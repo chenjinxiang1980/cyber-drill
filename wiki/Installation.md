@@ -27,8 +27,8 @@ sudo mkdir -p /opt/cyber-drill-installer/baseline
 cd /opt/cyber-drill-installer
 sudo curl -fsSL -o install.sh \
   https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/install.sh
-sudo curl -fsSL -o baseline/drill-baseline-1.0.2.sql.gz \
-  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/drill-baseline-1.0.2.sql.gz
+sudo curl -fsSL -o baseline/drill-baseline-1.0.4.sql.gz \
+  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/drill-baseline-1.0.4.sql.gz
 sudo curl -fsSL -o baseline/SHA256SUMS \
   https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/SHA256SUMS
 sudo curl -fsSL -o baseline/manifest.env \
@@ -40,7 +40,7 @@ sudo bash install.sh --image-source swr
 - GitHub 备选：把 4 个 URL 的 `https://gitee.com/habeas/cyber-drill/raw/main/` 换成 `https://raw.githubusercontent.com/chenjinxiang1980/cyber-drill/main/`。
 - 已装 Docker/Compose 时，安装器只拉镜像、建库、恢复基线、起应用。
 
-安装器会依次完成：前置检查 → 检查/安装 Docker 与 Compose → 选择镜像源并拉取镜像 → 生成随机强口令 `.env`（权限 600）→ 启动 MySQL → 恢复 1.0.2 基线快照（结构 + 参照数据 + 80 条 `schema_migrations`）→ 启动应用并健康检查 → 打印访问地址与一次性初始口令。
+安装器会依次完成：前置检查 → 检查/安装 Docker 与 Compose → 选择镜像源并拉取镜像 → 生成随机强口令 `.env`（权限 600）→ 启动 MySQL → 恢复 1.0.4 基线快照（结构 + 参照数据 + 85 条 `schema_migrations`）→ 启动应用并健康检查 → 打印访问地址与一次性初始口令。
 
 ## 路径二：离线安装（Release 离线包，内网首选）
 
@@ -67,7 +67,7 @@ sudo bash deploy/install/install.sh --offline-dir "$PWD"
 ## 安装后：访问与初始口令
 
 - 浏览器访问 `http://<服务器IP>:8090`（登录页是 `/`）。
-- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，应返回 `"version":"1.0.3"`。
+- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，应返回 `"version":"1.0.4"`。
 - 初始账号：`admin`、`platformadmin`；口令在安装结束时**只打印一次**，同时写入 `/opt/cyber-drill/.env`（权限 600）。
 - **首次登录必须立即修改初始口令**；改密后 `.env` 中的一次性口令失效。未改密前可用 `sudo bash install.sh --show-secrets` 再次打印。
 
@@ -79,7 +79,7 @@ sudo bash deploy/install/install.sh --offline-dir "$PWD"
 | `--image-source ghcr` | `ghcr.io/chenjinxiang1980/cyber-drill:<版本>` |
 | `--image-source swr` | `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:<版本>`（国内推荐） |
 
-镜像 tag 与仓库根目录 `VERSION` 一致（当前 `1.0.3`），可用 `--version` 覆盖。
+镜像 tag 与仓库根目录 `VERSION` 一致（当前 `1.0.4`），可用 `--version` 覆盖。
 
 ## 容器名与多实例
 
@@ -112,7 +112,7 @@ sudo bash install.sh --reinstall
 sudo bash install.sh --reinstall --confirm DELETE
 
 # B. 保留数据：用升级工具（备份 → 迁移 → 重建 app → 校验，失败回滚）
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.3 --dir /opt/cyber-drill
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.4 --dir /opt/cyber-drill
 ```
 
 升级工具不在 `install.sh` 内。用离线包安装的用户直接使用包内 `deploy/upgrade/`；只下载了在线安装器的用户，可从 Gitee 取该目录（8 个文件）：
@@ -123,7 +123,7 @@ for f in upgrade.sh manifest.json lib/00-common.sh lib/10-manifest.sh \
          lib/20-backup.sh lib/30-migrate.sh lib/40-compose.sh lib/50-rollback.sh; do
   sudo curl -fsSL -o "$f" "https://gitee.com/habeas/cyber-drill/raw/main/deploy/upgrade/$f"
 done
-sudo bash upgrade.sh --to 1.0.3 --dir /opt/cyber-drill
+sudo bash upgrade.sh --to 1.0.4 --dir /opt/cyber-drill
 ```
 
 ## 安装后检查
@@ -133,7 +133,7 @@ docker compose -f /opt/cyber-drill/docker-compose.yml ps
 curl -fsS http://127.0.0.1:8090/api/health
 ```
 
-容器均为 `healthy`、健康检查返回 `"version":"1.0.3"` 后，浏览器访问 `http://<服务器IP>:8090`。
+容器均为 `healthy`、健康检查返回 `"version":"1.0.4"` 后，浏览器访问 `http://<服务器IP>:8090`。
 
 ## 开发者路径（不是部署路径）
 
