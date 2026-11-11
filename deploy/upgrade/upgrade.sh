@@ -669,20 +669,19 @@ do_verify() {
   fi
   info "健康检查通过：version=$v"
 
-  local bv from_total added=0
+  local bv exp_bv
   bv="$(brand_version)"
-  from_total="$(mf_get "$FROM_VER" schema_migrations_total 2>/dev/null || true)"
-  [ -n "$from_total" ] && added=$((CHAIN_TOTAL - from_total))
-  if [ "$bv" != "v$TO_VER" ]; then
-    # 补丁版本可能不带任何数据库迁移（清单 migrations.count=0）。
-    # 这种情况下 brand_version 本来就不会被迁移推进，不能因此判升级失败。
-    if [ "$added" -le 0 ]; then
-      info "brand_version=$bv（本次无数据库迁移，跳过品牌版本校验）"
-    else
-      rollback_apply "$E_VERSION" "settings.brand_version=$bv，期望 v$TO_VER"
-    fi
-  else
+  # 清单可用 brand_version 显式声明本次升级后 settings.brand_version 的期望值。
+  # 补丁版本不一定推进 brand_version（如 1.0.1 / 1.0.2 保持 v1.0.0，版本以 /api/health 为准），
+  # 此时必须在清单里写清期望值；未声明则沿用旧规则，按 v<目标版本> 校验。
+  exp_bv="$(mf_get "$TO_VER" brand_version 2>/dev/null || true)"
+  case "$exp_bv" in
+    ""|"null") exp_bv="v$TO_VER" ;;
+  esac
+  if [ "$bv" = "$exp_bv" ]; then
     info "brand_version=$bv"
+  else
+    rollback_apply "$E_VERSION" "settings.brand_version=$bv，期望 $exp_bv"
   fi
 
   if ! verify_schema_target "$CHAIN_TOTAL" "$CHAIN_THROUGH"; then
