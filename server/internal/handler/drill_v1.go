@@ -161,7 +161,7 @@ func drillV1NodeLock(node drillV1Node, byId map[string]*drillV1Node, done map[st
 
 // canHandleRole 角色 roleID 是否能处理 target 角色名的节点
 // 复刻 Node drill_plan.js canHandle：指挥部/平台管理员全量，
-// 信息科负责人仅统筹 itlead/duty/netsec/sysadmin（含 0127 新增的 opslead/algoengineer），其余角色仅本角色。
+// 信息科负责人仅统筹 itlead/duty/netsec/sysadmin，其余角色仅本角色。
 func canHandleRole(database *db.DB, roleID, target string) bool {
 	if roleID == "commander" || roleID == "platformadmin" {
 		return true
@@ -169,7 +169,7 @@ func canHandleRole(database *db.DB, roleID, target string) bool {
 	mapped := targetToRoleID(database, target)
 	if roleID == "itlead" {
 		switch mapped {
-		case "itlead", "duty", "netsec", "sysadmin", "opslead", "algoengineer":
+		case "itlead", "duty", "netsec", "sysadmin":
 			return true
 		}
 		return false

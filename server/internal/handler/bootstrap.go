@@ -556,15 +556,11 @@ func queryScriptNodes(database *db.DB) []gin.H {
 // --- tasks ---
 
 // MANAGED_ROLES 信息科负责人可统筹的角色
-// opslead / algoengineer 为 0127 新增的正式角色（原由 sysadmin / netsec 承接），
-// 纳入统筹范围以保持信息科负责人原有的任务可见性与处置权限不变。
 var managedRoles = map[string]bool{
-	"itlead":       true,
-	"duty":         true,
-	"netsec":       true,
-	"sysadmin":     true,
-	"opslead":      true,
-	"algoengineer": true,
+	"itlead":   true,
+	"duty":     true,
+	"netsec":   true,
+	"sysadmin": true,
 }
 
 // nodeAvailability 单节点前置可用性（Node: {available, blockedBy:[{id,title}]}）
@@ -1495,10 +1491,12 @@ func ledgerEventTypes(database *db.DB) []string {
 }
 
 // ledgerEventOf 将场景名归一到事件类型，采用三级匹配：
-//   L1 精确相等；
-//   L2 最长整词包含（命中多个仅取最长，避免「数据…」类被较短的「数据泄露」抢先）；
-//   L3 前两字兜底（保留旧 8 类的既有归一结果，如 S02「内网」→ 内网渗透、
-//      S07「边界」→ 边界突破）。
+//
+//	L1 精确相等；
+//	L2 最长整词包含（命中多个仅取最长，避免「数据…」类被较短的「数据泄露」抢先）；
+//	L3 前两字兜底（保留旧 8 类的既有归一结果，如 S02「内网」→ 内网渗透、
+//	   S07「边界」→ 边界突破）。
+//
 // 三级都未命中时保留场景名，避免台账事件列空白。
 func ledgerEventOf(scenarioName string, eventTypes []string) string {
 	name := strings.TrimSpace(scenarioName)

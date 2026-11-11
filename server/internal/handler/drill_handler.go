@@ -433,15 +433,17 @@ func targetToRoleIDTx(tx *sql.Tx, target string) string {
 }
 
 // targetRoleAliases 剧本里按科室/岗位书写的责任对象 → 角色的向后兼容别名。
-// 这些科室/岗位已在迁移 0127 中落为正式角色行（检验科主任/医保办/运维负责人/算法工程师/门诊部），
+// 这些科室/岗位已在迁移 0127 中落为正式角色行（检验科主任/医保办/门诊部），
 // 正常解析走「精确 name/short 匹配」优先；别名仅用于旧库尚未执行 0127、
 // 或历史导入数据缺角色行时兜底，避免必做节点没有对口角色可接单。
+// 0128 起「运维负责人 / 算法工程师」两个角色行已删除，旧 target 仅作为
+// 历史修订快照（script_revisions）的兼容映射指向新角色，不再对应独立角色。
 var targetRoleAliases = map[string]string{
-	"检验科主任":  "medlead",
-	"医保办":    "medlead",
-	"门诊部":    "medlead",
-	"运维负责人": "sysadmin",
-	"算法工程师":  "netsec",
+	"检验科主任": "medlead",
+	"医保办":   "medlead",
+	"门诊部":   "medlead",
+	"运维负责人": "itlead",
+	"算法工程师": "sysadmin",
 }
 
 func pad2(n int) string {

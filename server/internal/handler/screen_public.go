@@ -133,8 +133,10 @@ func ScreenNotifsHandler(database *db.DB) gin.HandlerFunc {
 func ScreenSummaryHandler(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var scens, nodes, projs int
-		_ = database.QueryRow(`SELECT COUNT(*) FROM scenarios`).Scan(&scens)
-		_ = database.QueryRow(`SELECT COUNT(*) FROM script_nodes WHERE deleted_at IS NULL AND COALESCE(flow_type,'correct')!='distractor'`).Scan(&nodes)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM scenarios WHERE COALESCE(status,'启用')='启用'`).Scan(&scens)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM script_nodes n JOIN scenarios s ON s.id=n.scenario_id
+			WHERE n.deleted_at IS NULL AND COALESCE(n.flow_type,'correct')!='distractor'
+			  AND COALESCE(s.status,'启用')='启用'`).Scan(&nodes)
 		_ = database.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&projs)
 		c.JSON(http.StatusOK, gin.H{"scenarios": scens, "scriptNodes": nodes, "projects": projs})
 	}
