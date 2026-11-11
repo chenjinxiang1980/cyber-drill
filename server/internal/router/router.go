@@ -133,6 +133,8 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 				}
 				// 目录：走 SPA fallback 到 index.html
 				if strings.HasSuffix(orig, ".html") || orig == "/" {
+					// 与静态文件分支一致：首页必须回源校验，避免升级后浏览器继续用旧页面
+					c.Header("Cache-Control", "no-cache")
 					c.File(filepath.Join(publicDir, "index.html"))
 					return
 				}
@@ -142,6 +144,7 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 
 			// 7. 文件不存在
 			if strings.HasSuffix(orig, ".html") || orig == "/" {
+				c.Header("Cache-Control", "no-cache")
 				c.File(filepath.Join(publicDir, "index.html"))
 				return
 			}
