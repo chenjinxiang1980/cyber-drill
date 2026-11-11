@@ -196,7 +196,7 @@
       "channel": "stable",
       "best_effort": false,
       "published_at": "2026-11-11",
-      "image": { "tags": ["1.0.3"], "digest": null, "digest_unknown": true, "size_bytes": 0, "layers": 0 },
+      "image": { "tags": ["1.0.3"], "digest": null, "digest_unknown": true, "size_bytes": 152438722, "layers": 10 },
       "migrations": { "from_exclusive": "0127_script_target_roles", "through": "0127_script_target_roles", "count": 0, "contains_ddl": false, "backward_compatible": true },
       "schema_migrations_total": 80,
       "brand_version": "v1.0.0",
