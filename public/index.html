@@ -100,7 +100,7 @@
       <div class="l-foot">
         ⚠ 本系统仅用于应急演练与桌面推演，所有告警、处置动作均为<b>模拟记录</b>，不下发真实网络配置命令，与医院生产网络物理隔离。<br>
         演练内容不具备真实法律效力；演练数据请使用虚拟测试数据。<br>
-        <span class="l-copy">Cyber-Drill-System 1.0.4 · © 2026 陈金祥 · 软件著作权登记：未登记（截至 1.0.4）</span>
+        <span class="l-copy">Cyber-Drill-System 1.0.5 · © 2026 陈金祥 · 软件著作权登记：未登记（截至 1.0.5）</span>
       </div>
     </div>
     <div class="login-right">
@@ -149,8 +149,8 @@
 (function(){
   DRILL.loadBrand().then(function(b){ if(b) DRILL.applyBrand(b); });
   document.getElementById('screenEntryIcon').innerHTML = App.icon('screen');
-  /* 剧本规模写死为当前在用数量（20 = 网络安全 8 + 数据安全 12）：
-     S20「数据加密勒索」已退役（status=停用），内容并入 S01，不再计入在用剧本。
+  /* 剧本规模写死为当前在用数量（20 = 网络安全 8 + 数据安全 12，编号 S01–S20）：
+     原 S20「数据加密勒索」已并入 S01 并删除，原 S21「数据权限」改为 S20，在用剧本仍为 20 个。
      登录页处于未登录状态，/api/bootstrap 与 /api/content/scenarios 均需鉴权，
      此处拿不到真实统计；若后续提供免登录统计接口，改为此处动态取值即可。 */
   var feats = [['net','剧本库按两类归档'],['flow','剧本可视化编排 · 版本管理'],['dashboard','态势看板 · 多角色协同'],['replay','回放 · 考评 · 报告导出']];
