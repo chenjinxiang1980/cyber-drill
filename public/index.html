@@ -133,9 +133,9 @@
       <div class="l-intro">
         <div class="l-title">内置演练剧本</div>
         <div class="l-stats">
-          <div class="st"><b>21</b><span>演练剧本</span></div>
+          <div class="st"><b>20</b><span>演练剧本</span></div>
           <div class="st"><b>8</b><span>网络安全演练</span></div>
-          <div class="st"><b>13</b><span>数据安全演练</span></div>
+          <div class="st"><b>12</b><span>数据安全演练</span></div>
         </div>
         <div class="l-features" id="featList"></div>
       </div>
@@ -149,7 +149,8 @@
 (function(){
   DRILL.loadBrand().then(function(b){ if(b) DRILL.applyBrand(b); });
   document.getElementById('screenEntryIcon').innerHTML = App.icon('screen');
-  /* 剧本规模写死为当前实际数量（21 = 网络安全 8 + 数据安全 13）：
+  /* 剧本规模写死为当前在用数量（20 = 网络安全 8 + 数据安全 12）：
+     S20「数据加密勒索」已退役（status=停用），内容并入 S01，不再计入在用剧本。
      登录页处于未登录状态，/api/bootstrap 与 /api/content/scenarios 均需鉴权，
      此处拿不到真实统计；若后续提供免登录统计接口，改为此处动态取值即可。 */
   var feats = [['net','剧本库按两类归档'],['flow','剧本可视化编排 · 版本管理'],['dashboard','态势看板 · 多角色协同'],['replay','回放 · 考评 · 报告导出']];

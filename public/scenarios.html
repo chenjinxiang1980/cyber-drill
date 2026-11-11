@@ -112,7 +112,7 @@ document.addEventListener('app:ready', function(e){
   var f = { q:'', level:'', cat:'' };
 
   page.innerHTML =
-    '<div class="page-head"><div><h1>场景剧本库与编排</h1><div class="sub">内置 '+BUILTIN.length+' 个医院典型演练场景（网络安全 / 数据安全）· 支持按演练大类筛选 · 点击「编辑剧本」打开并行编排画布</div></div>'
+    '<div class="page-head"><div><h1>场景剧本库与编排</h1><div class="sub">内置 '+MOCK.SCENARIOS.filter(function(s){ return BUILTIN.indexOf(s.id)>=0 && s.status==='启用'; }).length+' 个在用演练场景（网络安全 / 数据安全）· 已退役剧本保留卡片与历史记录，可再次启用 · 支持按演练大类筛选 · 点击「编辑剧本」打开并行编排画布</div></div>'
     + '<div class="acts">'
     + '<button class="btn" id="btnImport">'+App.icon('upload')+'导入场景</button>'
     + '<button class="btn primary" id="btnNew">'+App.icon('plus')+'新建自定义场景</button></div></div>'
