@@ -1,9 +1,9 @@
 # drill-server Linux/amd64 构建签名
-# 构建时间: 2026-11-11 08:41:00 (+08:00)
-# 构建方式: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o deploy-linux/drill-server .
+# 构建时间: 2026-11-11 15:09:00 (+08:00)
+# 构建方式: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o deploy-linux/drill-server .
 # 部署形态: 静态链接，容器基础镜像 Alpine（musl），无动态库依赖
-# 校验: 本文件末行哈希 = 二进制实测（Get-FileHash 大写取小写）一致（17,540,726 字节）
-# 上一线上版本: 1.0.1（sha256 65004872…，2026-11-10 部署）
-# 字节数: 17540726
-# 部署记录: 1.0.2 镜像重建（2026-11-11，152386996 B / 10 层），digest sha256:0d97564d…；含 0124–0127 剧本节点与正式角色整改、验证码联调开关
-0a3f309ce082c424204516d01fa9c9a5dfd5c64eec28b8418c4ad8b0f66e4dbc  drill-server
+# 校验: 本文件末行哈希 = 二进制实测（Get-FileHash 大写取小写）一致（12,218,528 字节）
+# 上一线上版本: 1.0.2（sha256 0a3f309c…，2026-11-11 部署）
+# 字节数: 12218528
+# 部署记录: 1.0.3 本地镜像（未推 registry，无 digest），含新建演练项目按剧本自动勾选参演角色（全部节点目标角色去重；是否已有账号仅统计启用状态）
+d9418f8a855d37e122c7e05a162ce69e95b832e3ff0cb411b7e96a13370e556e  drill-server

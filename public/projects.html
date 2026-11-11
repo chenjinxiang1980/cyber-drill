@@ -16,6 +16,10 @@
 .notice-preview .np-title{font-weight:600;margin-bottom:4px;color:#2c3e50}
 .notice-preview .np-body{color:var(--text2)}
 .notice-sent{background:rgba(46,204,113,.08);border:1px solid rgba(46,204,113,.3);border-radius:6px;padding:10px 12px;font-size:13px;color:#16a085;display:flex;align-items:center;gap:8px}
+.np-role-warn{background:rgba(248,81,73,.06);border:1px solid rgba(248,81,73,.4);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.7}
+.np-role-warn .np-title{font-weight:600;margin-bottom:4px;color:var(--err);display:flex;align-items:center;gap:6px}
+.np-role-warn .np-body{color:var(--text2)}
+.np-role-warn a{color:var(--info);text-decoration:underline}
 </style>
 </head>
 <body data-page="projects">
@@ -262,38 +266,94 @@ document.addEventListener('app:ready', function(e){
       +   '<label class="check"><input type="radio" name="npMode" value="实战版">实战版（自主选择处置方案）</label>'
       + '</div><div class="tiny dim" style="margin-top:4px">基础版仅时限评分，实战版按偏离/超时/未完成扣分。</div></div>'
       + '<div class="form-row"><label class="f-label">计划日期<span class="req">*</span></label><input class="input" id="npDate" type="date" value="2026-11-20"></div>'
-      + '<div class="form-row span2"><label class="f-label">参演角色</label><div class="flex gap3 wrap" id="npRoles">'
-      +   MOCK.ROLES.map(function(r){ return '<label class="check"><input type="checkbox" value="'+r.id+'"'+(r.id==='commander'?' checked':'')+'>'+r.name+'</label>'; }).join('')
-      + '</div></div>'
+      + '<div class="form-row span2"><label class="f-label">参演角色 <span class="tiny dim" id="npRoleHint">根据所选剧本自动匹配</span></label><div id="npRoleWarn" style="margin-bottom:10px"></div><div class="flex gap3 wrap" id="npRoles"><span class="tiny dim">正在加载剧本角色…</span></div></div>'
       + '</div>',
       foot:'<button class="btn" id="npNo">取消</button><button class="btn primary" id="npYes">创建项目</button>',
-      onOpen:function(ov){ ov.querySelector('#npNo').onclick=ov.close; ov.querySelector('#npYes').onclick=function(){
-        var name = ov.querySelector('#npName').value.trim();
-        var date = ov.querySelector('#npDate').value;
-        var members = Array.prototype.slice.call(ov.querySelectorAll('#npRoles input:checked')).map(function(c){ return { role:c.value }; });
-        if(!name){ App.toast('请填写项目名称','err'); return; }
-        if(!date){ App.toast('请选择计划日期','err'); return; }
-        if(!members.length){ App.toast('请至少选择一个参演角色','err'); return; }
-        var sc = MOCK.SCENARIOS.filter(function(s){ return s.id===ov.querySelector('#npSc').value; })[0];
-        var btn = ov.querySelector('#npYes');
-        btn.disabled = true; btn.textContent = '创建中…';
-        var modeEl = ov.querySelector('input[name="npMode"]:checked');
-        var mode = modeEl ? modeEl.value : '基础版';
-        API.createProject({
-          name:name, type:ov.querySelector('#npType').value, date:date, mode:mode,
-          scenarioId:sc?sc.id:'', level:sc?sc.level:'一般',
-          units:undefined, members:members,
-          target:'验证'+ov.querySelector('#npType').value+'流程与协同时效'
-        }).then(function(res){
-          ov.close();
-          MOCK.PROJECTS.unshift(res.project);
-          render();
-          showPostCreateActions(res.project);
-        }).catch(function(err){
-          btn.disabled = false; btn.textContent = '创建项目';
-          App.toast((err && err.message) ? err.message : '创建失败','err');
-        });
-      }; } });
+      onOpen:function(ov){
+        ov.querySelector('#npNo').onclick=ov.close;
+        var scSel = ov.querySelector('#npSc');
+        var roleBox = ov.querySelector('#npRoles');
+        var warnBox = ov.querySelector('#npRoleWarn');
+        var roleHint = ov.querySelector('#npRoleHint');
+        var canManageUsers = role.id === 'platformadmin';
+        var loadSeq = 0, roleLoading = false, missingRoles = [];
+
+        function renderRoleFallback(msg){
+          roleLoading = false; missingRoles = [];
+          roleHint.textContent = '自动匹配失败，请手动选择';
+          roleBox.innerHTML = (MOCK.ROLES || []).map(function(r){
+            return '<label class="check"><input type="checkbox" value="'+App.esc(r.id)+'">'+App.esc(r.name)+'</label>';
+          }).join('');
+          warnBox.innerHTML = '<div class="np-role-warn"><div class="np-title">'+App.icon('alert')+' 剧本角色加载失败</div><div class="np-body">'+App.esc(msg||'请稍后重试')+'</div></div>';
+        }
+
+        function loadScenarioRoles(){
+          var sid = scSel.value;
+          var seq = ++loadSeq;
+          roleLoading = true; missingRoles = [];
+          roleHint.textContent = '正在匹配…';
+          roleBox.innerHTML = '<span class="tiny dim">正在加载剧本角色…</span>';
+          warnBox.innerHTML = '';
+          if(!sid){ renderRoleFallback('未选择剧本'); return; }
+          API.getScenarioRoles(sid).then(function(res){
+            if(seq !== loadSeq) return;
+            roleLoading = false;
+            var roles = (res && res.roles) || [];
+            var involved = (res && res.involvedRoleIds) || [];
+            missingRoles = (res && res.missingRoles) || [];
+            if(!roles.length){ roleHint.textContent = ''; roleBox.innerHTML = '<span class="tiny dim">系统中暂无角色数据</span>'; return; }
+            roleBox.innerHTML = roles.map(function(r){
+              var on = involved.indexOf(r.id) >= 0;
+              var noAccount = on && !(r.accountCount > 0);
+              return '<label class="check"><input type="checkbox" value="'+App.esc(r.id)+'"'+(on?' checked':'')+'>'+App.esc(r.name)
+                + (noAccount?' <span class="tag red">暂无账号</span>':'')
+                + (r.external?' <span class="tag gray">外部单位</span>':'')
+                + '</label>';
+            }).join('');
+            roleHint.textContent = '已按剧本 '+sid+' 自动勾选 '+involved.length+' 个角色' + (missingRoles.length ? '，其中 '+missingRoles.length+' 个角色暂无账号' : '');
+            if(missingRoles.length){
+              var names = missingRoles.map(function(r){ return '「'+App.esc(r.name)+'」'; }).join('、');
+              var addLink = canManageUsers ? '<a href="admin.html">前往「用户账号」添加</a>' : '请联系平台管理员在「系统设置 → 用户账号」添加';
+              warnBox.innerHTML = '<div class="np-role-warn"><div class="np-title">'+App.icon('alert')+' 该角色暂无账号，请先添加账号</div><div class="np-body">缺少账号的角色：'+names+'。'+addLink+'后再开始演练；如仍要创建，相关角色将无法登录参与。</div></div>';
+            }
+          }).catch(function(err){
+            if(seq !== loadSeq) return;
+            renderRoleFallback((err && err.message) ? err.message : '');
+          });
+        }
+
+        scSel.onchange = loadScenarioRoles;
+        loadScenarioRoles();
+
+        ov.querySelector('#npYes').onclick=function(){
+          if(roleLoading){ App.toast('正在加载剧本角色，请稍候','warn'); return; }
+          var name = ov.querySelector('#npName').value.trim();
+          var date = ov.querySelector('#npDate').value;
+          var members = Array.prototype.slice.call(ov.querySelectorAll('#npRoles input:checked')).map(function(c){ return { role:c.value }; });
+          if(!name){ App.toast('请填写项目名称','err'); return; }
+          if(!date){ App.toast('请选择计划日期','err'); return; }
+          if(!members.length){ App.toast('请至少选择一个参演角色','err'); return; }
+          var sc = MOCK.SCENARIOS.filter(function(s){ return s.id===ov.querySelector('#npSc').value; })[0];
+          var btn = ov.querySelector('#npYes');
+          btn.disabled = true; btn.textContent = '创建中…';
+          var modeEl = ov.querySelector('input[name="npMode"]:checked');
+          var mode = modeEl ? modeEl.value : '基础版';
+          API.createProject({
+            name:name, type:ov.querySelector('#npType').value, date:date, mode:mode,
+            scenarioId:sc?sc.id:'', level:sc?sc.level:'一般',
+            units:undefined, members:members,
+            target:'验证'+ov.querySelector('#npType').value+'流程与协同时效'
+          }).then(function(res){
+            ov.close();
+            MOCK.PROJECTS.unshift(res.project);
+            render();
+            showPostCreateActions(res.project);
+          }).catch(function(err){
+            btn.disabled = false; btn.textContent = '创建项目';
+            App.toast((err && err.message) ? err.message : '创建失败','err');
+          });
+        };
+      } });
   };
 
   function showPostCreateActions(p){

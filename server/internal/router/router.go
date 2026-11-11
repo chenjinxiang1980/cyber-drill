@@ -272,6 +272,7 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			cnt.GET("/evaluation", handler.GetEvaluation(database))                                                // 评分项模板 + 当前项目 scores 明细
 			cnt.POST("/evaluation/scores", authSvc.RequirePlatformBoard(), handler.PostEvaluationScores(database)) // 手动/自动考评 K1-K9 分项写入
 			cnt.GET("/scenarios", handler.GetScenarios(database))
+			cnt.GET("/scenarios/:id/roles", authSvc.RequireNotExternal(), handler.GetScenarioRoles(database))
 			cnt.GET("/script-nodes", authSvc.RequireNotExternal(), handler.GetScriptNodes(database))
 			cnt.GET("/projects", handler.GetProjects(database))
 			cnt.GET("/messages", handler.GetMessages(database))

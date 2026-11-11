@@ -43,7 +43,7 @@ deploy/docker-dist/Dockerfile.runtime
 | `drill-system/internal/version.GitCommit` | 短提交号 |
 
 ```bash
-VERSION=1.0.2
+VERSION=1.0.3
 BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 GIT_COMMIT=$(git rev-parse --short HEAD)
 LDFLAGS="-X drill-system/internal/version.Version=${VERSION} \
@@ -109,7 +109,7 @@ cp dist/drill-server dist/drill-migrate dist/drill-seed dist_local/
 
 DOCKER_BUILDKIT=1 docker build \
   -f deploy/docker-dist/Dockerfile.runtime \
-  -t cyber-drill:1.0.2 .
+  -t cyber-drill:1.0.3 .
 ```
 
 `dist_local/`、`public/`、`migrations/`、`deploy/docker-dist/docker-entrypoint.sh` 都必须在构建上下文根目录下。
@@ -142,10 +142,10 @@ mysqldump --single-transaction --quick --routines --triggers --events \
 
 ```bash
 # 只读检查：当前版本、链是否完整、要跑哪几条、迁移后会到多少条
-./dist/drill-upgrade verify --to 1.0.2 --env-file .env
+./dist/drill-upgrade verify --to 1.0.3 --env-file .env
 
 # 备份 + 迁移 + 校验，一条龙
-./dist/drill-upgrade db --to 1.0.2 --env-file .env \
+./dist/drill-upgrade db --to 1.0.3 --env-file .env \
   --backup-dir ./backups --root . --migrate-bin ./dist/drill-migrate --yes
 ```
 
@@ -175,7 +175,7 @@ docker run --rm \
   --network <compose项目名>_drill-net \
   --env-file .env -e DB_HOST=mysql \
   --entrypoint /opt/drill/bin/drill-migrate \
-  cyber-drill:1.0.2 -root=/opt/drill up
+  cyber-drill:1.0.3 -root=/opt/drill up
 ```
 
 `--entrypoint` 绕开 `docker-entrypoint.sh`，不会先等 MySQL 再 seed；迁移只写库，不挂数据卷。
@@ -185,7 +185,7 @@ docker run --rm \
 ## 4. 升级后自检
 
 ```bash
-curl -fsS http://127.0.0.1:8090/api/health          # {"ok":true,...,"version":"1.0.2"}
+curl -fsS http://127.0.0.1:8090/api/health          # {"ok":true,...,"version":"1.0.3"}
 docker exec <mysql容器> mysql -uroot -p -N -e \
   "select count(*), max(version) from schema_migrations" drill_system   # 80 / 0127_script_target_roles
 ```

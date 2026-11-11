@@ -67,7 +67,7 @@ sudo bash deploy/install/install.sh --offline-dir "$PWD"
 ## 安装后：访问与初始口令
 
 - 浏览器访问 `http://<服务器IP>:8090`（登录页是 `/`）。
-- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，应返回 `"version":"1.0.2"`。
+- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，应返回 `"version":"1.0.3"`。
 - 初始账号：`admin`、`platformadmin`；口令在安装结束时**只打印一次**，同时写入 `/opt/cyber-drill/.env`（权限 600）。
 - **首次登录必须立即修改初始口令**；改密后 `.env` 中的一次性口令失效。未改密前可用 `sudo bash install.sh --show-secrets` 再次打印。
 
@@ -79,7 +79,7 @@ sudo bash deploy/install/install.sh --offline-dir "$PWD"
 | `--image-source ghcr` | `ghcr.io/chenjinxiang1980/cyber-drill:<版本>` |
 | `--image-source swr` | `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:<版本>`（国内推荐） |
 
-镜像 tag 与仓库根目录 `VERSION` 一致（当前 `1.0.2`），可用 `--version` 覆盖。
+镜像 tag 与仓库根目录 `VERSION` 一致（当前 `1.0.3`），可用 `--version` 覆盖。
 
 ## 容器名与多实例
 
@@ -112,7 +112,7 @@ sudo bash install.sh --reinstall
 sudo bash install.sh --reinstall --confirm DELETE
 
 # B. 保留数据：用升级工具（备份 → 迁移 → 重建 app → 校验，失败回滚）
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.2 --dir /opt/cyber-drill
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.3 --dir /opt/cyber-drill
 ```
 
 升级工具不在 `install.sh` 内。用离线包安装的用户直接使用包内 `deploy/upgrade/`；只下载了在线安装器的用户，可从 Gitee 取该目录（8 个文件）：
@@ -123,7 +123,7 @@ for f in upgrade.sh manifest.json lib/00-common.sh lib/10-manifest.sh \
          lib/20-backup.sh lib/30-migrate.sh lib/40-compose.sh lib/50-rollback.sh; do
   sudo curl -fsSL -o "$f" "https://gitee.com/habeas/cyber-drill/raw/main/deploy/upgrade/$f"
 done
-sudo bash upgrade.sh --to 1.0.2 --dir /opt/cyber-drill
+sudo bash upgrade.sh --to 1.0.3 --dir /opt/cyber-drill
 ```
 
 ## 安装后检查
@@ -133,7 +133,7 @@ docker compose -f /opt/cyber-drill/docker-compose.yml ps
 curl -fsS http://127.0.0.1:8090/api/health
 ```
 
-容器均为 `healthy`、健康检查返回 `"version":"1.0.2"` 后，浏览器访问 `http://<服务器IP>:8090`。
+容器均为 `healthy`、健康检查返回 `"version":"1.0.3"` 后，浏览器访问 `http://<服务器IP>:8090`。
 
 ## 开发者路径（不是部署路径）
 

@@ -260,6 +260,7 @@ window.API = (function () {
   /* ---------- 表单 / 场景 / 剧本 ---------- */
   function getForms() { return Promise.resolve((window.MOCK && MOCK.FORM_TEMPLATES) || []); }
   function getScenarios() { return DRILL.get('/content/scenarios'); }
+  function getScenarioRoles(id) { return DRILL.get('/content/scenarios/' + encodeURIComponent(id) + '/roles'); }
   function getScriptNodes() { return DRILL.get('/content/script-nodes'); }
   function saveScenario(id, patch) {
     return DRILL.patch('/content/scenarios/' + encodeURIComponent(id), patch).then(function (r) {
@@ -584,7 +585,7 @@ window.API = (function () {
     getPredecessor: getPredecessor,
     getMessages: getMessages, getNotifs: getNotifs, readNotifs: readNotifs, pushMessage: pushMessage,
     getChatChannels: getChatChannels, getChat: getChat, sendChat: sendChat, uploadChatAttachment: uploadChatAttachment, getDrillProgress: getDrillProgress, startNode: startNode, getForms: getForms,
-    getScenarios: getScenarios, getScriptNodes: getScriptNodes,
+    getScenarios: getScenarios, getScenarioRoles: getScenarioRoles, getScriptNodes: getScriptNodes,
     saveScenario: saveScenario, addScenario: addScenario, saveScriptNodes: saveScriptNodes,
     getEvidence: getEvidence, addEvidence: addEvidence, deleteEvidence: deleteEvidence, uploadEvidence: uploadEvidence, prefillEvidence: prefillEvidence, downloadEvidence: downloadEvidence, getEvidenceRequirements: getEvidenceRequirements, importMockEvidence: importMockEvidence,
     getSnapshots: getSnapshots, addSnapshot: addSnapshot,
