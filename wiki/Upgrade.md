@@ -6,13 +6,13 @@
 
 ```bash
 sudo bash deploy/upgrade/upgrade.sh --status
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.3 --dry-run
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.4 --dry-run
 ```
 
 ## 执行升级
 
 ```bash
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.3
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.4
 ```
 
 可显式指定来源版本：
