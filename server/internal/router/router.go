@@ -120,6 +120,13 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			// 6. 只允许文件，拒绝目录
 			if fi, err := os.Stat(absDisk); err == nil {
 				if !fi.IsDir() {
+					// HTML/JS/CSS 强制回源校验：缺省 Cache-Control 时浏览器会按 Last-Modified 做启发式缓存，
+					// 升级后可能继续用旧页面/旧脚本，使新功能看起来「没生效」。no-cache 允许缓存但必须校验，
+					// 内容未变仍返回 304。
+					switch strings.ToLower(filepath.Ext(absDisk)) {
+					case ".html", ".js", ".css":
+						c.Header("Cache-Control", "no-cache")
+					}
 					// HTML 或静态资源都允许（通过安全校验）
 					c.File(absDisk)
 					return
