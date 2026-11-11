@@ -161,6 +161,11 @@ state_write() {
     "app_stopped": $APP_STOPPED,
     "compose_changed": $COMPOSE_CHANGED
   },
+  "precheck": {
+    "allow_ahead": ${ALLOW_AHEAD:-0},
+    "ahead_accepted": ${AHEAD_ACCEPTED:-0},
+    "ahead_migrations": "$(json_escape "${AHEAD_LIST:-}")"
+  },
   "started_at": "$(json_escape "${RUN_STARTED_AT:-}")",
   "updated_at": "$(ts)"
 }

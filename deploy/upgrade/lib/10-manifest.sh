@@ -162,6 +162,56 @@ for e in chain:
 PY
 }
 
+# 清单中累计迁移条数最多的版本的 through（用于识别「库比清单还新」）
+mf_max_through() {
+  python3 - "$MANIFEST" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+best=None
+for r in d["releases"]:
+    if best is None or int(r.get("schema_migrations_total") or 0) > int(best.get("schema_migrations_total") or 0):
+        best=r
+print((best or {}).get("migrations",{}).get("through","") if best else "")
+PY
+}
+
+# mf_classify_migrations <from> <to> <迁移名>...
+# 输出：每行 "<迁移名>|<归属版本>|<state>"
+#   state=in_target     落在 from→to 链上某一版本的 (from_exclusive, through] 区间内
+#   state=out_of_target 不在目标版本链的任何迁移区间内（清单没覆盖）
+mf_classify_migrations() {
+  python3 - "$MANIFEST" "$1" "$2" "${@:3}" <<'PY'
+import json,sys
+path,frm,to=sys.argv[1],sys.argv[2],sys.argv[3]
+names=sys.argv[4:]
+d=json.load(open(path))
+rel={r["version"]:r for r in d["releases"]}
+chain=[]
+cur=to
+for _ in range(50):
+    if not cur or cur==frm:
+        break
+    e=rel.get(cur)
+    if not e:
+        break
+    chain.append(e)
+    cur=e.get("previous")
+chain.reverse()
+def classify(n):
+    for e in chain:
+        m=e.get("migrations",{}) or {}
+        fe=m.get("from_exclusive","") or ""
+        th=m.get("through","") or ""
+        # 迁移名以补零编号开头，字典序即执行序
+        if fe and th and fe < n <= th:
+            return e["version"]
+    return ""
+for n in names:
+    v=classify(n)
+    print("%s|%s|%s" % (n, v, "in_target" if v else "out_of_target"))
+PY
+}
+
 chain_requires_downtime() { # 链上任一版本含 DDL 或声明不兼容 → 需要停服迁移
   local line
   while IFS='|' read -r _v _total _thru _from _cnt ddl compat _ch _be; do

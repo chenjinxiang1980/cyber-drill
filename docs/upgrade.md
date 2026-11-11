@@ -6,7 +6,7 @@
 
 > 适用范围：用 `docker compose` 部署 Drill 的用户。
 > 源码自行编译、只想升级数据库的用户看 [从源码构建与升级数据库](build-from-source.md)。
-> 全新服务器从零安装（Docker / openEuler / 离线包）见 [一键安装（Docker / openEuler）](install-docker-openeuler.md)。
+> 全新服务器从零安装（Docker / openEuler / 离线镜像 tar）见 [一键安装（Docker / openEuler）](install-docker-openeuler.md)。
 > 工具的内部设计（阶段、清单格式、失败分支）见 [一键升级工具设计](upgrade-tool-design.md)。
 
 一条命令完成 **备份 → 数据库迁移 → 拉取镜像 → 重建 app → 校验**；失败自动回滚：
@@ -112,6 +112,7 @@ sudo ./deploy/upgrade/upgrade.sh --recover-last
 | `--timeout <sec>` | 180 | 等待新版本 healthy 的上限 |
 | `--log-dir <path>` | `<dir>/logs` | 日志目录 |
 | `--allow-internal` | 关 | 允许目标为内部迭代版（`channel=internal`，如 0.8.7） |
+| `--allow-ahead` | 关 | 库已超前于 `--from` 版本时，若超出的迁移**全部**落在目标版本链的迁移区间内则放行（日志与 `STATE.json` 留痕）；其它库状态异常仍拦截 |
 | `--force-chain` | 关 | 链不完整时强行继续，**必须与 `--yes` 同用**；日志留痕 |
 | `--status` | — | 只打印当前状态 |
 | `--recover-last` | — | 继续失败的回滚（见第 8 节） |
@@ -144,7 +145,9 @@ sudo ./deploy/upgrade/upgrade.sh --recover-last
 
 - 「版本链不完整，已停止」→ 说明升级工具太旧、清单里没有中间版本。**升级 `deploy/upgrade/` 目录到最新**（脚本 + `manifest.json` 要一起换），不要直接 `--force-chain`。
 - 「数据库落后于当前版本」→ 上次启动迁移没跑完。先让当前版本正常启动一次（entrypoint 会自动补迁移），确认 `schema_migrations` 行数后再升级。
-- 「数据库超前于当前版本」→ 你在试图降级。**不支持降级**，要退只能恢复备份（第 7 节）。
+- 「数据库超前于当前版本」→ 分两种：
+  - 工具会先逐条列出超出的迁移名及归属版本区间。**若这些迁移全部属于目标版本链**（常见于运维提前用目标镜像跑过迁移、或上次升级中途停过），确认后加 `--allow-ahead` 重跑即可，工具会在 P3 用目标镜像补齐剩余迁移；
+  - 若超出的迁移里有**目标版本未覆盖**的条目，说明库结构比目标镜像新，任何参数都不放行，只能改用包含这些迁移的更新版本，或恢复升级前备份（第 7 节）。
 
 ### 6.2 P3 迁移（退出码 14）
 

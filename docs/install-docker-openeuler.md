@@ -2,7 +2,7 @@
 
 > 适用场景：**全新** x86_64 Linux 服务器，从零装出可登录的应急演练系统（Docker + MySQL + 应用）。
 > 已在 openEuler 24.03 LTS-SP1 实机验证（验证机地址以 `<测试机 IP>` 代指）。
-> **最终用户不需要 Go、Node.js/npm，也不需要 clone 源码**：只需 Docker 环境 + 在线镜像源或 Release 离线包（见第 3 节）。
+> **最终用户不需要 Go、Node.js/npm，也不需要 clone 源码**：只需 Docker 环境 + 在线镜像源，或与 `install.sh` 同目录的镜像 tar（见第 3 节）。
 > 升级已有环境请用 [升级指南](upgrade.md)；源码编译、物理机 systemd 属于开发者路径，见 [源码编译](build-from-source.md) 与 [Linux 部署指南](linux-deployment.md)。
 
 > **🔒 对外交付必须上 TLS。** 面向非本机访问（局域网/专网/公网）时必须启用 HTTPS：
@@ -15,8 +15,8 @@
 | 脚本 | 作用 |
 |------|------|
 | [`deploy/install/build-baseline.sh`](../deploy/install/build-baseline.sh) | 从参照库导出 → 脱敏 → 校验，生成**可重复**的基线快照 |
-| [`deploy/install/pack-offline.sh`](../deploy/install/pack-offline.sh) | 打离线包：RPM + compose + 镜像 + **基线快照** + 校验清单 |
-| [`deploy/install/install.sh`](../deploy/install/install.sh) | 一键安装：Docker → 镜像 → 空库恢复快照 → 起应用 → 健康检查 |
+| [`deploy/install/pack-offline.sh`](../deploy/install/pack-offline.sh) | 打离线交付物：镜像 tar + 内嵌基线的 `install.sh`（可选 `--with-rpms` 带引擎 RPM） |
+| [`deploy/install/install.sh`](../deploy/install/install.sh) | 一键安装：Docker → 镜像 → 空库恢复快照 → 起应用 → 健康检查（基线快照内嵌） |
 
 ---
 
@@ -82,10 +82,10 @@
 | 系统 | x86_64 Linux；**优先 openEuler 24.03 LTS-SP1**（实机验证）；**统信 UOS Server 20** 为兼容可选项 |
 | 权限 | root（装软件包、改 firewalld、写 /opt） |
 | 内存 | ≥ 2 GB（实测 3.3 GB） |
-| 磁盘 | 安装目录所在分区 ≥ 3 GB 可用（建议 ≥ 5 GB）；1.0.1 离线包 472,867,328 字节（约 451 MiB / 473 MB） |
+| 磁盘 | 安装目录所在分区 ≥ 3 GB 可用（建议 ≥ 5GB）；离线场景另需存放两个镜像 tar（约 450 MB） |
 | 端口 | 8090（应用）空闲；3306 仅绑定 127.0.0.1；启用应用内 TLS 时 8443 |
 | 目录 | 默认 `/opt/cyber-drill`；自定义 `--install-dir` 时**父目录必须已存在**（安装器只创建最后一级） |
-| 容器 | Docker Engine 20.10+ 与 Compose v2；未安装时在线用 openEuler 源、离线用包内 RPM |
+| 容器 | Docker Engine 20.10+ 与 Compose v2；未安装时在线用 openEuler 源，离线用 `pack-offline.sh --with-rpms` 打出的 RPM |
 | SELinux | openEuler 保持 enforcing 即可（`moby-engine` 自带 `container-selinux` 策略）；UOS 需自行确认该策略，另注意其 `docker.socket` 激活差异（见 [Q8](vmware-vm-deployment.md)） |
 | 软件源 | 离线路径不需要外网；在线路径需要 openEuler 源与 GHCR 或华为云 SWR；UOS 的 Docker 引擎需自备仓库或离线 RPM |
 
@@ -144,7 +144,7 @@ sha256  f2e934c7103b97ee8893a893c9c04d00e73ff0086d662d16a35114f494efc45f
   `manifest.env` 的 `BASELINE_VERSION` = 镜像版本 = `deploy/upgrade/manifest.json` 中该版本的 `version`；
   `BASELINE_MIGRATIONS` = 该版本的 `schema_migrations_total`；
   `BASELINE_SHA256` = `SHA256SUMS` 中的哈希 = 实际文件哈希。
-- 发布包（离线 `--out` 目录）里的 `baseline/` 必须与镜像同版本；安装器会拒绝“旧快照 + 新镜像”的组合。
+- 发布用的 `install.sh` 由 `pack-offline.sh --embed-installer` 内嵌同版本基线；安装器发现内嵌版本 ≠ 目标版本时直接退出码 27。
 - 生成新版本快照后，同步更新 `SHA256SUMS`、`manifest.env` 与本节示例，三者缺一不可。
 
 ---
@@ -154,62 +154,59 @@ sha256  f2e934c7103b97ee8893a893c9c04d00e73ff0086d662d16a35114f494efc45f
 > **最终用户不需要 Go、Node.js/npm，也不需要 clone 源码。** 只需要 x86_64 Linux + Docker 环境，下面两条路径任选一条。
 > 需要自行编译二进制或做二次开发时才看 [源码编译](build-from-source.md)（开发者路径，不是部署路径）。
 
-### 3.1 路径一：在线安装（无需源码，推荐）
+### 3.1 路径一：在线安装（只下一个文件，推荐）
 
 前置：8090 空闲；可达华为云 SWR 或 GHCR。Docker / compose 未安装时由安装器在线补齐（openEuler 源 + compose v2 二进制）。
 
-安装器与基线快照合计约 270 KB，Gitee 优先：
+`install.sh` 约 350 KB，**基线快照已内嵌**，不需要再下载 baseline 相关文件。国内走 Gitee：
 
 ```bash
-sudo mkdir -p /opt/cyber-drill-installer/baseline
+sudo mkdir -p /opt/cyber-drill-installer
 cd /opt/cyber-drill-installer
 sudo curl -fsSL -o install.sh \
   https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/install.sh
-sudo curl -fsSL -o baseline/drill-baseline-1.0.2.sql.gz \
-  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/drill-baseline-1.0.2.sql.gz
-sudo curl -fsSL -o baseline/SHA256SUMS \
-  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/SHA256SUMS
-sudo curl -fsSL -o baseline/manifest.env \
-  https://gitee.com/habeas/cyber-drill/raw/main/deploy/install/baseline/manifest.env
 sudo bash install.sh --image-source swr
 ```
 
-- **四条 `curl` 缺一不可**：安装器优先读取脚本同级 `baseline/`，并用 `SHA256SUMS` 校验快照；只下 `install.sh` 会在退出码 27 处失败。
-- `--image-source swr` 为华为云（国内推荐），`--image-source ghcr` 为 GHCR（国外网络），不写则自动探测后选择。
-- GitHub 备选：把 4 个 URL 的 `https://gitee.com/habeas/cyber-drill/raw/main/` 换成 `https://raw.githubusercontent.com/chenjinxiang1980/cyber-drill/main/`。
-- 已装 Docker/Compose 时，安装器只拉镜像、建库、恢复基线、起应用，不会重复装引擎。
-
-### 3.2 路径二：离线安装（Release 离线包，内网首选）
-
-在可联网机器下载，把 tar 包拷到目标机：
+国外走 GitHub：
 
 ```bash
-curl -fL -o cyber-drill-offline-1.0.2.tar.gz \
-  https://github.com/chenjinxiang1980/cyber-drill/releases/download/v1.0.2/cyber-drill-offline-1.0.2.tar.gz
-tar -xzf cyber-drill-offline-1.0.2.tar.gz
-cd cyber-drill-offline-1.0.2
-sudo bash deploy/install/install.sh --offline-dir "$PWD"
+sudo mkdir -p /opt/cyber-drill-installer
+cd /opt/cyber-drill-installer
+sudo curl -fsSL -o install.sh \
+  https://raw.githubusercontent.com/chenjinxiang1980/cyber-drill/main/deploy/install/install.sh
+sudo bash install.sh --image-source ghcr
 ```
 
-- **体积**：472,867,328 字节（约 451 MiB / 473 MB）。
-- **内容**：Docker 引擎 RPM（`moby-engine` / `moby-client` 及依赖）、compose v2 二进制、应用镜像 `cyber-drill-1.0.2`、MySQL 8.0 镜像、基线快照与校验清单，以及 `install.sh`、`deploy/upgrade/` 升级工具。
-- 解包后无需外网，也无需仓库源码；安装器按 `--offline-dir` 使用包内 RPM、镜像和基线。
-- Gitee 发行版页 <https://gitee.com/habeas/cyber-drill/releases> 提供同版本说明；离线包体积较大，附件托管在 GitHub Release，可在能出网的机器下载后经内网拷贝。
+- 基线来源：脚本内嵌版本；`--help` 末尾会打印内嵌版本、SHA256 与大小，安装日志第 4 步解码后与内嵌 `SHA256SUMS` 比对，不一致直接退出码 27。
+- `--image-source swr` 为华为云（国内推荐），`ghcr` 为 GHCR（国外网络），`local` 为本地 tar；不写则自动探测，交互默认 1=SWR，非交互也优先 SWR。
+- 已装 Docker/Compose 时，安装器只拉镜像、建库、恢复基线、起应用，不会重复装引擎。
 
-离线包内与安装相关的目录：
+### 3.2 路径二：离线安装（install.sh 与镜像 tar 同目录，内网首选）
 
-```text
-cyber-drill-offline-1.0.2/
-├── deploy/install/install.sh          # 一键安装器
-├── deploy/install/baseline/           # 脚本同级的基线（安装器优先使用）
-├── deploy/upgrade/                    # 升级/回滚工具与 manifest.json
-├── rpms/                              # moby-engine、containerd、runc、container-selinux 等及依赖
-├── bin/docker-compose                 # compose v2 独立二进制
-├── images/cyber-drill-1.0.2.tar.gz
-├── images/mysql-8.0.tar.gz
-├── baseline/drill-baseline-1.0.2.sql.gz
-└── SHA256SUMS
+把 `install.sh` 与两个镜像 tar 放进**同一个目录**，在目标机执行，全程不联网：
+
+```bash
+ls
+# install.sh  cyber-drill-1.0.5.tar.gz  mysql-8.0.tar.gz
+
+sudo bash install.sh --mode offline
 ```
+
+镜像 tar 可由任意镜像源获取，例如在能联网的机器上导出：
+
+```bash
+docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.5
+docker tag  swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.5 cyber-drill:1.0.5
+docker save cyber-drill:1.0.5 | gzip -1 > cyber-drill-1.0.5.tar.gz
+docker pull mysql:8.0
+docker save mysql:8.0 | gzip -1 > mysql-8.0.tar.gz
+```
+
+- 安装器自动发现同目录 `cyber-drill-*.tar*` 与 `mysql-*.tar*` 并 `docker load`；也可用 `--image-tar` / `--mysql-tar` 显式指定。
+- 用 `--mode auto`（默认）时，只要发现镜像 tar 就自动走离线，不访问镜像仓库。
+- 目标机未装 Docker 时，需先安装 Docker Engine + Compose v2，或使用发布者用 `pack-offline.sh --with-rpms` 打出的含 `rpms/`、`bin/docker-compose` 的离线目录（此时配合 `--offline-dir`）。
+- 老版 `--offline-dir`（含 `images/`、`rpms/`、`bin/`、`baseline/`）仍然兼容；快照优先级为 `--snapshot` > 内嵌 > 离线目录 `baseline/`。
 
 ### 3.3 安装后：访问、初始口令、健康检查
 
@@ -224,12 +221,9 @@ cyber-drill-offline-1.0.2/
 安装目录已存在且非空时，安装器**直接停止**（退出码 28），不会覆盖 `.env`、不会覆盖数据库，并给出两条路径：
 
 - A（不保留数据）：`sudo bash install.sh --reinstall`，交互输入确认词 `DELETE` 后删除原目录/容器/数据卷再重装；非交互环境用 `--reinstall --confirm DELETE`。
-- B（保留数据）：用升级工具执行 `sudo bash deploy/upgrade/upgrade.sh --to 1.0.2 --dir /opt/cyber-drill`。
+- B（保留数据）：用升级工具执行 `sudo bash deploy/upgrade/upgrade.sh --to 1.0.5 --dir /opt/cyber-drill`。
 
-升级工具不在在线安装器内：
-
-- 用离线包安装：直接使用包内 `deploy/upgrade/`；
-- 只下载了 `install.sh`：从 Gitee 取 8 个文件到 `/opt/cyber-drill-upgrade`：
+升级工具不在在线安装器内，从 Gitee 取 8 个文件到 `/opt/cyber-drill-upgrade`：
 
 ```bash
 sudo mkdir -p /opt/cyber-drill-upgrade/lib && cd /opt/cyber-drill-upgrade
@@ -237,7 +231,7 @@ for f in upgrade.sh manifest.json lib/00-common.sh lib/10-manifest.sh \
          lib/20-backup.sh lib/30-migrate.sh lib/40-compose.sh lib/50-rollback.sh; do
   sudo curl -fsSL -o "$f" "https://gitee.com/habeas/cyber-drill/raw/main/deploy/upgrade/$f"
 done
-sudo bash upgrade.sh --to 1.0.2 --dir /opt/cyber-drill
+sudo bash upgrade.sh --to 1.0.5 --dir /opt/cyber-drill
 ```
 
 ### 3.5 破坏性操作纪律（测试必读）
@@ -264,16 +258,29 @@ sudo bash upgrade.sh --to 1.0.2 --dir /opt/cyber-drill
 > 反例（真实事故）：曾用伪造的安装目录触发旧版清理逻辑，旧逻辑按固定容器名 `drill-app`/`drill-mysql`
 > 删除，误删了同机现网实例的容器与数据卷。现版本已改为仅按工作目录标签清理，并在删除前打印清单。
 
-### 3.6 制作离线包（发布者/开发者，不是部署步骤）
+### 3.6 制作离线交付物（发布者/开发者，不是部署步骤）
 
-发布新版本时，在**有网、有 docker、dnf** 的构建机上执行：
+在**有网、有 docker** 的构建机上执行：
 
 ```bash
 sudo bash deploy/install/pack-offline.sh \
-  --out /opt/cyber-drill-offline --version 1.0.2 --baseline-dir ./baseline
+  --out /opt/cyber-drill-offline --version 1.0.5 --embed-installer
 ```
 
-产出 `rpms/`、`bin/docker-compose`、`images/`、`baseline/` 与 `SHA256SUMS`。正式 Release 离线包会在此基础上加入 `deploy/install/install.sh` 和 `deploy/upgrade/`，最终用户按 3.2 解包即装，**不需要执行本节**。
+产出：
+
+```text
+/opt/cyber-drill-offline/
+├── install.sh                  # 已内嵌基线快照，可独立运行
+├── cyber-drill-1.0.5.tar.gz
+├── mysql-8.0.tar.gz
+└── SHA256SUMS
+```
+
+- `--embed-installer` 会把基线段整体重写（先剥离旧段再写，可重复执行，不会叠加）；脚本会校验标记唯一并做 `bash -n`。
+- 目标机未装 Docker 时加 `--with-rpms`，额外产出 `rpms/` 与 `bin/docker-compose`，安装时配合 `--offline-dir`。
+- 不带 `--embed-installer` 时输出 `install.sh` + `baseline/` 目录（兼容旧 `--offline-dir` 用法）。
+- 交付给用户的就是上述目录内容（默认四个文件），**不再通过 Release 附件分发**。
 
 ---
 
@@ -281,11 +288,13 @@ sudo bash deploy/install/pack-offline.sh \
 
 | 参数 | 默认 | 说明 |
 |------|------|------|
-| `--offline-dir <目录>` | 脚本同级 `offline/` 或 `/opt/cyber-drill-offline` | 离线资源目录（含 `baseline/`） |
-| `--snapshot <文件>` | 自动查找 | 指定基线快照 `.sql.gz` |
-| `--mode auto\|offline\|online` | `auto` | 有离线镜像包时优先离线 |
-| `--version <版本>` | 读取仓库 `VERSION` | 应用镜像版本，禁止写死 |
-| `--image-source auto\|ghcr\|swr` | `auto` | 应用镜像来源；`auto` 探测后选择，国内推荐 `swr` |
+| `--offline-dir <目录>` | 脚本同级 `offline/` 或 `/opt/cyber-drill-offline` | 兼容旧离线包布局（`images/`、`rpms/`、`bin/`、`baseline/`） |
+| `--image-tar <文件>` | 自动发现同目录 `cyber-drill-*.tar*` | 应用镜像 tar |
+| `--mysql-tar <文件>` | 自动发现同目录 `mysql-*.tar*` | MySQL 镜像 tar |
+| `--snapshot <文件>` | 内嵌基线 | 覆盖内嵌基线快照 `.sql.gz` |
+| `--mode auto\|offline\|online` | `auto` | 发现镜像 tar 时自动离线 |
+| `--version <版本>` | 内嵌基线版本 / 仓库 `VERSION` | 应用镜像版本，禁止写死 |
+| `--image-source auto\|ghcr\|swr\|local` | `auto` | 应用镜像来源；交互三选一默认 SWR，非交互国内优先 `swr` |
 | `--registry <ghcr\|swr>` | — | `--image-source` 的别名 |
 | `--install-dir <目录>` | `/opt/cyber-drill` | 安装目录（compose、.env、日志、基线副本） |
 | `--port <端口>` | `8090` | 应用对外端口 |
@@ -306,7 +315,7 @@ sudo bash deploy/install/pack-offline.sh \
 1. **前置检查**：root、x86_64、磁盘 ≥ 3 GB、8090 占用、识别离线/联网来源与访问 IP。
 2. **安装引擎**：离线用自带 RPM，联网用 `moby-engine`；安装 compose v2 并启动 docker。
 3. **准备镜像**：优先导入离线 tar，缺失时按配置拉取并统一打标签。
-4. **定位快照**：按 `--offline-dir/baseline` → 脚本同级 `baseline/` → 安装目录顺序查找，校验 `SHA256SUMS`，读取 `manifest.env` 的期望值。
+4. **定位快照**：按 `--snapshot` → 内嵌基线 → `--offline-dir/baseline` → 脚本同级 `baseline/` → 安装目录顺序查找，内嵌/文件均按 `SHA256SUMS` 校验，读取 `manifest.env` 的期望值。
 5. **创建目录与 compose**：MySQL 仅绑回环、命名卷持久化；`.env` 以单文件挂进应用容器（用于首登改密后清空一次性口令）。
 6. **生成 env**：随机数据库口令、JWT/SESSION 密钥、两个管理员初始口令、备份加密口令 `BACKUP_PASSPHRASE`、恢复口令 `RESTORE_PASSWORD`；权限 `600`、属主 `10001`（容器用户），已有文件不覆盖。
 7. **初始化数据库**：见第 6 节判定 → 空库恢复快照 → 逐项校验 76/21/1165/22/12/20 → 写 `.restored`。
@@ -377,9 +386,9 @@ curl -fsS http://127.0.0.1:8090/api/health
 
 | 退出码 | 阶段 | 常见原因 |
 |--------|------|----------|
-| 10 | 前置检查 | 非 root、架构不符、磁盘不足、端口被占、离线目录无镜像包 |
+| 10 | 前置检查 | 非 root、架构不符、磁盘不足、端口被占、离线模式未找到镜像 tar |
 | 20 | Docker | 离线 RPM 缺失、源不可用、compose 下载失败、docker 启动失败 |
-| 21 | 镜像 | 离线 tar 缺失/损坏、仓库不可达 |
+| 21 | 镜像 | 离线 tar 缺失/损坏、仓库不可达（错误信息会给出 SWR / GHCR / 离线三条可直接复制的命令） |
 | 23 | MySQL | 初始化慢（180 s 超时）、端口冲突、`MYSQL_*` 与 `.env` 不一致 |
 | 25 | 应用 | 启动失败、240 s 内未 healthy、`/api/health` 无版本号 |
 | 26 | 已有库保护 | 探测到非本安装器创建的库，拒绝覆盖 |

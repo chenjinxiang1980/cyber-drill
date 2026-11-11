@@ -1,7 +1,7 @@
 # Linux 部署指南
 
 > **这是源码/物理机 systemd 的开发者路径，不是最终用户部署路径。**
-> 最终用户不需要 Go、Node.js/npm，也不需要 clone 源码：只需 Docker 环境 + 在线镜像源或 Release 离线包，见 [一键安装（Docker / openEuler）](install-docker-openeuler.md)。
+> 最终用户不需要 Go、Node.js/npm，也不需要 clone 源码：只需 Docker 环境 + 在线镜像源，或与 `install.sh` 同目录的镜像 tar，见 [一键安装（Docker / openEuler）](install-docker-openeuler.md)。
 > 本机的 systemd unit、交叉编译与手工 compose 仅面向开发者/运维定制。
 
 > **升级请用一键升级工具**：`sudo ./deploy/upgrade/upgrade.sh --to <版本>`，详见 [升级指南](upgrade.md)。

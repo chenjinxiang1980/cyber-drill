@@ -28,8 +28,8 @@
 
 只需要 x86_64 Linux + Docker 环境，不需要 Go、Node.js/npm，也不需要 clone 源码：
 
-- **在线**：下载约 270 KB 的安装器与基线快照，按镜像源选择 GHCR / 华为云 SWR；
-- **离线**：Release 离线包约 451 MiB，解包后一条命令安装。
+- **在线**：只下载约 350 KB 的 `install.sh`（基线快照已内嵌），按镜像源选择 GHCR / 华为云 SWR；
+- **离线**：把 `install.sh` 与两个镜像 tar（约 450 MB）放同一目录，一条命令安装。
 
 完整命令、前置条件、初始口令、重装与升级见 [一键安装（Docker / openEuler）](install-docker-openeuler.md)。
 

@@ -46,6 +46,9 @@ CHAIN_TOTAL=""
 CHAIN_THROUGH=""
 NEED_DOWNTIME=0
 RESUMING=0
+ALLOW_AHEAD=0
+AHEAD_ACCEPTED=0
+AHEAD_LIST=""
 RUN_TS="$(date +%Y%m%d-%H%M%S)"
 RUN_ID=""
 RUN_STATUS="running"
@@ -79,6 +82,9 @@ usage() {
   --timeout <sec>         健康检查等待上限，默认 180
   --log-dir <path>        日志目录，默认 <dir>/logs
   --allow-internal        允许目标为 channel=internal 的版本
+  --allow-ahead           库已超前于 --from 版本时，若超出的迁移全部落在目标版本链内则放行
+                          （只对「库超前但目标版本已包含这些迁移」这一种情形生效，日志与
+                          STATE.json 留痕；缺迁移、版本不认识、指纹不符仍照旧拦截）
   --force-chain           链不完整时强行继续（需 --yes，日志留痕）
   --status                只打印当前状态
   --recover-last          自动回滚失败后的人工补救入口
@@ -111,6 +117,7 @@ parse_args() {
       --timeout) HEALTH_TIMEOUT="${2:-180}"; shift 2 ;;
       --log-dir) LOG_DIR="${2:-}"; shift 2 ;;
       --allow-internal) ALLOW_INTERNAL=1; shift ;;
+      --allow-ahead) ALLOW_AHEAD=1; shift ;;
       --force-chain) FORCE_CHAIN=1; shift ;;
       --status) MODE="status"; shift ;;
       --recover-last) MODE="recover"; shift ;;
@@ -394,6 +401,73 @@ print_plan() {
   info "────────────────────────────────────────────"
 }
 
+# 库比 --from 清单超前时的判定：
+#   - 逐条列出账本里超出 $FROM_VER through 的迁移名，并标注归属版本区间；
+#   - 仅当这些迁移全部落在 目标版本链 的 (from_exclusive, through] 区间内、
+#     且显式给了 --allow-ahead 时放行（放行后由 P3 用目标镜像补齐缺失迁移）；
+#   - 超出目标版本区间 / 清单缺区间 / 未给放行参数，一律拦截，不做任何变更。
+precheck_ahead_or_fail() {
+  local cnt="$1" f_total="$2"
+  local f_through to_from to_through to_total lines name ver state
+  local in_detail="" outside=""
+
+  f_through="$(mf_get "$FROM_VER" migrations.through)"
+  to_from="$(mf_get "$TO_VER" migrations.from_exclusive)"
+  to_through="$(mf_get "$TO_VER" migrations.through)"
+  to_total="$(mf_get "$TO_VER" schema_migrations_total)"
+
+  if [ -z "$f_through" ] || [ -z "$to_from" ] || [ -z "$to_through" ] || [ -z "$to_total" ]; then
+    fail "$E_CHAIN" "P0-precheck" "schema_migrations=$cnt" \
+      "数据库超前于当前版本（$FROM_VER 应为 $f_total 条），且清单缺少 $FROM_VER/$TO_VER 的迁移区间，无法判定超出的迁移属于哪个版本" \
+      "修正 manifest.json 的 migrations.from_exclusive / through 后重跑；如需回退请恢复升级前的整库备份"
+  fi
+
+  # 迁移名以补零编号开头，字典序即执行序
+  lines="$(sql_scalar "SELECT version FROM schema_migrations WHERE version > '$f_through' ORDER BY version" \
+    | sed '/^[[:space:]]*$/d')"
+  if [ -z "$lines" ]; then
+    fail "$E_CHAIN" "P0-precheck" "schema_migrations=$cnt" \
+      "数据库行数超前（$FROM_VER 应为 $f_total 条）但查不到超出 $f_through 的迁移名，账本内容异常" \
+      "人工核对 schema_migrations 后重跑；不要直接降级镜像"
+  fi
+
+  local ahead_names=()
+  while IFS= read -r name; do
+    [ -n "$name" ] && ahead_names+=("$name")
+  done <<<"$lines"
+
+  warn "数据库超前于当前版本 $FROM_VER：清单应 $f_total 条，实际 $cnt 条"
+  warn "超出 $FROM_VER（through=$f_through）的迁移共 ${#ahead_names[@]} 条："
+  while IFS='|' read -r name ver state; do
+    [ -n "$name" ] || continue
+    if [ "$state" = "in_target" ]; then
+      in_detail+="${name} "
+      warn "  - $name（属于 $ver，位于 $to_from 之后、$to_through 及之前）"
+    else
+      outside+="${name} "
+      warn "  - $name（不在 $TO_VER 的迁移区间内，已超出 through=$to_through）"
+    fi
+  done < <(mf_classify_migrations "$FROM_VER" "$TO_VER" "${ahead_names[@]}")
+
+  AHEAD_LIST="$(printf '%s' "${ahead_names[*]}" | tr ' ' ',')"
+
+  if [ -n "$outside" ]; then
+    fail "$E_CHAIN" "P0-precheck" "schema_migrations=$cnt" \
+      "数据库超前且含目标版本 $TO_VER 未覆盖的迁移：${outside}（--allow-ahead 不放行此类情形，避免库结构比镜像新）" \
+      "改用包含这些迁移的更新版本（或升级 upgrade.sh/manifest.json）后重跑；否则恢复升级前的整库备份"
+  fi
+
+  if [ "$ALLOW_AHEAD" != 1 ]; then
+    fail "$E_CHAIN" "P0-precheck" "schema_migrations=$cnt" \
+      "数据库超前于当前版本（$FROM_VER 应为 $f_total 条）：${in_detail}均已提前应用，但未给放行参数" \
+      "确认上面逐条标注的迁移都属于目标版本 $TO_VER 后，加 --allow-ahead 重跑；其它情况请恢复升级前的整库备份"
+  fi
+
+  AHEAD_ACCEPTED=1
+  warn "ALLOW-AHEAD 放行：超出 $FROM_VER 的迁移（${in_detail% }）全部包含在 $TO_VER 的迁移区间（$to_from → $to_through）内"
+  warn "放行后将由目标镜像补齐其余迁移，并在 P5 校验 schema_migrations=$to_total / 末条 $to_through"
+}
+
 precheck() {
   PHASE="P0-precheck"
   step "P0 预检"
@@ -469,9 +543,7 @@ precheck() {
          [ "$(sql_scalar "SELECT COUNT(*) FROM schema_migrations WHERE version='$through'")" = "1" ]; then
         warn "数据库已提前应用到 $TO_VER 的迁移（$cnt 条，含 $through），按「迁移已执行」继续，仅切换镜像"
       else
-        fail "$E_CHAIN" "P0-precheck" "schema_migrations=$cnt" \
-          "数据库超前于当前版本（$FROM_VER 应为 $f_total 条），不支持降级" \
-          "如需回退请恢复升级前的整库备份；不要直接降级镜像"
+        precheck_ahead_or_fail "$cnt" "$f_total"
       fi
     fi
   fi
@@ -777,7 +849,24 @@ show_status() {
   mycnf_install "$E_PRECHECK" "status"
   n="$(schema_count)"; last="$(schema_last)"
   info "schema_migrations：$n 条，末条 ${last:-无}"
-  info "按清单推断的当前版本：$(mf_version_by_total "$n" || true)"
+  local inferred mt extra line
+  inferred="$(mf_version_by_total "$n" 2>/dev/null || true)"
+  if [ -n "$inferred" ]; then
+    info "按清单推断的当前版本：$inferred"
+  else
+    info "按清单推断的当前版本：（清单中无对应版本，数据库可能超前于清单）"
+    mt="$(mf_max_through)"
+    if [ -n "$mt" ]; then
+      extra="$(sql_scalar "SELECT version FROM schema_migrations WHERE version > '$mt' ORDER BY version" \
+        | sed '/^[[:space:]]*$/d')"
+      if [ -n "$extra" ]; then
+        info "库超前清单：以下迁移超出清单最新 through=$mt："
+        while IFS= read -r line; do
+          [ -n "$line" ] && info "  - $line"
+        done <<<"$extra"
+      fi
+    fi
+  fi
 
   local d
   d="$(ls -1dt "$DEPLOY_DIR"/.upgrade-runs/*/ 2>/dev/null | head -1)"
@@ -786,6 +875,13 @@ show_status() {
   else
     info "最近一次升级：无记录"
   fi
+  local ad
+  for ad in $(ls -1dt "$DEPLOY_DIR"/.upgrade-runs/*/ 2>/dev/null | head -10); do
+    if [ "$(state_get_file "$ad/STATE.json" precheck.ahead_accepted)" = "1" ]; then
+      info "预检放行记录：$(basename "$ad") 升级 $(state_get_file "$ad/STATE.json" from) → $(state_get_file "$ad/STATE.json" to)，以 --allow-ahead 放行库超前（超前迁移：$(state_get_file "$ad/STATE.json" precheck.ahead_migrations)）"
+      break
+    fi
+  done
   local cnt
   cnt="$(ls -1d "$DEPLOY_DIR"/backups/upgrade-*-to-* 2>/dev/null | wc -l)"
   info "升级备份目录数：$cnt"

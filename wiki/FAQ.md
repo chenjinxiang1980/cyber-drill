@@ -6,7 +6,7 @@
 
 ```bash
 # A. 删除重装（会删除容器与数据卷，输入 DELETE 确认）
-sudo bash deploy/install/install.sh --reinstall
+sudo bash install.sh --reinstall
 
 # B. 保留数据升级
 sudo bash deploy/upgrade/upgrade.sh --to 1.0.5
@@ -41,7 +41,7 @@ sudo bash deploy/upgrade/upgrade.sh --to 1.0.5
 ## 端口被占用
 
 ```bash
-sudo bash deploy/install/install.sh --port 18090 --mysql-port 13306
+sudo bash install.sh --port 18090 --mysql-port 13306
 ```
 
 安装前可用 `ss -lnt | grep 8090` 检查。
@@ -50,7 +50,7 @@ sudo bash deploy/install/install.sh --port 18090 --mysql-port 13306
 
 - 国内网络优先使用 `--image-source swr`；
 - 国外网络使用 `--image-source ghcr`；
-- 完全无外网时使用离线包 `--offline-dir`。
+- 完全无外网时，把镜像 tar 与 `install.sh` 放同一目录，用 `--mode offline` 安装。
 
 ## 修改了前端页面但不生效
 
