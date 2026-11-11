@@ -146,6 +146,17 @@ app_log_scan() { # 只做告警，不作为回滚依据（业务日志里也有 
 #   cyber-drill:0.8.9                        → cyber-drill:<to>（本地）
 #   ghcr.io/acme/cyber-drill:0.8.9           → <清单仓库>:<to>（registry）
 #   ghcr.io/acme/cyber-drill:0.8.9@sha256:…  → 同写法 + 清单里该版本的 digest
+
+# 由当前镜像名推断它属于清单里的哪个仓库，用于取对应仓库的 digest
+registry_for_ref() { # <repo-without-tag>
+  local name="$1" g s
+  g="$(mf_registry_base ghcr)"
+  s="$(mf_registry_base swr)"
+  if [ -n "$g" ] && [ "$name" = "$g" ]; then printf '%s' ghcr; return 0; fi
+  if [ -n "$s" ] && [ "$name" = "$s" ]; then printf '%s' swr; return 0; fi
+  printf '%s' "$REGISTRY"
+}
+
 compute_target_ref() {
   local cur="${1:-$CURRENT_REF}" ref dg="" name tag last base
   ref="$cur"
@@ -187,16 +198,18 @@ compute_target_ref() {
   fi
 
   if [ -n "$dg" ] || [ "$PIN_DIGEST" = 1 ]; then
-    local td
-    td="$(mf_digest "$TO_VER" "$REGISTRY")"
+    local td reg
+    if [ -n "$REGISTRY_GIVEN" ]; then reg="$REGISTRY"; else reg="$(registry_for_ref "$name")"; fi
+    td="$(mf_digest "$TO_VER" "$reg")"
     if [ -n "$td" ] && [ "$td" != "null" ]; then
       TARGET_REF="$TARGET_REF@$td"
+      info "目标镜像按 $reg 清单 digest 固定"
     elif [ -n "$dg" ]; then
-      fail "$E_IMAGE" "P0-precheck" "目标镜像 digest" \
-        "当前 compose 用 tag@digest 写法，但清单里 $TO_VER 没有 $REGISTRY 的 digest" \
-        "把 compose 的 image 改回 tag 写法后重跑（历史版本没有记录 digest）"
+      # 当前 compose 是 digest 固定写法：必须剥离旧 digest，否则改 tag 后仍钉死旧镜像
+      warn "当前 compose 用 @sha256 固定，但清单里 $TO_VER 没有 $reg 的 digest"
+      warn "已剥离旧 digest，目标改为 tag 写法：$TARGET_REF（本次升级后不再固定 digest）"
     else
-      warn "清单里 $TO_VER 没有 $REGISTRY 的 digest，忽略 --pin-digest"
+      warn "清单里 $TO_VER 没有 $reg 的 digest，忽略 --pin-digest"
     fi
   fi
   info "目标镜像：$TARGET_REF"

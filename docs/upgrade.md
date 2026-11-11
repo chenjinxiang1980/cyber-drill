@@ -103,7 +103,7 @@ sudo ./deploy/upgrade/upgrade.sh --recover-last
 | `--image-ref <ref>` | 按清单生成 | 直接指定目标镜像（本地构建/自建仓库） |
 | `--offline` | 关 | 不访问 registry，要求本地已有镜像或配 `--image-tar` |
 | `--image-tar <file>` | — | `docker load -i` 的镜像包；导入后 tag 与目标不符会自动打 tag |
-| `--pin-digest` | 关 | 目标写成 `repo:ver@sha256:…`；清单没有该版本 digest 时只告警 |
+| `--pin-digest` | 关 | 目标写成 `repo:ver@sha256:…`；当前 compose 已是 digest 固定时默认即如此；清单没有该版本 digest 时剥离旧 digest 并告警 |
 | `--dry-run` | 关 | 只检查 + 打印计划 |
 | `--yes` | 关 | 跳过交互确认（非交互环境必须加） |
 | `--skip-backup` | 关 | 复用已有同版本、sha256 校验通过的备份；**必须与 `--yes` 同用** |
@@ -168,6 +168,19 @@ docker run --rm --network <app所在网络> --env-file <env文件> -e DB_HOST=<�
 - `settings.brand_version` == `v<目标版本>`（本版本迁移增量为 0 时跳过该项，仅打印实际值）；
 - `schema_migrations` 行数 == 清单累计条数，末条 == 清单 `through`；
 - 容器 `RestartCount`、最近 200 行日志里的 `PANIC/FATAL/[ERROR]` —— **只告警，不作为回滚依据**。
+
+### 6.4 compose 用 digest 固定时的行为
+
+`app` 的 image 如果写成 `repo@sha256:…`（例如 `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill@sha256:8d24611e…`），升级工具按下列规则处理：
+
+| 情形 | 改写结果 |
+|---|---|
+| 清单里目标版本有 digest（且仓库能对上） | `repo:新版本@sha256:新digest`，继续保持 digest 固定 |
+| 清单里目标版本没有 digest | **剥离旧 digest**，写成 `repo:新版本`，并在日志与计划里告警「本次升级后不再固定 digest」 |
+| 加 `--pin-digest` 但清单没有 digest | 同上，忽略该参数并告警 |
+| 镜像仓库推断 | 按当前 image 的仓库前缀取该仓库的 digest；显式 `--registry ghcr\|swr` 时以参数为准 |
+
+也就是说，升级不会出现「tag 改了、digest 还钉着旧镜像」：旧 digest 要么被替换成目标版本的 digest，要么被明确剥离。回滚时工具会用 `META.json` 里记录的旧引用（含原 digest）原样写回 compose。
 
 ---
 

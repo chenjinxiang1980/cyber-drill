@@ -73,7 +73,7 @@ usage() {
   --image-ref <ref>       直接指定目标镜像引用（本地构建场景）
   --offline               不访问 registry（需本地已有镜像或配合 --image-tar）
   --image-tar <file>      docker load -i 的镜像包
-  --pin-digest            写 tag@sha256:…（默认跟随 compose 原写法）
+  --pin-digest            写 tag@sha256:…（默认跟随 compose 原写法：原来是 digest 固定的继续固定）
   --dry-run               只检查与打印计划，不做任何变更
   --yes                   跳过交互确认
   --skip-backup           复用已有同版本备份（必须与 --yes 同时使用）
