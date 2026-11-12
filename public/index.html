@@ -56,6 +56,17 @@
    栏内品牌 / 剧本规模 / 登录表单均为满宽块，共用同一条左边缘线，不再单独约束内列宽度 */
 .login-right .brand-row,.login-right .l-intro,.login-right .form-block{width:auto;max-width:none}
 
+/* 多角色账号：凭据校验通过后在表单内选择本次登录身份 */
+.role-pick-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.rp-item{font:inherit;width:100%;appearance:none;-webkit-appearance:none;display:flex;align-items:center;gap:7px;padding:9px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--elev);color:var(--text2);cursor:pointer;text-align:left;line-height:1.3;font-size:12px}
+.rp-item:hover{border-color:var(--accent)}
+.rp-item:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+.rp-item[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-dim);color:#fff}
+.rp-item .rp-ic{flex:none;display:flex}
+.rp-item .rp-ic svg{width:16px;height:16px}
+.role-pick-hint{margin-top:6px;font-size:10.5px;line-height:1.5;color:var(--text3)}
+.role-pick-back{appearance:none;background:none;border:0;padding:0;margin-top:5px;font:inherit;font-size:11px;color:var(--accent2);cursor:pointer;text-decoration:underline}
+
 /* 窄屏：登录优先，角色区随后；整页纵向滚动，无横向滚动 */
 @media (max-width:900px){
   .login-bg{position:static;inset:auto;display:block;min-height:100vh;min-height:100svh;padding:calc(env(safe-area-inset-top,0px) + 12px) 12px calc(env(safe-area-inset-bottom,0px) + 16px);overflow:visible}
@@ -125,6 +136,12 @@
             </span>
             <button type="button" class="captcha-reload" id="capReload" title="换一张">换一张</button>
           </div>
+        </div>
+        <div class="form-row" id="rolePick" style="display:none">
+          <label class="f-label">选择本次登录身份 <span class="req">*</span></label>
+          <div class="role-pick-grid" id="rpGrid"></div>
+          <div class="role-pick-hint">该账号绑定了多个角色，请选择本次进入系统使用的身份；展开的身份仅在本次会话生效。</div>
+          <button type="button" class="role-pick-back" id="rpBack">换个账号</button>
         </div>
         <div class="login-err" id="loginErr"></div>
         <button class="btn primary block" id="btnLogin" style="padding:10px;font-size:14px">登 录</button>
@@ -300,7 +317,7 @@
   fetch('/api/auth/roles').then(function(r){ if(!r.ok) throw new Error('角色加载失败'); return r.json(); })
   .then(function(res){
     ROLES = res || [];
-    document.getElementById('roleCount').textContent = '系统内置 ' + ROLES.length + ' 类业务角色，登录后按账号主角色展示差异化工作台；角色卡仅展示职责，不用于选择账号';
+    document.getElementById('roleCount').textContent = '系统内置 ' + ROLES.length + ' 类业务角色，登录后按所选身份展示差异化工作台；角色卡仅展示职责，不用于选择账号';
     renderRoles();
   }).catch(function(e){
     grid.innerHTML = '';
@@ -330,27 +347,90 @@
     pinnedRole = null; syncPressed(); restoreDuty();
   });
 
-  document.getElementById('btnLogin').onclick = function(){
+  /* ---------- 多角色身份选择（第二步） ----------
+     第一步 API.login 凭据校验通过但账号绑定多个角色时，服务端只返回
+     待选角色与一次性 ticket，不下发 token；此处渲染选择器，
+     用户确认后再调用 API.selectLoginRole 换取正式会话。 */
+  var pendingTicket = '', pendingRoles = [], pendingRole = '';
+  var rpGrid = document.getElementById('rpGrid');
+  var rolePick = document.getElementById('rolePick');
+  var inPass = document.getElementById('inPass');
+  var capReload = document.getElementById('capReload');
+  var btnLogin = document.getElementById('btnLogin');
+
+  function renderRolePick(roles, def){
+    pendingRoles = roles || [];
+    pendingRole = def || (pendingRoles[0] && pendingRoles[0].id) || '';
+    rpGrid.innerHTML = pendingRoles.map(function(r){
+      return '<button type="button" class="rp-item" data-id="'+App.esc(r.id)+'" aria-pressed="'+(r.id===pendingRole?'true':'false')+'"><span class="rp-ic">'+App.icon(ROLE_ICON[r.id]||'user')+'</span><span>'+App.esc(r.name)+'</span></button>';
+    }).join('');
+    rpGrid.querySelectorAll('.rp-item').forEach(function(el){
+      el.onclick = function(){
+        pendingRole = el.getAttribute('data-id');
+        rpGrid.querySelectorAll('.rp-item').forEach(function(x){
+          x.setAttribute('aria-pressed', x === el ? 'true' : 'false');
+        });
+      };
+    });
+    rolePick.style.display = '';
+    inUser.disabled = true; inPass.disabled = true; inCap.disabled = true;
+    if(capReload) capReload.disabled = true;
+    btnLogin.disabled = false; btnLogin.textContent = '进入系统';
+  }
+
+  function exitRolePick(){
+    pendingTicket = ''; pendingRoles = []; pendingRole = '';
+    rolePick.style.display = 'none';
+    inUser.disabled = false; inPass.disabled = false; inCap.disabled = false;
+    if(capReload) capReload.disabled = false;
+    btnLogin.disabled = false; btnLogin.textContent = '登 录';
+    loadCaptcha(); inCap.value = '';
+  }
+
+  function afterLogin(r){
+    App.toast('登录成功，欢迎 ' + r.user.name, 'ok');
+    // 首登强制改密：服务端只签发受限令牌，前端立即跳转改密页
+    var target = (r.user && r.user.mustChange) ? 'password.html' : null;
+    if(!target){
+      var nav = r.role.nav || [];
+      target = nav.indexOf('dashboard') >= 0 ? 'dashboard.html' : (HREF[nav[0]] || 'workbench.html');
+    }
+    setTimeout(function(){ location.href = target; }, 450);
+  }
+
+  document.getElementById('rpBack').onclick = function(){ err(''); exitRolePick(); };
+
+  btnLogin.onclick = function(){
     err('');
+    // 第二步：已选择身份，用一次性 ticket 换取正式会话
+    if(pendingTicket){
+      if(!pendingRole){ err('请选择本次登录身份'); return; }
+      btnLogin.disabled = true; btnLogin.textContent = '进入中…';
+      API.selectLoginRole(pendingTicket, pendingRole).then(afterLogin).catch(function(e){
+        var msg = (e && e.message) || '登录状态已过期，请重新登录';
+        exitRolePick();
+        err(msg);
+      });
+      return;
+    }
+
     var user = inUser.value.trim();
-    var pass = document.getElementById('inPass').value;
+    var pass = inPass.value;
     if(!user){ err('请输入账号'); return; }
     if(pass.length < 1){ err('请输入密码'); return; }
     if(capAvailable && !inCap.value.trim()){ err('请输入验证码'); return; }
 
-    var btn = document.getElementById('btnLogin');
-    btn.disabled = true; btn.textContent = '登录中…';
+    btnLogin.disabled = true; btnLogin.textContent = '登录中…';
     API.login(user, pass, '', capAvailable ? capId : '', capAvailable ? inCap.value.trim() : '').then(function(r){
-      App.toast('登录成功，欢迎 ' + r.user.name, 'ok');
-      // 首登强制改密：服务端只签发受限令牌，前端立即跳转改密页
-      var target = (r.user && r.user.mustChange) ? 'password.html' : null;
-      if(!target){
-        var nav = r.role.nav || [];
-        target = nav.indexOf('dashboard') >= 0 ? 'dashboard.html' : (HREF[nav[0]] || 'workbench.html');
+      // 多角色账号：进入身份选择，第二步才下发 token
+      if(r && r.needRole){
+        pendingTicket = r.ticket;
+        renderRolePick(r.roles, r.defaultRole);
+        return;
       }
-      setTimeout(function(){ location.href = target; }, 450);
+      afterLogin(r);
     }).catch(function(e){
-      btn.disabled = false; btn.textContent = '登 录';
+      btnLogin.disabled = false; btnLogin.textContent = '登 录';
       var msg = (e && e.message) || '登录失败，请检查账号与密码';
       var status = (e && e.status) || 0;
       if(status === 400 && msg.indexOf('验证码') >= 0){

@@ -191,15 +191,28 @@ window.API = (function () {
   }
 
   /* ---------- 会话 ---------- */
+  function storeSession(r) {
+    DRILL.setToken(r.token);
+    sessionStorage.setItem('pzy_role', JSON.stringify(r.role));
+    sessionStorage.setItem('pzy_user', r.user.name);
+    sessionStorage.setItem('pzy_org', r.user.org || '示例医院');
+  }
+  /* 第一步登录。多角色账号在凭据校验通过后返回 needRole + 一次性 ticket，
+     此时不下发 token，交由 selectLoginRole 完成第二步身份选择。 */
   function login(username, password, role, captchaId, captchaCode) {
     var body = { username: username, password: password, role: role || '' };
     if (captchaId) body.captchaId = captchaId;
     if (captchaCode) body.captchaCode = captchaCode;
     return DRILL.post('/auth/login', body).then(function (r) {
-      DRILL.setToken(r.token);
-      sessionStorage.setItem('pzy_role', JSON.stringify(r.role));
-      sessionStorage.setItem('pzy_user', r.user.name);
-      sessionStorage.setItem('pzy_org', r.user.org || '示例医院');
+      if (r && r.needRole) return r;
+      storeSession(r);
+      return r;
+    });
+  }
+  /* 第二步：凭一次性 ticket + 所选角色换取正式会话 */
+  function selectLoginRole(ticket, role) {
+    return DRILL.post('/auth/login/role', { ticket: ticket, role: role }).then(function (r) {
+      storeSession(r);
       return r;
     });
   }
@@ -574,7 +587,7 @@ window.API = (function () {
 
   return {
     mediaUrl: mediaUrl,
-    login: login, logout: logout, curRole: curRole, changePassword: changePassword, me: me,
+    login: login, selectLoginRole: selectLoginRole, logout: logout, curRole: curRole, changePassword: changePassword, me: me,
     activeProject: activeProject, setActiveProject: setActiveProject,
     getProjects: getProjects, createProject: createProject, deleteProject: deleteProject, updateProjectMembers: updateProjectMembers, updateProjectStatus: updateProjectStatus,
     drillElapsed: drillElapsed, elapsedOf: elapsedOf, fmtElapsed: fmtElapsed,

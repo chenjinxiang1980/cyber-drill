@@ -206,6 +206,10 @@ func New(database *db.DB, cfg *config.Config, authSvc *auth.Service, projectRoot
 			authg.POST("/login",
 				middleware.RateLimitByGroup("/api/auth", cfg.RateLimitAuth),
 				handler.Login(authSvc, database, cfg))
+			// 多角色账号第二步：凭第一步返回的一次性票据选择本次登录身份
+			authg.POST("/login/role",
+				middleware.RateLimitByGroup("/api/auth", cfg.RateLimitAuth),
+				handler.LoginSelectRole(authSvc, database, cfg))
 			// logout 可不带 auth（delete token 尽力而为），同时清理媒体 Cookie
 			authg.POST("/logout", handler.Logout(authSvc, cfg))
 		}

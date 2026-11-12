@@ -52,7 +52,7 @@ func auditWritesEnabled(c *gin.Context) bool {
 		return false
 	}
 	switch path {
-	case "/api/auth/login", "/api/auth/captcha", "/api/content/audit":
+	case "/api/auth/login", "/api/auth/login/role", "/api/auth/captcha", "/api/content/audit":
 		return false
 	}
 	return true
@@ -70,7 +70,7 @@ func maintenanceBlocked(c *gin.Context) bool {
 		return false
 	}
 	switch path {
-	case "/api/auth/login", "/api/auth/captcha", "/api/admin/restore", "/api/admin/restore-upload":
+	case "/api/auth/login", "/api/auth/login/role", "/api/auth/captcha", "/api/admin/restore", "/api/admin/restore-upload":
 		return false
 	}
 	return true
