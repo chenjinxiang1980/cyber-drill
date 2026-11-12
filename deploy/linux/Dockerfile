@@ -2,7 +2,7 @@
 # drill-server —— Docker 多阶段构建（**可替换国产基础镜像**）
 #
 # 用法：
-#   docker build -f deploy/linux/Dockerfile -t drill-server:1.0.5 .
+#   docker build -f deploy/linux/Dockerfile -t drill-server:1.0.6 .
 #   # 指定国产发行版：
 #   docker build -f deploy/linux/Dockerfile \
 #       --build-arg RUNTIME_BASE=openeuler/openeuler:22.03 \
@@ -90,7 +90,7 @@ COPY migrations/ ../migrations/
 
 # 编译两个二进制
 # -trimpath 剥离本地路径，-ldflags 可注入版本号
-ARG VERSION=1.0.5
+ARG VERSION=1.0.6
 ARG BUILD_TIME=unknown
 ARG GIT_COMMIT=unknown
 
@@ -117,7 +117,9 @@ FROM ${RUNTIME_BASE} AS runtime
 # 默认时区（覆盖即可）
 ENV TZ=Asia/Shanghai
 
-SHELL ["/bin/bash", "-lc"]
+# 用 /bin/sh：alpine 默认没有 bash，写死 /bin/bash 会让下面所有 RUN 直接失败；
+# sh 在 alpine 与 dnf/yum 系发行版里都一定存在，探测逻辑不依赖 bash 特性。
+SHELL ["/bin/sh", "-c"]
 
 # 1) 创建非 root 用户 / 目录 / 安装必要运行时
 #    每个发行版都尝试自己的包管理器

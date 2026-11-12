@@ -790,7 +790,7 @@ docker import /path/to/rootfs.tar.gz kylin-v10-rootfs
 
 ### 13.5 Dockerfile 已做的兼容性设计
 
-`deploy/linux/Dockerfile` 里 runtime 阶段用 `SHELL ["/bin/bash", "-lc"]`，然后按顺序探测包管理器：
+`deploy/linux/Dockerfile` 里 runtime 阶段用 `SHELL ["/bin/sh", "-c"]`，然后按顺序探测包管理器：
 
 ```bash
 (command -v apk && ...) ||     # Alpine
@@ -801,7 +801,7 @@ echo "WARNING: no package manager found"
 
 - 有哪个就用哪个，装出 `wget`（HEALTHCHECK）和时区文件
 - **都没有**（纯 rootfs）→ 跳过装包，HEALTHCHECK 用 `|| true` 兜底
-- 如果麒麟/UOS rootfs 连 `/bin/bash` 都没有，把第一行改成 `SHELL ["/bin/sh", "-c"]` 即可
+- 如果麒麟/UOS rootfs 连 `/bin/sh` 都没有（极简 rootfs），需要按上一节的 distroless 思路去掉包管理与 HEALTHCHECK
 
 ### 13.6 Windows Docker Desktop 上测国产镜像的注意点
 

@@ -4,7 +4,7 @@ package version
 
 var (
 	// Version 当前发布版本。
-	Version = "1.0.5"
+	Version = "1.0.6"
 	// BuildTime 构建时间，发布构建时注入。
 	BuildTime = "unknown"
 	// GitCommit 构建对应提交，发布构建时注入。

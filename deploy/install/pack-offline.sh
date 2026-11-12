@@ -13,9 +13,9 @@
 #   --with-rpms         追加 rpms/（Docker 引擎及依赖）与 bin/docker-compose
 #
 # 用法：
-#   sudo bash pack-offline.sh --out ./offline --version 1.0.5 --embed-installer
-#   sudo bash pack-offline.sh --out ./offline --version 1.0.5 --embed-installer --with-rpms
-#   sudo bash pack-offline.sh --out ./offline --version 1.0.5
+#   sudo bash pack-offline.sh --out ./offline --version 1.0.6 --embed-installer
+#   sudo bash pack-offline.sh --out ./offline --version 1.0.6 --embed-installer --with-rpms
+#   sudo bash pack-offline.sh --out ./offline --version 1.0.6
 #       # 不带 --embed-installer 时输出 install.sh + baseline/ 目录（兼容旧 --offline-dir 用法）
 #
 # 说明：

@@ -188,7 +188,7 @@ sudo bash install.sh --image-source ghcr
 
 ```bash
 ls
-# install.sh  cyber-drill-1.0.5.tar.gz  mysql-8.0.tar.gz
+# install.sh  cyber-drill-1.0.6.tar.gz  mysql-8.0.tar.gz
 
 sudo bash install.sh --mode offline
 ```
@@ -196,9 +196,9 @@ sudo bash install.sh --mode offline
 镜像 tar 可由任意镜像源获取，例如在能联网的机器上导出：
 
 ```bash
-docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.5
-docker tag  swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.5 cyber-drill:1.0.5
-docker save cyber-drill:1.0.5 | gzip -1 > cyber-drill-1.0.5.tar.gz
+docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.6
+docker tag  swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.6 cyber-drill:1.0.6
+docker save cyber-drill:1.0.6 | gzip -1 > cyber-drill-1.0.6.tar.gz
 docker pull mysql:8.0
 docker save mysql:8.0 | gzip -1 > mysql-8.0.tar.gz
 ```
@@ -221,7 +221,7 @@ docker save mysql:8.0 | gzip -1 > mysql-8.0.tar.gz
 安装目录已存在且非空时，安装器**直接停止**（退出码 28），不会覆盖 `.env`、不会覆盖数据库，并给出两条路径：
 
 - A（不保留数据）：`sudo bash install.sh --reinstall`，交互输入确认词 `DELETE` 后删除原目录/容器/数据卷再重装；非交互环境用 `--reinstall --confirm DELETE`。
-- B（保留数据）：用升级工具执行 `sudo bash deploy/upgrade/upgrade.sh --to 1.0.5 --dir /opt/cyber-drill`。
+- B（保留数据）：用升级工具执行 `sudo bash deploy/upgrade/upgrade.sh --to 1.0.6 --dir /opt/cyber-drill`。
 
 升级工具不在在线安装器内，从 Gitee 取 8 个文件到 `/opt/cyber-drill-upgrade`：
 
@@ -231,7 +231,7 @@ for f in upgrade.sh manifest.json lib/00-common.sh lib/10-manifest.sh \
          lib/20-backup.sh lib/30-migrate.sh lib/40-compose.sh lib/50-rollback.sh; do
   sudo curl -fsSL -o "$f" "https://gitee.com/habeas/cyber-drill/raw/main/deploy/upgrade/$f"
 done
-sudo bash upgrade.sh --to 1.0.5 --dir /opt/cyber-drill
+sudo bash upgrade.sh --to 1.0.6 --dir /opt/cyber-drill
 ```
 
 ### 3.5 破坏性操作纪律（测试必读）
@@ -264,7 +264,7 @@ sudo bash upgrade.sh --to 1.0.5 --dir /opt/cyber-drill
 
 ```bash
 sudo bash deploy/install/pack-offline.sh \
-  --out /opt/cyber-drill-offline --version 1.0.5 --embed-installer
+  --out /opt/cyber-drill-offline --version 1.0.6 --embed-installer
 ```
 
 产出：
@@ -272,7 +272,7 @@ sudo bash deploy/install/pack-offline.sh \
 ```text
 /opt/cyber-drill-offline/
 ├── install.sh                  # 已内嵌基线快照，可独立运行
-├── cyber-drill-1.0.5.tar.gz
+├── cyber-drill-1.0.6.tar.gz
 ├── mysql-8.0.tar.gz
 └── SHA256SUMS
 ```

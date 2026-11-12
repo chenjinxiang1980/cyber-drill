@@ -5,9 +5,9 @@
 #   备份 → 数据库迁移 → 拉取镜像 → 重建 app → 校验；失败自动回滚。
 #
 # 用法：
-#   sudo ./deploy/upgrade/upgrade.sh --to 1.0.5
-#   sudo ./deploy/upgrade/upgrade.sh --from 0.9.0 --to 1.0.5
-#   sudo ./deploy/upgrade/upgrade.sh --to 1.0.5 --dry-run
+#   sudo ./deploy/upgrade/upgrade.sh --to 1.0.6
+#   sudo ./deploy/upgrade/upgrade.sh --from 0.9.0 --to 1.0.6
+#   sudo ./deploy/upgrade/upgrade.sh --to 1.0.6 --dry-run
 #   sudo ./deploy/upgrade/upgrade.sh --status
 #
 # 规格见 docs/upgrade-tool-design.md；用户手册见 docs/upgrade.md。
@@ -62,7 +62,7 @@ usage() {
 用法: upgrade.sh --to <版本> [选项]
 
 必填（--status / --recover-last 除外）：
-  --to <ver>              目标版本，例如 1.0.5
+  --to <ver>              目标版本，例如 1.0.6
 
 选项：
   --from <ver>            当前版本（默认自动探测：容器 /api/health → schema_migrations 行数）

@@ -9,7 +9,7 @@
 sudo bash install.sh --reinstall
 
 # B. 保留数据升级
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.5
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.6
 ```
 
 不要直接 `rm -rf /opt/cyber-drill` 后重装：旧 MySQL 数据卷还在，旧库口令与新 `.env` 不一致，会出现“装完却登不上”。
