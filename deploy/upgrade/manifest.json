@@ -235,7 +235,7 @@
       "channel": "stable",
       "best_effort": false,
       "published_at": "2026-11-12",
-      "image": { "tags": ["1.0.6"], "digest": null, "digest_unknown": true, "size_bytes": 0, "layers": 0 },
+      "image": { "tags": ["1.0.6"], "digest": { "ghcr": "sha256:4b04fa1ea82076d7c359e9fa5a60fd386aab76606de62aa3d63ddde65581295c", "swr": "sha256:4b04fa1ea82076d7c359e9fa5a60fd386aab76606de62aa3d63ddde65581295c" }, "digest_unknown": false, "size_bytes": 152696990, "layers": 10 },
       "migrations": { "from_exclusive": "0136_task_proxy_dispatch", "through": "0136_task_proxy_dispatch", "count": 0, "contains_ddl": false, "backward_compatible": true },
       "schema_migrations_total": 88,
       "brand_version": "v1.0.0",
