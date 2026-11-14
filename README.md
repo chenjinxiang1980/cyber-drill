@@ -17,7 +17,7 @@
 点击封面播放：2 分 27 秒，1920×1080，含旁白与硬字幕，画面使用内置演示数据，不含真实账号与内网地址。
 
 - **GitHub**：点击封面进入文件页，可直接在浏览器内播放。
-- **Gitee**：点击封面进入[文件页](https://gitee.com/habeas/cyber-drill/blob/main/docs/media/demo-1.0.6.mp4)，Gitee 不在页面内播放，下载后用本地播放器观看。
+- **Gitee**：点击封面进入[文件页](https://gitee.com/habeas/cyber-drill/blob/main/docs/media/demo-1.0.6.mp4)，在页面内点「下载」后本地播放；Gitee 不支持页面内播放，raw 直链会返回 403，请勿直接引用直链。
 
 视频依次覆盖：登录与多角色选身份 → 演练监视大屏 → 剧本编排与节点时序 → 基础版 / 实战版演练 → 关键词评分 → 复盘报告导出。
 
