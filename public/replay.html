@@ -150,7 +150,7 @@ document.addEventListener('app:ready', function(e){
       if(curT==null) cls = n.state==='done' ? 'done' : 'pending';
       else cls = mins(n.time) <= mins(curT) ? 'done lit' : 'pending';
       return (i?'<span class="seq-arrow">▸</span>':'')
-        + '<div class="seq-node '+cls+'"><div class="s-idx">'+(i+1<10?'0':'')+(i+1)+'</div><div class="s-name">'+n.name+'</div><div class="s-time">'+n.time+'</div><div class="s-role">'+n.role+'</div></div>';
+        + '<div class="seq-node '+cls+'"><div class="s-idx">'+(i+1<10?'0':'')+(i+1)+'</div><div class="s-name">'+App.esc(n.name)+'</div><div class="s-time">'+App.esc(n.time)+'</div><div class="s-role">'+App.esc(n.role)+'</div></div>';
     }).join('');
   }
 

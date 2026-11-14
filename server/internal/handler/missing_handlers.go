@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"math"
@@ -571,13 +572,15 @@ func GetProjectScriptExport(database *db.DB) gin.HandlerFunc {
 		fmtQ := c.DefaultQuery("fmt", "word")
 		var name string
 		_ = database.QueryRow(`SELECT name FROM projects WHERE id=?`, id).Scan(&name)
-		body := fmt.Sprintf(`<html><head><meta charset='utf-8'><title>%s 演练脚本</title></head><body><h1>%s</h1><p>项目ID：%s</p></body></html>`, name, name, id)
+		safeName := html.EscapeString(name)
+		safeID := html.EscapeString(id)
+		body := fmt.Sprintf(`<html><head><meta charset='utf-8'><title>%s 演练脚本</title></head><body><h1>%s</h1><p>项目ID：%s</p></body></html>`, safeName, safeName, safeID)
 		ctype := "application/msword"
 		if fmtQ == "html" {
 			ctype = "text/html; charset=utf-8"
 		}
 		c.Header("Content-Type", ctype)
-		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="script_%s.doc"`, id))
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="script_%s.doc"`, safeFileToken(id)))
 		c.String(http.StatusOK, body)
 	}
 }
@@ -637,13 +640,13 @@ func GetProjectNotifyExport(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		fmtQ := c.DefaultQuery("fmt", "word")
-		body := fmt.Sprintf(`<html><head><meta charset='utf-8'></head><body><h1>演练通知</h1><p>项目ID：%s</p></body></html>`, id)
+		body := fmt.Sprintf(`<html><head><meta charset='utf-8'></head><body><h1>演练通知</h1><p>项目ID：%s</p></body></html>`, html.EscapeString(id))
 		ctype := "application/msword"
 		if fmtQ == "html" {
 			ctype = "text/html; charset=utf-8"
 		}
 		c.Header("Content-Type", ctype)
-		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="notify_%s.doc"`, id))
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="notify_%s.doc"`, safeFileToken(id)))
 		c.String(http.StatusOK, body)
 	}
 }
@@ -1821,6 +1824,21 @@ func sanitizeFileName(name string) string {
 		base = "未命名附件"
 	}
 	return base
+}
+
+// safeFileToken 将路径/参数值收敛为 [A-Za-z0-9._-]，避免响应头文件名注入。
+func safeFileToken(v string) string {
+	token := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			return r
+		}
+		return '-'
+	}, v)
+	if token == "" || token == "." || token == ".." {
+		return "unknown"
+	}
+	return token
 }
 
 // saveUploadedFile 写入 uploads/<sub>/<YYYYMM>/，返回相对路径与绝对路径。

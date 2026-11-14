@@ -115,13 +115,15 @@ COMPOSE_URLS=(
     "https://ghfast.top/https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64"
     "https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64"
 )
+# 官方 sha256（v2.29.7 / linux-x86_64），下载后强校验，防止镜像站或链路投毒。
+COMPOSE_SHA256_X86_64="383ce6698cd5d5bbf958d2c8489ed75094e34a77d340404d9f32c4ae9e12baf0"
 
 # ---------- 内嵌基线快照 ----------
 # 本段由 pack-offline.sh --embed-installer 整体重写（先剥离旧段再写，可重复执行）。
 # 仓库里的源码版本是空占位；发布用手册中给出的 install.sh 必须带内嵌基线。
 # >>> BEGIN EMBEDDED BASELINE >>>
 # 本段由 pack-offline.sh --embed-installer 生成；重复打包会先剥离旧段再整体重写。
-EMBEDDED_BASELINE_VERSION="1.0.6"
+EMBEDDED_BASELINE_VERSION="1.0.7"
 EMBEDDED_BASELINE_SHA256="bf4aa0c50bd6ebaf6fde1b9d2b1ccd9105239afd55e025c8dd679abf378c4b29"
 EMBEDDED_BASELINE_SIZE="228135"
 EMBEDDED_BASELINE_B64='
@@ -4441,9 +4443,26 @@ wait_healthy() {
     return 1
 }
 
+# 以临时 defaults 文件执行 mysql，避免 root 口令出现在宿主进程 argv（ps 可见）。
+docker_mysql() {
+    local cnf tmp rc
+    cnf="$(mktemp "${TMPDIR:-/tmp}/cyber-drill-my.XXXXXX")" || return 1
+    chmod 600 "${cnf}"
+    printf '[client]\nuser=root\npassword=%s\n' "${MYSQL_ROOT_PASSWORD}" > "${cnf}"
+    tmp="/tmp/.drill-my.$$.${RANDOM}"
+    if ! docker cp "${cnf}" "${MYSQL_CONTAINER}:${tmp}" >/dev/null 2>&1; then
+        rm -f "${cnf}"
+        return 1
+    fi
+    rm -f "${cnf}"
+    docker exec -i "${MYSQL_CONTAINER}" mysql --defaults-extra-file="${tmp}" "$@"
+    rc=$?
+    docker exec "${MYSQL_CONTAINER}" rm -f "${tmp}" >/dev/null 2>&1 || true
+    return ${rc}
+}
+
 db_query() {
-    docker exec "${MYSQL_CONTAINER}" mysql -N -B --default-character-set=utf8mb4 \
-        -uroot -p"${MYSQL_ROOT_PASSWORD}" "${DB_NAME}" -e "$1" 2>/dev/null
+    docker_mysql -N -B --default-character-set=utf8mb4 "${DB_NAME}" -e "$1" 2>/dev/null
 }
 
 # 内嵌基线：解码到临时目录，并按内嵌 SHA256SUMS 复校（首尾各校一次，防止脚本被截断/篡改）
@@ -4754,13 +4773,23 @@ install_compose() {
         return 0
     fi
     tmp="$(mktemp)"
+    local want_sha=""
+    case "$(uname -m)" in
+        x86_64|amd64) want_sha="${COMPOSE_SHA256_X86_64}" ;;
+    esac
     for url in "${COMPOSE_URLS[@]}"; do
         info "下载 compose：${url%%/https*}"
-        if curl -fL --connect-timeout 10 --speed-limit 102400 --speed-time 60 -m 600 -o "${tmp}" "${url}"; then
-            install -m 0755 "${tmp}" "${plugin_dir}/docker-compose"
-            rm -f "${tmp}"
-            return 0
+        if ! curl -fL --connect-timeout 10 --speed-limit 102400 --speed-time 60 -m 600 -o "${tmp}" "${url}"; then
+            continue
         fi
+        if [ -n "${want_sha}" ] && [ "$(sha256sum "${tmp}" 2>/dev/null | awk '{print $1}')" != "${want_sha}" ]; then
+            warn "compose 校验失败（sha256 不匹配），已丢弃：${url}"
+            rm -f "${tmp}"; tmp="$(mktemp)"
+            continue
+        fi
+        install -m 0755 "${tmp}" "${plugin_dir}/docker-compose"
+        rm -f "${tmp}"
+        return 0
     done
     rm -f "${tmp}"
     return 1
@@ -5071,8 +5100,8 @@ DB_INITIALIZED=0
 if [ "${TABLE_COUNT}" -eq 0 ]; then
     info "空库，开始恢复基线快照"
     set +e
-    gzip -dc "${SNAPSHOT}" | docker exec -i "${MYSQL_CONTAINER}" mysql \
-        --default-character-set=utf8mb4 -uroot -p"${MYSQL_ROOT_PASSWORD}" "${DB_NAME}" 2>&1 | tee "${RESTORE_LOG}"
+    gzip -dc "${SNAPSHOT}" | docker_mysql \
+        --default-character-set=utf8mb4 "${DB_NAME}" 2>&1 | tee "${RESTORE_LOG}"
     RESTORE_RC=${PIPESTATUS[1]}
     set -e
     if [ "${RESTORE_RC}" -ne 0 ]; then

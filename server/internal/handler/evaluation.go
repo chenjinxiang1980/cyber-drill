@@ -30,6 +30,11 @@ func clampManualScore(score, max float64) float64 {
 // 返回 score_items 模板 + 当前项目的 scores 明细（含 MODE 和 K1-K9）
 func GetEvaluation(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 外部单位仅可查看医院上报材料，评分明细与封存版本不下发。
+		if isExternalUser(auth.CurrentUser(c)) {
+			c.JSON(http.StatusOK, gin.H{"items": []gin.H{}, "scores": []gin.H{}})
+			return
+		}
 		qProjID := c.Query("projectId")
 		if qProjID == "" {
 			qProjID = currentProjectID(database)

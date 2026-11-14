@@ -6,7 +6,7 @@
 
 面向医院、政府与企事业单位**内网**的桌面推演 + 实战演练指挥调度平台：内置勒索病毒、横向渗透、DDoS、钓鱼邮件、存储故障等高频安全事件剧本，覆盖演练编排、多角色协同、时序控制、处置记录、监视大屏、自动考评与复盘报告全流程。
 
-> 当前版本：**1.0.6** · 许可证：MIT © 2026 陈金祥
+> 当前版本：**1.0.7** · 许可证：MIT © 2026 陈金祥
 
 ---
 
@@ -83,7 +83,7 @@ sudo bash install.sh --image-source ghcr
 ```bash
 # 目录内只需这三个文件
 ls
-# install.sh  cyber-drill-1.0.6.tar.gz  mysql-8.0.tar.gz
+# install.sh  cyber-drill-1.0.7.tar.gz  mysql-8.0.tar.gz
 
 sudo bash install.sh --mode offline
 ```
@@ -91,9 +91,9 @@ sudo bash install.sh --mode offline
 镜像 tar 可由任意镜像源获取，例如在能联网的机器上导出：
 
 ```bash
-docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.6
-docker tag  swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.6 cyber-drill:1.0.6
-docker save cyber-drill:1.0.6 | gzip -1 > cyber-drill-1.0.6.tar.gz
+docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.7
+docker tag  swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.7 cyber-drill:1.0.7
+docker save cyber-drill:1.0.7 | gzip -1 > cyber-drill-1.0.7.tar.gz
 docker pull mysql:8.0
 docker save mysql:8.0 | gzip -1 > mysql-8.0.tar.gz
 ```
@@ -105,7 +105,7 @@ docker save mysql:8.0 | gzip -1 > mysql-8.0.tar.gz
 ### 安装后：访问与初始口令
 
 - 浏览器访问 `http://<服务器IP>:8090`（登录页是 `/`）。
-- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，返回 `"version":"1.0.6"`。
+- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，返回 `"version":"1.0.7"`。
 - 初始账号：`admin` / `platformadmin`；口令在安装结束时**只打印一次**，同时写入 `/opt/cyber-drill/.env`（权限 600）。
 - **首次登录必须立即修改初始口令**；改密后 `.env` 中的初始口令失效。若已遗失，可在安装器所在目录执行 `sudo bash install.sh --show-secrets`（仅在尚未改密时有效），或直接查看 `.env`。
 - 常用参数：`--port 8090`、`--install-dir /opt/cyber-drill`、`--mysql-port 3306`、`--project drill`、`--tls-cert/--tls-key`；完整列表见 [安装文档](docs/install-docker-openeuler.md)。
@@ -122,7 +122,7 @@ sudo bash install.sh --reinstall
 sudo bash install.sh --reinstall --confirm DELETE
 
 # B. 保留数据：用升级工具（自动备份 → 迁移 → 重建 app → 校验，失败回滚）
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.6 --dir /opt/cyber-drill
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.7 --dir /opt/cyber-drill
 ```
 
 升级工具不在 `install.sh` 内。从 Gitee 取该目录（8 个文件）即可：
@@ -133,7 +133,7 @@ for f in upgrade.sh manifest.json lib/00-common.sh lib/10-manifest.sh \
          lib/20-backup.sh lib/30-migrate.sh lib/40-compose.sh lib/50-rollback.sh; do
   sudo curl -fsSL -o "$f" "https://gitee.com/habeas/cyber-drill/raw/main/deploy/upgrade/$f"
 done
-sudo bash upgrade.sh --to 1.0.6 --dir /opt/cyber-drill
+sudo bash upgrade.sh --to 1.0.7 --dir /opt/cyber-drill
 ```
 
 ### 镜像源选择
@@ -145,7 +145,7 @@ sudo bash upgrade.sh --to 1.0.6 --dir /opt/cyber-drill
 | `--image-source swr` | 使用 `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:<版本>`（国内推荐） |
 | `--image-source local` | 使用本地镜像 tar（等价于 `--mode offline`），不访问镜像仓库 |
 
-镜像 tag 取仓库根目录 `VERSION`（当前 `1.0.6`），可用 `--version` 覆盖。
+镜像 tag 取仓库根目录 `VERSION`（当前 `1.0.7`），可用 `--version` 覆盖。
 
 ### Windows
 
@@ -159,8 +159,8 @@ Windows 不提供原生一键安装脚本。推荐使用 **Docker Desktop + WSL2
 
 ```bash
 sudo bash deploy/upgrade/upgrade.sh --status
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.6 --dry-run
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.6 --dir /opt/cyber-drill
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.7 --dry-run
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.7 --dir /opt/cyber-drill
 ```
 
 版本链与升级矩阵见 [`docs/upgrade.md`](docs/upgrade.md) 与 [`deploy/upgrade/manifest.json`](deploy/upgrade/manifest.json)。
@@ -192,7 +192,7 @@ go build -trimpath -ldflags "-s -w -X drill-system/internal/version.Version=${VE
 Emergency/
 ├── server/                  # Go 后端（Gin + MySQL）
 ├── public/                  # 前端静态页面（无构建步骤，由服务端托管）
-├── migrations/              # 0000_bootstrap … 0136_task_proxy_dispatch（1.0.6 共 88 条）
+├── migrations/              # 0000_bootstrap … 0136_task_proxy_dispatch（1.0.7 共 88 条）
 ├── deploy/
 │   ├── install/             # ★ 唯一一键安装入口（install.sh 内嵌基线快照）
 │   ├── upgrade/             # 升级脚本与版本清单

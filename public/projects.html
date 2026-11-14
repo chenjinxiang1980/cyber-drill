@@ -235,7 +235,7 @@ document.addEventListener('app:ready', function(e){
       var avail = MOCK.ROLES.filter(function(r){ return used.indexOf(r.id)<0; });
       if(!avail.length){ App.toast('全部角色已在编组中','warn'); return; }
       App.modal({ title:'添加参演角色', body:'<div class="form-row"><label class="f-label">参演角色</label><select class="select" id="amRole">'
-        + avail.map(function(r){ return '<option value="'+r.id+'">'+r.name+'</option>'; }).join('')+'</select></div>',
+        + avail.map(function(r){ return '<option value="'+App.esc(r.id)+'">'+App.esc(r.name)+'</option>'; }).join('')+'</select></div>',
         foot:'<button class="btn" id="amNo">取消</button><button class="btn primary" id="amYes">加入</button>',
         onOpen:function(m){
           m.querySelector('#amNo').onclick = m.close;

@@ -43,7 +43,7 @@ sudo bash install.sh --image-source ghcr
 - 基线快照已内嵌在 `install.sh` 里，**不需要再下载 baseline 相关文件**；`bash install.sh --help` 末尾会打印内嵌版本与 SHA256。
 - 已装 Docker/Compose 时，安装器只拉镜像、建库、恢复基线、起应用。
 
-安装器会依次完成：前置检查 → 检查/安装 Docker 与 Compose → 选择镜像源并拉取镜像 → 生成随机强口令 `.env`（权限 600）→ 启动 MySQL → 恢复 1.0.6 基线快照（结构 + 参照数据 + 88 条 `schema_migrations`）→ 启动应用并健康检查 → 打印访问地址与一次性初始口令。
+安装器会依次完成：前置检查 → 检查/安装 Docker 与 Compose → 选择镜像源并拉取镜像 → 生成随机强口令 `.env`（权限 600）→ 启动 MySQL → 恢复 1.0.7 基线快照（结构 + 参照数据 + 88 条 `schema_migrations`）→ 启动应用并健康检查 → 打印访问地址与一次性初始口令。
 
 ## 路径二：离线安装（install.sh 与镜像 tar 同目录，内网首选）
 
@@ -51,7 +51,7 @@ sudo bash install.sh --image-source ghcr
 
 ```text
 install.sh
-cyber-drill-1.0.6.tar.gz
+cyber-drill-1.0.7.tar.gz
 mysql-8.0.tar.gz
 ```
 
@@ -64,9 +64,9 @@ sudo bash install.sh --mode offline
 镜像 tar 可由任意镜像源获取，例如在能联网的机器上导出：
 
 ```bash
-docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.6
-docker tag  swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.6 cyber-drill:1.0.6
-docker save cyber-drill:1.0.6 | gzip -1 > cyber-drill-1.0.6.tar.gz
+docker pull swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.7
+docker tag  swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.7 cyber-drill:1.0.7
+docker save cyber-drill:1.0.7 | gzip -1 > cyber-drill-1.0.7.tar.gz
 docker pull mysql:8.0
 docker save mysql:8.0 | gzip -1 > mysql-8.0.tar.gz
 ```
@@ -76,7 +76,7 @@ docker save mysql:8.0 | gzip -1 > mysql-8.0.tar.gz
 ## 安装后：访问与初始口令
 
 - 浏览器访问 `http://<服务器IP>:8090`（登录页是 `/`）。
-- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，应返回 `"version":"1.0.6"`。
+- 健康检查：`curl -fsS http://127.0.0.1:8090/api/health`，应返回 `"version":"1.0.7"`。
 - 初始账号：`admin`、`platformadmin`；口令在安装结束时**只打印一次**，同时写入 `/opt/cyber-drill/.env`（权限 600）。
 - **首次登录必须立即修改初始口令**；改密后 `.env` 中的一次性口令失效。未改密前可用 `sudo bash install.sh --show-secrets` 再次打印。
 
@@ -89,7 +89,7 @@ docker save mysql:8.0 | gzip -1 > mysql-8.0.tar.gz
 | `--image-source swr` | `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:<版本>`（国内推荐） |
 | `--image-source local` | 使用本地镜像 tar（等价 `--mode offline`），不访问镜像仓库 |
 
-镜像 tag 与仓库根目录 `VERSION` 一致（当前 `1.0.6`），可用 `--version` 覆盖。
+镜像 tag 与仓库根目录 `VERSION` 一致（当前 `1.0.7`），可用 `--version` 覆盖。
 
 ## 容器名与多实例
 
@@ -122,7 +122,7 @@ sudo bash install.sh --reinstall
 sudo bash install.sh --reinstall --confirm DELETE
 
 # B. 保留数据：用升级工具（备份 → 迁移 → 重建 app → 校验，失败回滚）
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.6 --dir /opt/cyber-drill
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.7 --dir /opt/cyber-drill
 ```
 
 升级工具不在 `install.sh` 内，从 Gitee 取该目录（8 个文件）：
@@ -133,7 +133,7 @@ for f in upgrade.sh manifest.json lib/00-common.sh lib/10-manifest.sh \
          lib/20-backup.sh lib/30-migrate.sh lib/40-compose.sh lib/50-rollback.sh; do
   sudo curl -fsSL -o "$f" "https://gitee.com/habeas/cyber-drill/raw/main/deploy/upgrade/$f"
 done
-sudo bash upgrade.sh --to 1.0.6 --dir /opt/cyber-drill
+sudo bash upgrade.sh --to 1.0.7 --dir /opt/cyber-drill
 ```
 
 ## 安装后检查
@@ -143,7 +143,7 @@ docker compose -f /opt/cyber-drill/docker-compose.yml ps
 curl -fsS http://127.0.0.1:8090/api/health
 ```
 
-容器均为 `healthy`、健康检查返回 `"version":"1.0.6"` 后，浏览器访问 `http://<服务器IP>:8090`。
+容器均为 `healthy`、健康检查返回 `"version":"1.0.7"` 后，浏览器访问 `http://<服务器IP>:8090`。
 
 ## 开发者路径（不是部署路径）
 

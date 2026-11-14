@@ -20,7 +20,11 @@ import (
 // GetScenarios GET /api/content/scenarios
 func GetScenarios(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(200, queryScenarios(database))
+		list := queryScenarios(database)
+		if isExternalUser(auth.CurrentUser(c)) {
+			list = externalScenarios(list)
+		}
+		c.JSON(200, list)
 	}
 }
 
@@ -34,13 +38,19 @@ func GetScriptNodes(database *db.DB) gin.HandlerFunc {
 // GetProjects GET /api/content/projects
 func GetProjects(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(200, queryProjects(database, ""))
+		u := auth.CurrentUser(c)
+		list := queryProjects(database, "")
+		c.JSON(200, filterProjectsForUser(list, u, activeProjectID(database)))
 	}
 }
 
 // GetMessages GET /api/content/messages
 func GetMessages(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if isExternalUser(auth.CurrentUser(c)) {
+			c.JSON(200, []gin.H{})
+			return
+		}
 		c.JSON(200, queryMessages(database))
 	}
 }
@@ -90,6 +100,10 @@ func GetLedger(database *db.DB) gin.HandlerFunc {
 // GetOpinion GET /api/content/opinion
 func GetOpinion(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if isExternalUser(auth.CurrentUser(c)) {
+			c.JSON(200, []gin.H{})
+			return
+		}
 		c.JSON(200, queryOpinion(database))
 	}
 }
@@ -97,6 +111,10 @@ func GetOpinion(database *db.DB) gin.HandlerFunc {
 // GetImpact GET /api/content/impact
 func GetImpact(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if isExternalUser(auth.CurrentUser(c)) {
+			c.JSON(200, []gin.H{})
+			return
+		}
 		c.JSON(200, queryImpact(database, resolveActiveProjectID(database)))
 	}
 }
@@ -104,6 +122,10 @@ func GetImpact(database *db.DB) gin.HandlerFunc {
 // GetSnapshots GET /api/content/snapshots
 func GetSnapshots(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if isExternalUser(auth.CurrentUser(c)) {
+			c.JSON(200, []gin.H{})
+			return
+		}
 		c.JSON(200, querySnapshots(database))
 	}
 }
@@ -111,6 +133,10 @@ func GetSnapshots(database *db.DB) gin.HandlerFunc {
 // GetSeqFlow GET /api/content/seqflow
 func GetSeqFlow(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if isExternalUser(auth.CurrentUser(c)) {
+			c.JSON(200, []gin.H{})
+			return
+		}
 		c.JSON(200, querySeqFlow(database))
 	}
 }

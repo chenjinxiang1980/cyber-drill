@@ -1,8 +1,8 @@
-# =============================================================================
+﻿# =============================================================================
 # drill-server —— Docker 多阶段构建（**可替换国产基础镜像**）
 #
 # 用法：
-#   docker build -f deploy/linux/Dockerfile -t drill-server:1.0.6 .
+#   docker build -f deploy/linux/Dockerfile -t drill-server:1.0.7 .
 #   # 指定国产发行版：
 #   docker build -f deploy/linux/Dockerfile \
 #       --build-arg RUNTIME_BASE=openeuler/openeuler:22.03 \
@@ -67,8 +67,8 @@
 # =============================================================================
 
 # ---------- 可替换参数 ----------
-ARG BUILDER_BASE=golang:1.27-alpine
-ARG RUNTIME_BASE=alpine:3.20
+ARG BUILDER_BASE=golang:1.27.4-alpine
+ARG RUNTIME_BASE=alpine:3.22
 ARG GOARCH=amd64
 ARG GOOS=linux
 
@@ -90,7 +90,7 @@ COPY migrations/ ../migrations/
 
 # 编译两个二进制
 # -trimpath 剥离本地路径，-ldflags 可注入版本号
-ARG VERSION=1.0.6
+ARG VERSION=1.0.7
 ARG BUILD_TIME=unknown
 ARG GIT_COMMIT=unknown
 

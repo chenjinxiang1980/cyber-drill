@@ -1361,7 +1361,7 @@ document.addEventListener('app:ready', function(e){
       var n = nodes[i];
       var t = TYPES[n.type]||TYPES.task;
       var qr = qualityOf(n);
-      var targetOpts = MOCK.ROLES.map(function(r){ return '<option value="'+App.esc(r.name)+'"'+(n.target===r.name?' selected':'')+'>'+r.name+'</option>'; }).join('');
+      var targetOpts = MOCK.ROLES.map(function(r){ return '<option value="'+App.esc(r.name)+'"'+(n.target===r.name?' selected':'')+'>'+App.esc(r.name)+'</option>'; }).join('');
       if(MOCK.ROLES.map(function(r){ return r.name; }).indexOf(n.target)<0){
         targetOpts = '<option value="'+App.esc(n.target||'')+'" selected>'+App.esc(n.target||'（未指定）')+'</option>' + targetOpts;
       }

@@ -31,6 +31,29 @@ func BootstrapHandler(database *db.DB) gin.HandlerFunc {
 				activeID = pid
 			}
 		}
+		ext := isExternalUser(u)
+		// 外部单位仅可见当前演练项目与自身任务节点，剧本答案/内部会商/评分/通知一律不下发。
+		projects = filterProjectsForUser(projects, u, activeID)
+		scenarios := queryScenarios(database)
+		scriptNodes := queryScriptNodes(database)
+		messages := queryMessages(database)
+		seqFlow := querySeqFlowForBootstrap(database)
+		scoreItems := queryScoreItems(database)
+		scores := queryScores(database, activeID)
+		opinion := queryOpinion(database)
+		impact := queryImpact(database, activeID)
+		snapshots := querySnapshots(database)
+		if ext {
+			scenarios = externalScenarios(scenarios)
+			scriptNodes = externalScriptNodes(scriptNodes, u)
+			messages = []gin.H{}
+			seqFlow = []gin.H{}
+			scoreItems = []gin.H{}
+			scores = []gin.H{}
+			opinion = []gin.H{}
+			impact = []gin.H{}
+			snapshots = []gin.H{}
+		}
 		c.JSON(200, gin.H{
 			"serverTime":      util.NowSec(),
 			"activeProjectId": activeID,
@@ -44,24 +67,24 @@ func BootstrapHandler(database *db.DB) gin.HandlerFunc {
 			"roles":         queryRoles(database),
 			"users":         queryUsers(database, u),
 			"projects":      projects,
-			"scenarios":     queryScenarios(database),
-			"scriptNodes":   queryScriptNodes(database),
+			"scenarios":     scenarios,
+			"scriptNodes":   scriptNodes,
 			"tasks":         queryTasks(database, u),
 			"formTemplates": queryFormTemplates(database),
-			"messages":      queryMessages(database),
+			"messages":      messages,
 			"notifs":        queryNotifs(database, u),
 			"chat":          queryChat(database, u),
 			"evidence":      queryEvidence(database, u),
-			"snapshots":     querySnapshots(database),
+			"snapshots":     snapshots,
 			"timeline":      queryTimelineForBootstrap(database, u),
-			"seqFlow":       querySeqFlowForBootstrap(database),
-			"scoreItems":    queryScoreItems(database),
-			"scores":        queryScores(database, activeID),
+			"seqFlow":       seqFlow,
+			"scoreItems":    scoreItems,
+			"scores":        scores,
 			"ledger":        ledgerForUser(database, u),
-			"opinion":       queryOpinion(database),
+			"opinion":       opinion,
 			"knowledge":     knowledgeForUser(database, u),
 			"auditLogs":     queryAuditLogs(database, u),
-			"impact":        queryImpact(database, activeID),
+			"impact":        impact,
 			"dict":          queryDictMap(database),
 			"simData":       querySimDataMap(database),
 		})
@@ -69,6 +92,78 @@ func BootstrapHandler(database *db.DB) gin.HandlerFunc {
 }
 
 // --- 辅助 ---
+
+// isExternalUser 外部单位判定（数据库 external 标记或内置外部角色）。
+func isExternalUser(u *auth.User) bool {
+	return u != nil && (u.Role.External || auth.IsExternal(u.Role.ID))
+}
+
+// filterProjectsForUser 外部单位只能看到当前演练项目，避免枚举其他项目与成员。
+func filterProjectsForUser(projects []gin.H, u *auth.User, activeID string) []gin.H {
+	if !isExternalUser(u) {
+		return projects
+	}
+	if activeID == "" {
+		return []gin.H{}
+	}
+	out := make([]gin.H, 0, 1)
+	for _, p := range projects {
+		if id, _ := p["id"].(string); id == activeID {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// externalScenarios 外部单位只保留剧本的基本展示字段，去掉描述/告警等内部信息。
+func externalScenarios(list []gin.H) []gin.H {
+	out := make([]gin.H, 0, len(list))
+	for _, s := range list {
+		item := gin.H{}
+		for _, k := range []string{"id", "name", "type", "level", "status", "category"} {
+			if v, ok := s[k]; ok {
+				item[k] = v
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// targetIsRole 判断剧本节点的 target 是否指向该角色。
+// script_nodes.target 存的是角色名称（历史数据也可能存简称或角色 ID），三者都比对，
+// 避免外部单位过滤时把属于自己的节点也一并过滤掉。
+func targetIsRole(target string, role auth.Role) bool {
+	t := strings.TrimSpace(target)
+	if t == "" {
+		return false
+	}
+	return t == role.ID || t == strings.TrimSpace(role.Name) || t == strings.TrimSpace(role.Short)
+}
+
+// externalScriptNodes 外部单位只下发与其自身任务相关的节点，并剔除
+// desc/guide/keywords/action/wrong/score 等剧本答案字段。
+func externalScriptNodes(nodes []gin.H, u *auth.User) []gin.H {
+	out := make([]gin.H, 0)
+	for _, n := range nodes {
+		target, _ := n["target"].(string)
+		if u == nil || !targetIsRole(target, u.Role) {
+			continue
+		}
+		item := gin.H{}
+		for _, k := range []string{
+			"id", "scenarioId", "type", "title", "shortTitle", "target", "time",
+			"timeout", "form", "att", "seq", "required", "receiver", "deps",
+			"flowType", "posX", "posY", "anchorId", "parallelDesc", "releaseTiming",
+		} {
+			if v, ok := n[k]; ok {
+				item[k] = v
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
 
 // nullInt 从 sql.NullInt64 取 int（值接收，0 表示无效）
 func nullInt(n sql.NullInt64) int {
@@ -1094,7 +1189,7 @@ func queryNotifs(database *db.DB, u *auth.User) []gin.H {
 		}
 	}
 
-	isExt := u != nil && auth.IsExternal(u.Role.ID)
+	isExt := isExternalUser(u)
 
 	var rows *sql.Rows
 	var err error
@@ -1215,7 +1310,7 @@ func queryEvidence(database *db.DB, u *auth.User) []gin.H {
 	}
 	defer rows.Close()
 
-	isExt := u != nil && auth.IsExternal(u.Role.ID)
+	isExt := isExternalUser(u)
 	allowedTypes := map[string]bool{}
 	for _, t := range externalEvidenceTypes {
 		allowedTypes[t] = true
@@ -1298,7 +1393,7 @@ func queryTimeline(database *db.DB, u *auth.User) []gin.H {
 		return []gin.H{}
 	}
 	defer rows.Close()
-	isExt := u != nil && auth.IsExternal(u.Role.ID)
+	isExt := isExternalUser(u)
 	out := make([]gin.H, 0)
 	for rows.Next() {
 		var tm, actor, roleID, action, detail, level sql.NullString
@@ -1331,7 +1426,7 @@ func queryTimelineForBootstrap(database *db.DB, u *auth.User) []gin.H {
 		return []gin.H{}
 	}
 	defer rows.Close()
-	isExt := u != nil && auth.IsExternal(u.Role.ID)
+	isExt := isExternalUser(u)
 	out := make([]gin.H, 0)
 	for rows.Next() {
 		var projectID, tm, actor, roleID, action, detail, level sql.NullString

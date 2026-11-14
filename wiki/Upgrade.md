@@ -6,25 +6,26 @@
 
 ```bash
 sudo bash deploy/upgrade/upgrade.sh --status
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.6 --dry-run
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.7 --dry-run
 ```
 
 ## 执行升级
 
 ```bash
-sudo bash deploy/upgrade/upgrade.sh --to 1.0.6
+sudo bash deploy/upgrade/upgrade.sh --to 1.0.7
 ```
 
 可显式指定来源版本：
 
 ```bash
-sudo bash deploy/upgrade/upgrade.sh --from 1.0.5 --to 1.0.6
+sudo bash deploy/upgrade/upgrade.sh --from 1.0.6 --to 1.0.7
 ```
 
 ## 升级矩阵（摘要）
 
 | 路径 | 迁移条数 | 含 DDL | 说明 |
 |---|---|---|---|
+| 1.0.6 → 1.0.7 | 0 | 否 | 无数据库迁移，仅替换应用镜像并重建容器（数秒停机）；安全加固：外部单位剧本越权与 XSS 修复 |
 | 1.0.5 → 1.0.6 | 0 | 否 | 无数据库迁移，仅替换应用镜像并重建容器（数秒停机）；登录页多角色选身份 |
 | 1.0.4 → 1.0.5 | 3 | 是 | 0133 删除退役 S20、0134 原 S21 改名 S20（现网已执行）；0136 新增 `tasks` 代填字段、索引与存量回填 |
 | 1.0.3 → 1.0.4 | 5 | 否 | 五条纯 DML（0128–0132）：下线两个临时角色、补齐必需角色覆盖、S20 并入 S01 并补结束依赖 |
@@ -38,6 +39,8 @@ sudo bash deploy/upgrade/upgrade.sh --from 1.0.5 --to 1.0.6
 | 0.5.0 → 1.0.0 | 76 | 是 | best effort，建议先整库备份 |
 
 完整版本链见 `deploy/upgrade/manifest.json` 与 `docs/upgrade.md`。
+
+> 1.0.7 无数据库迁移（累计仍为 88 条，末条 `0136_task_proxy_dispatch`），升级仅替换应用镜像并重建容器；`settings.brand_version` 仍保持 `v1.0.0`（版本以 `/api/health` 的 `version` 为准，页面显示 **v1.0.7**）。本次为安全加固：外部单位 bootstrap 越权、报告与台账 XSS、导出 HTML 注入、安装脚本口令 argv 与 compose 下载校验。
 
 > 1.0.6 无数据库迁移（累计仍为 88 条，末条 `0136_task_proxy_dispatch`），升级仅替换应用镜像并重建容器；`settings.brand_version` 仍保持 `v1.0.0`（版本以 `/api/health` 的 `version` 为准，页面显示 **v1.0.6**）。本次功能改动为登录页多角色账号选身份（两步登录 + 一次性票据）。
 

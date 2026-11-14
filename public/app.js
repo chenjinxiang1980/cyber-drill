@@ -121,7 +121,7 @@ function mountShell(pageKey){
   var brandLogo = (window.API && API.mediaUrl) ? API.mediaUrl(B.logo || 'img/logo.png') : (B.logo || 'img/logo.png');
   var brandSystem = B.systemName || '网络安全应急演练';
   var brandUnit = B.unitName || '示例医院';
-  var brandVer = (window.DRILL && DRILL.runtimeVersion && DRILL.runtimeVersion()) || B.version || 'v1.0.6';
+  var brandVer = (window.DRILL && DRILL.runtimeVersion && DRILL.runtimeVersion()) || B.version || 'v1.0.7';
   var brandGh = B.github || 'https://github.com/chenjinxiang1980/cyber-drill';
   var brandGe = B.gitee || 'https://gitee.com/habeas/cyber-drill';
   var html = '<aside class="sidebar"><div class="brand"><span class="logo brand-logo"><img src="'+brandLogo+'" alt="'+App.esc(brandUnit)+'院徽"></span><span class="bt"><div class="t1">'+App.esc(brandSystem)+'</div><div class="t2">'+App.esc(brandUnit)+' · DRILL</div></span></div><nav class="nav">';
@@ -136,7 +136,7 @@ function mountShell(pageKey){
     });
     html += '</div>';
   });
-  html += '</nav><div class="side-foot"><div class="u-role">'+r.name+'</div><div class="u-name">'+curUser()+'</div><div class="u-out" data-act="logout">'+icon('logout')+'<span>退出登录</span></div>'
+  html += '</nav><div class="side-foot"><div class="u-role">'+App.esc(r.name)+'</div><div class="u-name">'+App.esc(curUser())+'</div><div class="u-out" data-act="logout">'+icon('logout')+'<span>退出登录</span></div>'
     + '<div class="u-meta"><span class="ver" data-brand="version">'+App.esc(brandVer)+'</span>'
     + '<a class="lnk" data-brand="github" href="'+App.esc(brandGh)+'" target="_blank" rel="noopener" title="GitHub 项目地址">'+icon('github')+'</a>'
     + '<a class="lnk" data-brand="gitee" href="'+App.esc(brandGe)+'" target="_blank" rel="noopener" title="Gitee 项目地址">'+icon('gitee')+'</a>'
@@ -152,7 +152,7 @@ function mountShell(pageKey){
     + '<div class="topbar-right-group">'
     +   '<span class="bell" data-act="show-notifs">'+icon('bell')+'<span class="n" id="bellN" style="display:none">0</span></span>'
     +   '<span class="bell voice-btn" id="voiceBtn" data-act="toggle-voice" title="语音播报"></span>'
-    +   '<span class="role-chip"><span class="av">'+(r.name||'?').slice(0,1)+'</span>'+r.name+'</span>'
+    +   '<span class="role-chip"><span class="av">'+App.esc((r.name||'?').slice(0,1))+'</span>'+App.esc(r.name)+'</span>'
     +   '<span class="tb-out" data-act="goto" data-href="password.html">'+icon('lock')+'修改密码</span>'
     +   '<span class="tb-out" data-act="logout">'+icon('logout')+'退出</span>'
     +   '<span class="tb-clock" id="topClock"></span>'
@@ -678,7 +678,7 @@ function donut(el, data, size){ // [{label,value,color}]
 /* ---------- 项目切换 / 通知 ---------- */
 function switchProject(){
   API.getProjects().then(function(ps){
-    modal({ title:'切换演练项目', body: ps.map(function(p){ return '<div class="task-item" data-id="'+p.id+'" style="margin-bottom:8px"><span class="tk-ic">'+icon('projects')+'</span><div><div class="tk-title">'+p.name+'</div><div class="tk-meta"><span>'+p.type+'</span><span>'+p.date+'</span></div></div><span class="tk-right">'+statusTag(p.status)+'</span></div>'; }).join(''),
+    modal({ title:'切换演练项目', body: ps.map(function(p){ return '<div class="task-item" data-id="'+App.esc(p.id)+'" style="margin-bottom:8px"><span class="tk-ic">'+icon('projects')+'</span><div><div class="tk-title">'+App.esc(p.name)+'</div><div class="tk-meta"><span>'+App.esc(p.type)+'</span><span>'+App.esc(p.date)+'</span></div></div><span class="tk-right">'+statusTag(p.status)+'</span></div>'; }).join(''),
       onOpen:function(ov){ ov.querySelectorAll('.task-item').forEach(function(el){ el.onclick=function(){ API.setActiveProject(el.dataset.id).then(function(){ toast('已切换演练项目','ok'); location.reload(); }); }; }); } });
   });
 }

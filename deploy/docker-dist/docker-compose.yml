@@ -50,7 +50,7 @@ services:
       --default-time-zone='+08:00'
     healthcheck:
       # root ping —— 用 MYSQL_ROOT_PASSWORD（compose 里已定义）
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p${MYSQL_ROOT_PASSWORD} --silent"]
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h localhost -uroot --silent"]
       interval: 10s
       timeout: 5s
       retries: 10

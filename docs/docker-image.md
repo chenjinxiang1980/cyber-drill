@@ -33,7 +33,7 @@
 
 完整命令、前置条件、初始口令、重装与升级见 [一键安装（Docker / openEuler）](install-docker-openeuler.md)。
 
-应用镜像：`ghcr.io/chenjinxiang1980/cyber-drill:1.0.6` 或 `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.6`；
+应用镜像：`ghcr.io/chenjinxiang1980/cyber-drill:1.0.7` 或 `swr.cn-east-3.myhuaweicloud.com/chenjinxiang/cyber-drill:1.0.7`；
 MySQL 为 `mysql:8.0`（Docker Hub 不可达时安装器自动回退国内镜像源）。
 
 下面的手工方式需要 compose 文件，面向运维定制与开发者，**不是**最终用户的一键部署路径。

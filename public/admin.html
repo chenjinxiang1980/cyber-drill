@@ -225,7 +225,7 @@ document.addEventListener('app:ready', function(e){
     document.querySelectorAll('#uBody [data-rp]').forEach(function(b){
       b.onclick = function(){
         var u = users[+b.dataset.rp];
-        App.confirmSim('将账号「'+u.account+'」（'+u.name+'）的密码重置为随机初始口令？', function(){
+        App.confirmSim('将账号「'+App.esc(u.account)+'」（'+App.esc(u.name)+'）的密码重置为随机初始口令？', function(){
           API.resetUserPassword(u.id).then(function(r){
             showInitialPassword(u.account, r && r.initialPassword);
           }).catch(function(e){ App.toast((e&&e.message)||'重置失败','err'); });
@@ -236,7 +236,7 @@ document.addEventListener('app:ready', function(e){
       b.onclick = function(){
         var u = users[+b.dataset.tg];
         var next = u.status==='启用' ? '停用' : '启用';
-        App.confirmSim('将账号「'+u.account+'」（'+u.name+'）状态切换为「'+next+'」？', function(){
+        App.confirmSim('将账号「'+App.esc(u.account)+'」（'+App.esc(u.name)+'）状态切换为「'+App.esc(next)+'」？', function(){
           API.updateUser(u.id, { status: next }).then(function(){
             u.status = next;
             renderUsers();

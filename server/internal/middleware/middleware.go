@@ -87,6 +87,8 @@ func SecurityHeaders(scriptHashes []string) gin.HandlerFunc {
 		"img-src 'self' data:; " +
 		"font-src 'self' data:; " +
 		"connect-src 'self'; " +
+		"object-src 'none'; " +
+		"base-uri 'none'; " +
 		"frame-ancestors 'self'; " +
 		"form-action 'self'"
 	return func(c *gin.Context) {

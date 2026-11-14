@@ -246,7 +246,7 @@ window.ReportExport = (function () {
       evalTxt = ss.pct === null ? '未开展' : (ss.sum + ' / ' + (ss.max || '—') + ' 分（得分率 ' + ss.pct + '%，等级' + grade + '）');
     }
 
-    var conclusion = '本次演练以「' + (sc ? sc.name : '—') + '」为场景，演练等级' + App.esc(p.level || '—') + '，共设置处置任务 ' + st.total + ' 项，完成 ' + st.done +
+    var conclusion = '本次演练以「' + (sc ? App.esc(sc.name) : '—') + '」为场景，演练等级' + App.esc(p.level || '—') + '，共设置处置任务 ' + st.total + ' 项，完成 ' + st.done +
       ' 项，完成率 ' + st.rate + '%' + (st.overdue ? ('，超时 ' + st.overdue + ' 项') : '') + '；系统自动考评为 ' + evalTxt +
       '。' + (evalPct === null ? '总体完成情况尚可，建议补充考评后形成量化结论。' : (evalPct >= 80 && st.rate >= 90 ? '演练组织有序、职责清晰、处置及时，达到演练预期目标。' : '演练基本达到预期目标，但在时限控制、证据完备性与流程闭环方面仍需改进。'));
 
@@ -359,7 +359,7 @@ window.ReportExport = (function () {
         var others = arr(d.snapshots).filter(function (x) { return x.version !== sn.version; });
         if (others.length) {
           s6 += '<p style="font-size:9.5pt;color:#444">历史版本：' + others.map(function (x) {
-            return 'v' + x.version + '（' + x.snapshotStatus + (x.recalcReason ? '·' + x.recalcReason : '') + '，' + (x.score) + ' / ' + (num(x.maxScore, 0) || '—') + ' 分）';
+            return 'v' + App.esc(x.version) + '（' + App.esc(x.snapshotStatus) + (x.recalcReason ? '·' + App.esc(x.recalcReason) : '') + '，' + App.esc(x.score) + ' / ' + (num(x.maxScore, 0) || '—') + ' 分）';
           }).join('；') + '。重算只追加新版本，不覆盖封存版本。</p>';
         }
       } else if (p.status === '已结束' || p.status === '已归档') {

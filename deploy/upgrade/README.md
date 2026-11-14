@@ -1,4 +1,4 @@
-# deploy/upgrade —— 一键升级（速查）
+﻿# deploy/upgrade —— 一键升级（速查）
 
 完整说明：[docs/upgrade.md](../../docs/upgrade.md)；设计规格：[docs/upgrade-tool-design.md](../../docs/upgrade-tool-design.md)。
 源码自编译用户：[docs/build-from-source.md](../../docs/build-from-source.md)。
@@ -7,8 +7,8 @@
 
 ```bash
 sudo ./deploy/upgrade/upgrade.sh --status                 # 现在是什么版本、上一次升级结果
-sudo ./deploy/upgrade/upgrade.sh --to 1.0.6 --dry-run     # 只检查 + 打印计划，零变更
-sudo ./deploy/upgrade/upgrade.sh --to 1.0.6               # 备份 → 迁移 → 换镜像 → 校验；失败自动回滚
+sudo ./deploy/upgrade/upgrade.sh --to 1.0.7 --dry-run     # 只检查 + 打印计划，零变更
+sudo ./deploy/upgrade/upgrade.sh --to 1.0.7               # 备份 → 迁移 → 换镜像 → 校验；失败自动回滚
 ```
 
 常用变体：

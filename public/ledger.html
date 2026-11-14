@@ -156,7 +156,7 @@ document.addEventListener('app:ready', function(e){
       }).join('')+'</div>';
     } else {
       seqHtml = '<div class="seqflow">'+MOCK.SEQ_FLOW.map(function(n,i){
-        return (i?'<span class="seq-arrow">▸</span>':'')+'<div class="seq-node done" style="min-width:96px"><div class="s-name">'+n.name+'</div><div class="s-time">'+n.time+'</div></div>';
+        return (i?'<span class="seq-arrow">▸</span>':'')+'<div class="seq-node done" style="min-width:96px"><div class="s-name">'+App.esc(n.name)+'</div><div class="s-time">'+App.esc(n.time)+'</div></div>';
       }).join('')+'</div><div class="tiny dim mt2">完整逐事件时序已随档案归档，可在取证与材料归档模块调阅。</div>';
     }
     var scoreHtml;

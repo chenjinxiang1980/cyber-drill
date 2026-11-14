@@ -1263,7 +1263,7 @@ document.addEventListener('app:ready', function(e){
 
     var fin = host.querySelector('[data-finish]');
     if(fin) fin.onclick = function(){
-      App.confirmSim('确认完成「'+t.title+'」？完成后归档并自动进入下一流程（演练模拟）。', function(){
+      App.confirmSim('确认完成「'+App.esc(t.title)+'」？完成后归档并自动进入下一流程（演练模拟）。', function(){
         fin.disabled = true; fin.textContent = '提交中…';
         var chain = Promise.resolve();
         if(t.status==='待处理'||t.status==='超时') chain = chain.then(function(){ return API.acceptTask(t.id, proxy); });
