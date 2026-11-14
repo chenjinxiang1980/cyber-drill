@@ -10,21 +10,16 @@
 
 ---
 
-## 界面预览
+## 演示视频
 
-截图使用内置演示数据渲染，不含真实账号与内网地址。
+[![Cyber-Drill-System 1.0.6 演示视频](docs/media/demo-1.0.6-cover.png)](https://github.com/chenjinxiang1980/cyber-drill/blob/main/docs/media/demo-1.0.6.mp4)
 
-| 登录页 | 角色工作台 |
-|---|---|
-| ![登录页](docs/images/login.png) | ![角色工作台](docs/images/workbench.png) |
+点击封面播放：2 分 27 秒，1920×1080，含旁白与硬字幕，画面使用内置演示数据，不含真实账号与内网地址。
 
-| 剧本编辑（可视化流程） | 演练监视大屏 |
-|---|---|
-| ![剧本编辑](docs/images/scenario-edit.png) | ![演练监视大屏](docs/images/monitor.png) |
+- **GitHub**：点击封面进入文件页，可直接在浏览器内播放。
+- **Gitee**：点击封面进入[文件页](https://gitee.com/habeas/cyber-drill/blob/main/docs/media/demo-1.0.6.mp4)，Gitee 不在页面内播放，下载后用本地播放器观看。
 
-| 台账与统计 | 复盘报告导出 |
-|---|---|
-| ![台账与统计](docs/images/ledger.png) | ![报告导出](docs/images/report.png) |
+视频依次覆盖：登录与多角色选身份 → 演练监视大屏 → 剧本编排与节点时序 → 基础版 / 实战版演练 → 关键词评分 → 复盘报告导出。
 
 ---
 
@@ -207,7 +202,7 @@ Emergency/
 │   ├── docker-dist/         # 多阶段镜像构建
 │   ├── docker-desktop/      # 跨平台 / 本机开发 compose
 │   └── linux/               # 物理机 systemd / nginx / caddy 参考
-├── docs/                    # 部署、安全、合规、发版文档与截图
+├── docs/                    # 部署、安全、合规、发版文档、截图与演示视频
 ├── scripts/                 # 构建辅助脚本
 ├── VERSION                  # 版本号单一来源
 ├── THIRD-PARTY-NOTICES.md   # 第三方组件与许可证
